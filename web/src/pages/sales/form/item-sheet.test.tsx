@@ -27,7 +27,7 @@ function Harness({ start, edit = false, productsError, focusField }: { start: St
     <button onClick={() => { void F.save().then((r) => { if (r.refused) setOpen(true); }); }}>Try save</button>
     <output data-testid="lines">{JSON.stringify(F.filled)}</output>
     <ItemSheet F={F} open={open} lineKey={edit ? start.form.lines[0].key : null} products={productsError ? undefined : products} productsError={productsError} focusField={focusField}
-      onClose={() => setOpen(false)} onAgain={() => setAgain((n) => n + 1)} again={again} />
+      onClose={() => setOpen(false)} onAgain={() => setAgain((n) => n + 1)} onRemove={(key) => { F.removeLine(key); setOpen(false); }} again={again} />
   </>;
 }
 const savedLines = (): FormLine[] => JSON.parse(screen.getByTestId("lines").textContent || "[]") as FormLine[];

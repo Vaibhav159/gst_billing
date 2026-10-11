@@ -5,13 +5,34 @@ import { useView } from "@/core/view";
 import { Button, IconButton } from "./Button";
 import { DL, type DLRow } from "./Card";
 import { Checkbox } from "./Choice";
-import { Portal, useDragClose, useFocusTrap, useGhostGuard, usePresence } from "./Overlay";
+import { focusables, Portal, useDragClose, useFocusTrap, useGhostGuard, usePresence } from "./Overlay";
 
 /** Last value seen while open, so content doesn't blank out during the exit animation. */
 function useHeld<T>(open: boolean, value: T): T {
   const held = useRef(value);
   if (open) held.current = value;
   return open ? value : held.current;
+}
+
+/**
+ * Whether the body is a region the keyboard reaches (WCAG 2.1.1, Ruling 1D-18): while it overflows with nothing focusable
+ * inside (the bill's review once payment is picked), so Tab reaches it and the arrows scroll it. Asked again as the body
+ * resizes or its content changes; the focus trap never puts the first focus there.
+ */
+function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): boolean {
+  const [region, setRegion] = useState(false);
+  useEffect(() => {
+    const el = body.current;
+    if (!open || !el) return undefined;
+    const check = () => setRegion(el.scrollHeight > el.clientHeight && !focusables(el).length);
+    check();
+    const resized = new ResizeObserver(check);
+    resized.observe(el);
+    const changed = new MutationObserver(check);
+    changed.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
+    return () => { resized.disconnect(); changed.disconnect(); };
+  }, [open, body]);
+  return region;
 }
 
 export type DialogSize = "sm" | "md" | "lg" | "xl";
@@ -29,6 +50,7 @@ export type DialogProps = {
 export function Dialog({ open, onClose, title, description, children, footer, size = "md", initialFocus, ghostGuardKey, confirmClose }: DialogProps) {
   const { isPhone, isEasy } = useView();
   const ref = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const { mounted, closing } = usePresence(open, isPhone ? 220 : 170);
   // confirmClose: what typing would be lost ("Discard this item?"); closing then asks first
@@ -38,6 +60,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   useFocusTrap(ref, open, tryClose, initialFocus);
   const guard = useGhostGuard(open, ghostGuardKey);
   const drag = useDragClose(tryClose, isPhone && open);
+  const region = useScrollRegion(bodyRef, open);
   const heldChildren = useHeld(open, children);
   const heldFooter = useHeld(open, footer);
   const heldTitle = useHeld(open, title);
@@ -67,7 +90,9 @@ export function Dialog({ open, onClose, title, description, children, footer, si
               <Button size="sm" variant="danger" onClick={() => { setAsking(false); onClose(); }}>Discard</Button>
             </div>
           ) : null}
-          <div className="px-5 py-3 overflow-y-auto min-h-0 flex-1">{children}</div>
+          {/* its focus ring is drawn inside it: the dialog's edge is right there */}
+          <div ref={bodyRef} data-dialog-body="" {...(region ? { tabIndex: 0, role: "region", "aria-labelledby": id + "t" } : {})}
+            className="px-5 py-3 overflow-y-auto min-h-0 flex-1 focus-visible:[outline-offset:-2px]">{children}</div>
           {footer ? <div className={cn("px-5 pt-4 border-t border-rule flex gap-2", isPhone ? "flex-col-reverse [&>*]:w-full pb-[calc(16px+env(safe-area-inset-bottom,0px))]" : "pb-4 justify-end")}>{footer}</div> : null}
         </div>
       </div>

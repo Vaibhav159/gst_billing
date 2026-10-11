@@ -15,6 +15,7 @@ import { cn } from "@/core/cn";
 import { addMonths, date, dateShort, monthLabel, monthOf, plural, possessive, todayIST } from "@/core/format";
 import { takeFresh } from "@/core/sales/fresh";
 import type { PaperBook, PaperBookBill } from "@/core/sales/types";
+import { cancelledMark } from "@/core/sales/words";
 import { useFirms, useScope, type Firm } from "@/core/scope";
 import { Banner, Button, ButtonLink, Card, EmptyState, Field, Money, Page, QueryView, Select, Skeleton, Table, Td, Th, Tr } from "@/core/ui";
 import { useView } from "@/core/view";
@@ -181,7 +182,7 @@ function BookFacts({ pb, firm, ym, today }: { pb: PaperBook; firm: Firm; ym: str
                   <span className="flex flex-wrap gap-x-4 -ml-1">
                     {on.map((b) => (
                       <ButtonLink key={b.id} size="sm" variant="link" to={`/sales/${b.id}`}>
-                        {`${b.invoice_number} · ${dateShort(b.invoice_date)} · ${b.customer_name}${b.status === "cancelled" ? " · cancelled" : ""}`}
+                        {`${b.invoice_number} · ${dateShort(b.invoice_date)} · ${b.customer_name}${cancelledMark(b.status)}`}
                       </ButtonLink>
                     ))}
                   </span>

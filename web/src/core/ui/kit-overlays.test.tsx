@@ -277,6 +277,53 @@ test("with a real layout, focus starts in the first field (not Close) and Tab wr
   }
 });
 
+test("a dialog's body that scrolls with nothing to focus inside takes the keyboard as a region named by its title, but never the first focus (Ruling 1D-18)", async () => {
+  // jsdom lays nothing out: the trap's focusables get a layout, and an element holding [data-tall] is taller than its box
+  const was = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetParent")!;
+  const sized = HTMLElement.prototype as unknown as Record<string, unknown>;
+  Object.defineProperty(HTMLElement.prototype, "offsetParent", { configurable: true, get() { return (this as HTMLElement).parentElement; } });
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return (this as HTMLElement).querySelector("[data-tall]") ? 900 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return (this as HTMLElement).querySelector("[data-tall]") ? 500 : 0; } });
+  // the bill's review: how it was paid asked inside the body until it's picked, Save and Go back in the footer
+  function Review({ paid, long = true }: { paid: boolean; long?: boolean }) {
+    return <MemoryRouter><ToastProvider>
+      <Dialog open onClose={() => {}} title="Check the bill" footer={<><Button>Go back and edit</Button><Button variant="primary">Save bill</Button></>}>
+        {paid ? null : <button type="button">Cash</button>}
+        <p data-tall={long ? "" : undefined}>Every line, to the paisa</p>
+      </Dialog>
+    </ToastProvider></MemoryRouter>;
+  }
+  try {
+    // something to focus inside: the body is as it was
+    const { rerender, unmount } = render(<Review paid={false} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cash" })).toHaveFocus());
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+    // paid: a body that scrolls with nothing left to focus is reached by Tab, from Close, so the arrows can scroll it
+    rerender(<Review paid />);
+    const body = await screen.findByRole("region", { name: "Check the bill" });
+    expect(body).toHaveAttribute("tabindex", "0");
+    act(() => screen.getByRole("button", { name: "Close" }).focus());
+    await userEvent.tab();
+    expect(body).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Go back and edit" })).toHaveFocus();
+    // a body that fits is no region
+    rerender(<Review paid long={false} />);
+    await waitFor(() => expect(screen.queryByRole("region")).not.toBeInTheDocument());
+    expect(screen.getByText("Every line, to the paisa").parentElement).not.toHaveAttribute("tabindex");
+    unmount();
+    // opened paid, the first focus is the footer's first button, never the body
+    render(<Review paid />);
+    const opened = await screen.findByRole("region", { name: "Check the bill" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Go back and edit" })).toHaveFocus());
+    expect(opened).not.toHaveFocus();
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, "offsetParent", was);
+    delete sized.scrollHeight;
+    delete sized.clientHeight;
+  }
+});
+
 test("a closing sheet says so, as a closing dialog does, on desktop and on phones", async () => {
   function Probe() { const [open, setOpen] = useState(true); return <Sheet open={open} onClose={() => setOpen(false)} title="Filter customers"><p>Owing</p></Sheet>; }
   for (const onPhone of [false, true]) {

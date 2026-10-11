@@ -48,6 +48,29 @@ test("Remove on a phone card focuses the next card, or Add another item after th
   expect(screen.getByRole("button", { name: "Add item" })).toHaveFocus();
 });
 
+test("Remove item in an item's sheet focuses the next card, or Add another item after the last card, as the card's Remove does", async () => {
+  const { user } = await copiedBill();
+  const removeInSheet = async (card: string, sheet: string) => {
+    await user.click(screen.getByRole("button", { name: card }));
+    const open = screen.getByRole("dialog", { name: sheet });
+    await settle();
+    await user.click(within(open).getByRole("button", { name: "Remove item" }));
+  };
+  await removeInSheet("Item 1: Gold Ring 22K. Edit", "Item 1");
+  expect(screen.getByRole("button", { name: "Item 1: Gold Pendant 22K. Edit" })).toHaveFocus();
+  // and still there once the sheet has gone
+  await settle();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Item 1: Gold Pendant 22K. Edit" })).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: /^Undo/ }));
+  await removeInSheet("Item 2: Gold Pendant 22K. Edit", "Item 2");
+  await settle();
+  expect(screen.getByRole("button", { name: "Add another item" })).toHaveFocus();
+  await removeInSheet("Item 1: Gold Ring 22K. Edit", "Item 1");
+  await settle();
+  expect(screen.getByRole("button", { name: "Add item" })).toHaveFocus();
+});
+
 test("an unsupported stored GST rate reads as not set on the phone card and in its sheet", async () => {
   const { user } = await copiedBill({ lines: [{ ...WIRE_LINES[0], gst_percent: "7" }] });
   const card = screen.getByRole("button", { name: "Item 1: Gold Ring 22K. Edit" });

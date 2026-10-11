@@ -43,7 +43,8 @@ export function Portal({ children }: { children: ReactNode }) {
   return createPortal(children, layer);
 }
 
-function focusables(node: HTMLElement): HTMLElement[] {
+/** What Tab reaches inside `node`, drawn (laid out, or holding focus). */
+export function focusables(node: HTMLElement): HTMLElement[] {
   return [...node.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null || el === document.activeElement);
 }
 /** Open dialogs, newest last: Esc closes the top one even if focus hasn't moved into it yet. */
@@ -58,9 +59,10 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, open: boolean, onClose
     // a dialog that names its field has it at once, so keys typed straight after opening land there. Only after the
     // opener is read: React's development re-run of this effect reads the opener again (the cleanup gave focus back)
     initialFocus?.current?.focus({ preventScroll: true });
-    // the others, or a field that couldn't take focus yet, after 20 ms
+    // the others, or a field that couldn't take focus yet, after 20 ms: never Close, nor a dialog's scrolling body (Ruling 1D-18)
     const t = initialFocus?.current && document.activeElement === initialFocus.current ? undefined : setTimeout(() => {
-      const target = initialFocus?.current || node.querySelector<HTMLElement>("[data-autofocus]") || focusables(node).find((el) => el.tagName !== "BUTTON" || !el.getAttribute("aria-label")?.startsWith("Close")) || node;
+      const target = initialFocus?.current || node.querySelector<HTMLElement>("[data-autofocus]")
+        || focusables(node).find((el) => !el.hasAttribute("data-dialog-body") && (el.tagName !== "BUTTON" || !el.getAttribute("aria-label")?.startsWith("Close"))) || node;
       target.focus?.({ preventScroll: true });
     }, 20);
     const onKey = (e: KeyboardEvent) => {

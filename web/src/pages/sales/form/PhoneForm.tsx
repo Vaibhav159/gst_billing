@@ -46,6 +46,13 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
   };
   const tryReview = () => { const r = F.openReview(); if (!r.ok) focusProblem(r.first); };
   const saveNow = (numberOverride?: string) => saveFromReview(F, focusProblem, numberOverride);
+  /** Remove, on a card or in its sheet: the item goes (and its sheet), and focus moves to the next card, or Add another item. */
+  const removeItem = (key: string) => {
+    const at = F.filled.findIndex((l) => l.key === key);
+    const next = at < 0 ? undefined : F.filled[at + 1];
+    flushSync(() => { F.removeLine(key); setSheet(null); });
+    focusNow(next ? `bfp-item-${next.key}` : "bfp-add");
+  };
   const close = () => navigate(billCloseTo(F));
   // A narrow desktop has a keyboard too. The review handles its own Save; sheets and menus keep the shortcut held.
   useEffect(() => {
@@ -109,7 +116,7 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
 
         <section aria-labelledby="bfp-items-h" className="flex flex-col gap-2">
           <h2 id="bfp-items-h" className="caps px-1">Items · {F.filled.length}</h2>
-          {F.filled.map((l, i) => <PhoneItemCard key={l.key} F={F} l={l} index={i} onEdit={() => setSheet({ kind: "item", key: l.key, n: ++again.current })} />)}
+          {F.filled.map((l, i) => <PhoneItemCard key={l.key} F={F} l={l} index={i} onEdit={() => setSheet({ kind: "item", key: l.key, n: ++again.current })} onRemove={() => removeItem(l.key)} />)}
           <Button id="bfp-add" variant="outline" size="lg" full icon={Plus} onClick={() => setSheet({ kind: "item", key: null, n: ++again.current })}>{F.filled.length ? "Add another item" : "Add item"}</Button>
           {F.showErr("lines") ? <p className="text-sm text-neg px-1 anim-rise">{F.errors.lines}</p> : null}
         </section>
@@ -136,7 +143,7 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
       <CustomerSheet open={sheet?.kind === "customer"} onClose={() => setSheet(null)} firmId={F.f.firmId} homeState={homeState(F.firms, F.f.firmId)} value={F.cust} onPick={F.setCustomer} />
       <ItemSheet F={F} open={sheet?.kind === "item"} lineKey={sheet?.kind === "item" ? sheet.key : null} again={sheet?.kind === "item" ? sheet.n : 0} products={products.data} productsError={products.isError}
         focusField={sheet?.kind === "item" ? sheet.focusField : undefined}
-        onClose={() => setSheet(null)} onAgain={() => setSheet({ kind: "item", key: null, n: ++again.current })} />
+        onClose={() => setSheet(null)} onAgain={() => setSheet({ kind: "item", key: null, n: ++again.current })} onRemove={removeItem} />
       <CustomerFixSheet customer={F.cust} field={fix} open={Boolean(fix)} onClose={() => setFix(null)} onSaved={(c) => { F.set({ customer: c }); if (F.reviewOpen) focusReview(); }} />
       <Review F={F} checks={checks} numberId="bfp-number" onSave={saveNow} waiting={drafts.waiting} onChangeNumber={() => {
         // Draw the sheet inside the tap, then focus its number so the phone opens the keyboard (Ruling 1D-4).
@@ -149,16 +156,11 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
 }
 
 /** An item on the phone: its name, weight × rate, HSN and GST, its value before GST, and Edit and Remove. */
-function PhoneItemCard({ F, l, index, onEdit }: { F: BillFormApi; l: FormLine; index: number; onEdit: () => void }) {
+function PhoneItemCard({ F, l, index, onEdit, onRemove }: { F: BillFormApi; l: FormLine; index: number; onEdit: () => void; onRemove: () => void }) {
   const fig = F.lineFig(l.key);
   const slab = slabOf(l.gst);
   const probs = (["qty", "rate", "gst", "hsn"] as const).map((k) => F.showErr(`${l.key}-${k}`)).filter(Boolean);
   const warn = lineWarning(l);
-  const remove = () => {
-    const next = F.filled[index + 1];
-    flushSync(() => F.removeLine(l.key));
-    focusNow(next ? `bfp-item-${next.key}` : "bfp-add");
-  };
   return (
     <div className={cn("card", probs.length && "border-neg-line", F.newKeys.has(l.key) && "anim-rise")}>
       <button id={`bfp-item-${l.key}`} type="button" onClick={onEdit} className="w-full text-left px-4 pt-3 pb-2.5 flex items-start gap-3" aria-label={`Item ${index + 1}: ${l.name}. Edit`}>
@@ -172,7 +174,7 @@ function PhoneItemCard({ F, l, index, onEdit }: { F: BillFormApi; l: FormLine; i
       </button>
       <div className="flex border-t border-rule">
         <Button variant="ghost" icon={Pencil} className="flex-1 rounded-none rounded-bl-card" onClick={onEdit}>Edit</Button>
-        <Button variant="ghost" icon={Trash2} className="flex-1 rounded-none rounded-br-card text-neg" onClick={remove} aria-label={`Remove item ${index + 1}, ${l.name}`}>Remove</Button>
+        <Button variant="ghost" icon={Trash2} className="flex-1 rounded-none rounded-br-card text-neg" onClick={onRemove} aria-label={`Remove item ${index + 1}, ${l.name}`}>Remove</Button>
       </div>
     </div>
   );

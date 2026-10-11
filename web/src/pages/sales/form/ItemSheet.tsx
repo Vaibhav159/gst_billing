@@ -30,11 +30,13 @@ export type ItemSheetProps = {
   onClose: () => void;
   /** "Add and next item": the sheet opens again, empty. */
   onAgain: () => void;
+  /** "Remove item": the form removes the line, closes the sheet and moves focus on, as a card's Remove does. */
+  onRemove: (key: string) => void;
   /** Changes each time the sheet opens again for the next item. */
   again: number;
 };
 
-export function ItemSheet({ F, open, lineKey, products, productsError, focusField, onClose, onAgain, again }: ItemSheetProps) {
+export function ItemSheet({ F, open, lineKey, products, productsError, focusField, onClose, onAgain, onRemove, again }: ItemSheetProps) {
   const { can } = useAuth();
   const existing = lineKey ? F.f.lines.find((x) => x.key === lineKey) ?? null : null;
   const [line, setLine] = useState<FormLine>(() => (existing ? { ...existing } : blankLine()));
@@ -89,7 +91,7 @@ export function ItemSheet({ F, open, lineKey, products, productsError, focusFiel
     if (lineKey) F.setLine(lineKey, line); else F.addLine(false, line);
     if (more) onAgain(); else onClose();
   };
-  const remove = () => { if (lineKey) F.removeLine(lineKey); onClose(); };
+  const remove = () => { if (lineKey) onRemove(lineKey); else onClose(); };
   const enterTo = (id: string | null) => (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); if (id) focusNow(id, true); else commit(false); } };
   const idx = lineKey ? F.f.lines.findIndex((x) => x.key === lineKey) + 1 : F.filled.length + 1;
   const footer = chosen && mode === "item" ? (
