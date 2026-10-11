@@ -2964,7 +2964,14 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     # A sale v3 moved to the bin comes back from there, under its own id; the
                     # restore marks this entry used. A closed month is still v2's 400 here.
                     assert_period_unlocked(binned.business_id, binned.invoice_date, "create")
-                    obj = restore_from_bin(binned, request.user, via="audit_log")
+                    if binned.type_of_invoice == INVOICE_TYPE_INWARD:
+                        from billing.services.bin import _fields
+                        from billing.services.purchase_bin import restore_purchase
+                        stored = Invoice(**_fields(Invoice, binned.data["invoice"]))
+                        assert_inward_unlocked(stored)
+                        obj = restore_purchase(binned, request.user, check_month=False, via="audit_log")
+                    else:
+                        obj = restore_from_bin(binned, request.user, via="audit_log")
                     return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
                 if entry.action == "deleted" and entry.snapshot:
                     # Recreate the deleted object
@@ -2984,6 +2991,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                             kwargs[k] = v
                     if model is Invoice:
                         assert_period_unlocked(kwargs.get("business_id"), kwargs.get("invoice_date"), "create")
+                        if kwargs.get("type_of_invoice") == INVOICE_TYPE_INWARD and kwargs.get("itc_month"):
+                            assert_period_unlocked(kwargs.get("business_id"), kwargs["itc_month"], "create")
                     try:
                         with transaction.atomic():
                             obj = model.objects.create(**kwargs)

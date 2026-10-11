@@ -492,7 +492,7 @@ class BinViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["post"])
     def restore(self, request, pk=None):
         try:
-            binned = get_object_or_404(BinnedInvoice, pk=pk)
+            binned = get_object_or_404(BinnedInvoice, pk=pk, type_of_invoice=INVOICE_TYPE_OUTWARD)
         except Http404:
             raise NotFound("That deleted bill isn't in the bin any more.") from None  # contract 3.2
         return Response(bill_detail(restore_from_bin(binned, request.user)))

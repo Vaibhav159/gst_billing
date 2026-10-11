@@ -36,9 +36,11 @@ from billing.constants import B2CL_THRESHOLD, INVOICE_TYPE_INWARD, INVOICE_TYPE_
 from billing.fy import fy_of
 from billing.gstin import check_digit
 from billing.models import (
+    AiRead,
     AuditLog,
     BinnedInvoice,
     Business,
+    CapturePage,
     Customer,
     FiledPeriod,
     Invoice,
@@ -161,6 +163,7 @@ class Command(BaseCommand):
     help = "Load synthetic data into the sandbox database (refuses any other database)."
 
     def add_arguments(self, parser):
+        parser.add_argument("--purchases-v3", action="store_true", help="Add v3 purchase, capture and AI usage cases.")
         parser.add_argument("--reset", action="store_true", help="Delete existing sandbox data first.")
         parser.add_argument(
             "--print-credentials", action="store_true",
@@ -188,6 +191,12 @@ class Command(BaseCommand):
             n_in = self._inward(firms, parties, opts["scale"])
             n_locked = self._file_periods(firms)
             n_caps = self._captures(firms, parties)
+            if opts["purchases_v3"]:
+                from billing.services.seed_purchases import seed_purchases
+
+                added_inward, added_outward, n_caps = seed_purchases(self, firms, parties)
+                n_in += added_inward
+                n_out += added_outward
         self.stderr.write(
             f"Seeded {len(firms)} firms, {len(parties['all'])} parties, {len(PRODUCTS)} products, "
             f"{n_out} outward + {n_in} inward invoices, {n_locked} filed months, {n_caps} captures."
@@ -210,6 +219,8 @@ class Command(BaseCommand):
             raise CommandError(f"Refusing: unexpected database vendor {connection.vendor!r}.")
 
     def _reset(self):
+        AiRead.objects.all().delete()
+        CapturePage.objects.all().delete()
         BinnedInvoice.objects.all().delete()  # these two protect the customers and firms below
         SaleDraft.objects.all().delete()
         SavedDraft.objects.all().delete()  # the notes of drafts saved as the bills below

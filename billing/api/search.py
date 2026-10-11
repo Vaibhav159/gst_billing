@@ -10,14 +10,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.cache import uncached
+from billing.credit import credit_month_of
 from billing.models import Customer, Invoice, Product
 from billing.params import text_param
+from billing.services.purchase_reads import supplier_ref
+from billing.services.suppliers import suppliers
 
 from .permissions import RoleBasedPermission
 
-# What a bill found by its number shows: these columns and its customer's name (Ruling 1A-39).
-BILL_FIELDS = ("invoice_number", "invoice_date", "total_amount", "type_of_invoice", "business", "status", "paper",
-               "customer__name")
+# Recent and direct bill rows read only the columns they show.
+RECENT_FIELDS = ("invoice_number", "invoice_date", "total_amount", "type_of_invoice", "business", "status",
+                 "itc_month", "needs_review")
+BILL_FIELDS = (*RECENT_FIELDS, "paper", "customer__name")
+
+
+def purchase_bits(invoice):
+    if invoice.type_of_invoice != "inward":
+        return {}
+    month = credit_month_of(invoice)
+    return {"credit_month": month.strftime("%Y-%m") if month else None, "needs_review": invoice.needs_review}
 
 
 def number_part(digits):
@@ -39,11 +50,11 @@ class QuickSearchView(APIView):
         customers = list(
             uncached(Customer).filter(
                 Q(name__icontains=q) | Q(gst_number__icontains=q) | Q(mobile_number__icontains=q)
-            ).order_by("name")[:5]
+            ).only("name", "gst_number", "state_name", "mobile_number").order_by("name")[:5]
         )
         cust_payload = []
         for c in customers:
-            recent = uncached(Invoice).filter(customer=c).order_by(
+            recent = uncached(Invoice).filter(customer=c).only(*RECENT_FIELDS).order_by(
                 "-invoice_date", "-id"
             )[:3]
             cust_payload.append({
@@ -61,6 +72,7 @@ class QuickSearchView(APIView):
                         "type_of_invoice": i.type_of_invoice,
                         "business_id": i.business_id,
                         "status": i.status,
+                        **purchase_bits(i),
                     }
                     for i in recent
                 ],
@@ -86,6 +98,7 @@ class QuickSearchView(APIView):
                 "business_id": i.business_id,
                 "status": i.status,
                 "paper": i.paper,
+                **purchase_bits(i),
             }
             for i in uncached(Invoice).filter(number)
             .select_related("customer")
@@ -99,7 +112,11 @@ class QuickSearchView(APIView):
             {"id": p.id, "name": p.name, "hsn_code": p.hsn_code or "", "gst_tax_rate": str(p.gst_tax_rate)}
             for p in uncached(Product).filter(
                 Q(name__icontains=q) | Q(hsn_code__icontains=q)
-            ).order_by("name")[:4]
+            ).only("name", "hsn_code", "gst_tax_rate").order_by("name")[:4]
         ]
 
-        return Response({"customers": cust_payload, "invoices": invoices, "products": products})
+        supplier_payload = [supplier_ref(party) for party in suppliers().filter(
+            Q(name__icontains=q) | Q(gst_number__icontains=q) | Q(mobile_number__icontains=q)
+        ).only("name", "gst_number", "state_name", "city").order_by("name")[:5]]
+        return Response({"customers": cust_payload, "invoices": invoices, "products": products,
+                         "suppliers": supplier_payload})

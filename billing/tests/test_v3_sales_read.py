@@ -742,7 +742,8 @@ class QuickSearchTest(TestCase):
         with CaptureQueriesContext(connection) as seen:
             r = viewer.get(reverse("quick-search"), {"q": "31"})
         self.assertEqual(len(r.data["invoices"]), 8)
-        bills = [q["sql"] for q in seen.captured_queries if 'FROM "billing_invoice"' in q["sql"]]
+        bills = [q["sql"] for q in seen.captured_queries if 'FROM "billing_invoice"' in q["sql"]
+                 and 'FROM "billing_customer"' not in q["sql"]]  # supplier role has its own EXISTS subquery
         self.assertEqual(len(bills), 1, bills)
         self.assertIn("LIMIT 8", bills[0])
         self.assertEqual([column for column in ('"notes"', '"firm_snapshot"', '"place_of_supply"', '"cancel_reason"',

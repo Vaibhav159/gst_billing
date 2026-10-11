@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from billing.api.mixins import mark_undone, snapshot_of
 from billing.cache import invalidate, uncached
-from billing.constants import V2_LINE_SNAPSHOT_FIELDS
+from billing.constants import INVOICE_TYPE_OUTWARD, V2_LINE_SNAPSHOT_FIELDS
 from billing.fy import fy_label, fy_of
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem
 from billing.numbering import bill_ref, refuse_taken
@@ -162,7 +162,7 @@ def live_bin():
     Only the deleting user is joined, outer (one v2 deleted reads as None). The firm's and customer's
     names come from `data`, so a row whose firm or customer v2 deleted still lists (Ruling 1A-6).
     """
-    return BinnedInvoice.objects.live().select_related("deleted_by")
+    return BinnedInvoice.objects.live().filter(type_of_invoice=INVOICE_TYPE_OUTWARD).select_related("deleted_by")
 
 
 def bin_row(binned, closed=None):
