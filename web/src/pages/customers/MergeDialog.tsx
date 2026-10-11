@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { AlertTriangle, ArrowRight, GitMerge } from "lucide-react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { useCustomer, type Customer } from "@/core/api/customers";
-import { useMergeCandidates, useMergeCustomer, useMergePreview } from "@/core/api/customerMerge";
+import { useMergeCandidates, useMergeCustomer, useMergePreview, type MergeChange } from "@/core/api/customerMerge";
 import { problemOf } from "@/core/api/errors";
 import { cn } from "@/core/cn";
 import { plural } from "@/core/format";
@@ -28,7 +28,7 @@ function MergeContent({ source, initialTarget, onClose }: Props) {
   const suggested = useCustomer(initialTarget ?? null);
   const [target, setTarget] = useState<Customer | null>(null);
   const [ack, setAck] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; bills?: MergeChange[] } | null>(null);
   const pv = useMergePreview(source.id, target?.id ?? null);
   const merge = useMergeCustomer();
   const running = useRef(false);
@@ -36,6 +36,7 @@ function MergeContent({ source, initialTarget, onClose }: Props) {
   const rows = [...(!q && suggested.data ? [suggested.data] : []), ...(candidates.data ?? [])]
     .filter((c, i, all) => c.id !== source.id && c.type !== "walkin" && all.findIndex(x => x.id === c.id) === i).slice(0, 8);
   const ready = Boolean(target && pv.isSuccess && !pv.isFetching && pv.data?.can_merge && ack);
+  const refusedBills = error?.bills ?? pv.data?.refusal?.bills ?? [];
   const go = async () => {
     if (!ready || !target || running.current) return;
     running.current = true; setError(null);
@@ -45,7 +46,9 @@ function MergeContent({ source, initialTarget, onClose }: Props) {
       show({ title: `${source.name} merged into ${target.name}`, body: `${plural(result.moved.bills, "bill")} now show under ${target.name}. Recorded in the Audit log.` });
       onClose(); navigate(`/customers/${result.target}`, { replace: true });
     } catch (e) {
-      setError(problemOf(e).message); setAck(false); void pv.refetch();
+      const problem = problemOf(e);
+      setError({ message: problem.message, bills: problem.kind === "conflict" ? (problem.body as { bills?: MergeChange[] })?.bills : undefined });
+      setAck(false); void pv.refetch();
     } finally { running.current = false; }
   };
   const why = (c: Customer) => c.gst_number && c.gst_number === source.gst_number ? "Same GSTIN"
@@ -87,7 +90,10 @@ function MergeContent({ source, initialTarget, onClose }: Props) {
           <Checkbox label={`I understand ${source.name} will be removed, and this can't be undone from the Audit log.`} checked={ack} onChange={setAck} disabled={busy} />
         </>}
       </div>}</QueryView> : null}
-      <FailNote error={error ? { title: "Not merged", body: error } : null} />
+      <FailNote error={error ? { title: "Not merged", body: error.message } : null} />
+      {refusedBills.length ? <ul aria-label="Bills that prevent this merge" className="flex flex-col gap-1.5 text-fg2">
+        {refusedBills.map((change) => <li key={change.bill.id}>{change.bill.invoice_number}: {change.words}</li>)}
+      </ul> : null}
     </div>
   </Dialog>;
 }

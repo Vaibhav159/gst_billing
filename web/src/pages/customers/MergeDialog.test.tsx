@@ -1,6 +1,7 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { handClock, pass } from "@/test/clock";
 import { toCustomer } from "@/core/api/customers";
+import type { MergePreview } from "@/core/api/customerMerge";
 import { ANIL, mount, serve, VIEWER, type Call } from "./testing";
 import { MergeDialog } from "./MergeDialog";
 
@@ -64,4 +65,42 @@ test("a viewer cannot open the merge dialog or ask for a preview", async () => {
   const calls = serve(replies()); open(VIEWER); await pass(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(calls.filter(c => c.url.includes("merge") || c.url === "customers/")).toHaveLength(0);
+});
+
+const purchaseRefusal: NonNullable<MergePreview["refusal"]> = {
+  code: "sent_changes", months: [],
+  detail: "Can't merge: under Anil Gupta (08AAMFR5567K1ZG), purchase bills PUR-1 and PUR-2 from Anil G (08AAGPL3375F1ZO) would have a different supplier GSTIN. The supplier's bills wouldn't match your purchase records. Keep both customers.",
+  bills: [1, 2].map((n) => ({ bill: { id: 500 + n, invoice_number: `PUR-${n}`, invoice_date: "2026-10-01", customer_name: "Anil G", status: "active" },
+    sent: false, paper: false, sent_at: null, sent_via: "", heads: null, segment: null, gstin_changes: true, words: "Supplier GSTIN changes" })),
+};
+function expectPurchaseRefusal() {
+  expect(screen.getAllByText(purchaseRefusal.detail).length).toBeGreaterThan(0);
+  const list = screen.getByRole("list", { name: "Bills that prevent this merge" });
+  expect(within(list).getAllByRole("listitem").map((row) => row.textContent)).toEqual(["PUR-1: Supplier GSTIN changes", "PUR-2: Supplier GSTIN changes"]);
+  expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
+  expect(screen.queryByText(/unlock/i)).not.toBeInTheDocument();
+}
+
+test("a different supplier GSTIN refusal lists every affected purchase without offering a merge", async () => {
+  const calls = serve({ ...replies(), "GET customers/31/merge-preview/": { ...preview, can_merge: false, refusal: purchaseRefusal } });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  expectPurchaseRefusal();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+});
+
+test.each([false, true])("a raced supplier GSTIN refusal retains its purchase list when preview refresh fails: %s", async (refreshFails) => {
+  let refused = false;
+  const calls = serve({ ...replies(),
+    "GET customers/31/merge-preview/": () => refused
+      ? refreshFails ? { status: 503, data: {} } : { status: 200, data: { ...preview, can_merge: false, refusal: purchaseRefusal } }
+      : { status: 200, data: preview },
+    "POST customers/31/merge-into/": () => { refused = true; return { status: 409, data: purchaseRefusal }; },
+  });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Merge into Anil Gupta" })); await pass();
+  expectPurchaseRefusal();
+  expect(screen.queryByRole("checkbox", { checked: true })).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  expect(calls.filter((c) => c.url.endsWith("merge-preview/"))).toHaveLength(2);
 });
