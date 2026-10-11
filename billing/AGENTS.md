@@ -40,10 +40,11 @@ Settings modules: `gst_billing/settings.py` (dev, `DEBUG = True`),
   has one, else `is_interstate(business, customer)`, which falls back to `state_name` for
   unregistered/B2C parties. `is_interstate` alone is for parties with no bill yet, such as a
   new purchase.
-  DON'T: the `Invoice.is_igst_applicable` property at `models.py:373` — it reads
-  GSTIN prefixes only, so a B2C interstate sale returns `False` and books
-  CGST+SGST. It is still fine as a *display* hint on registered parties; it is
-  not fine for deciding what to store.
+  DON'T: compare GSTIN prefixes or state names by hand, or read a bill's
+  `place_of_supply` column raw: `tax_rules._chosen(invoice)` reads the chosen place
+  (trimmed, so a blank one keeps today's rule). `Invoice.is_igst_applicable` is v2's
+  name for the same answer (it delegates to `supply_interstate`); new code calls
+  `supply_interstate` itself.
 - **Writing tax heads** — pass through `tax_rules.normalize_tax_heads()` so the
   total the user saw is preserved while the head is corrected. See
   `management/commands/fix_tax_heads.py` for the repair pass over existing rows.

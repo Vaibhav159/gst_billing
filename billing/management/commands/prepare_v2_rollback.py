@@ -20,7 +20,7 @@ from billing.constants import BILL_CANCELLED
 from billing.models import BinnedInvoice, Invoice
 from billing.refusals import Refusal
 from billing.services.bin import bin_bill, restore_from_bin
-from billing.tax_rules import default_place_of_supply
+from billing.tax_rules import _chosen, default_place_of_supply
 
 
 class Command(BaseCommand):
@@ -51,14 +51,15 @@ class Command(BaseCommand):
         self._chosen_places()
 
     def _chosen_places(self):
-        """Bills whose place of supply was chosen by hand: v2 files them under the customer's state."""
+        """Bills whose place of supply was chosen by hand: v2 files them under the customer's state. The place is
+        read as every reader reads it (_chosen): trimmed, so "  " is no place."""
         chosen = (Invoice.objects.nocache().sales().counted().exclude(place_of_supply__isnull=True)
                   .exclude(place_of_supply="").select_related("business", "customer"))
-        moved = [(inv, default_place_of_supply(inv.business, inv.customer)) for inv in chosen]
-        moved = [(inv, usual) for inv, usual in moved if usual != inv.place_of_supply]
-        for inv, usual in moved:
+        moved = [(inv, _chosen(inv), default_place_of_supply(inv.business, inv.customer)) for inv in chosen]
+        moved = [(inv, place, usual) for inv, place, usual in moved if place and usual != place]
+        for inv, place, usual in moved:
             self.stdout.write(f"  {inv.business.name} {inv.invoice_number} of {inv.invoice_date}: place of supply "
-                              f"{inv.place_of_supply}, v2 reads {usual or 'none'}")
+                              f"{place}, v2 reads {usual or 'none'}")
         self.stdout.write(f"{len(moved)} bill(s) with a place of supply chosen by hand. v2 files them under the "
                           "customer's state; don't run fix_tax_heads on v2 before the CA has seen this list.")
 

@@ -15,11 +15,12 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from billing import numbering
-from billing.constants import SENT_VIA_CHOICES
+from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, SENT_VIA_CHOICES
 from billing.fy import fy_label, fy_of, fy_range
 from billing.models import BinnedInvoice, Business, Invoice
-from billing.params import date_param, firm_param, fy_param, month_param
+from billing.params import PICK_A_FIRM, date_param, firm_param, fy_param, id_param, month_param, text_param
 from billing.period_lock import closed_months
+from billing.services.bill_reads import bill_detail, bill_rows, facets, filter_bills, ordered, summary
 from billing.services.bin import bin_bill, bin_row, live_bin, restore_from_bin
 from billing.services.sales import cancel_bill, mobile_of, move_bill, record_send, renumber_bill, sent_block
 from billing.text import person, stamp
@@ -141,9 +142,33 @@ class BinPages(Pages):
 class SalesViewSet(viewsets.GenericViewSet):
     permission_classes = [V3Permission]
     queryset = Invoice.objects.sales().select_related("customer", "business")
+    pagination_class = Pages
     lookup_value_regex = r"\d+"
     v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete", "sent": "bill.send",
                   "renumber": "bill.edit", "move": "bill.edit"}
+
+    def list(self, request):
+        """The bills list: a page of BillRows, the whole filtered set's summary, and the facets when asked (2.1)."""
+        params = request.query_params
+        bills = filter_bills(self.get_queryset(), params)
+        page = self.paginate_queryset(ordered(bills, params))
+        response = self.get_paginated_response(bill_rows(page))
+        response.data["summary"] = summary(bills, BILL_CANCELLED if params.get("status") == BILL_CANCELLED else BILL_ACTIVE)
+        if params.get("facets") == "1":
+            response.data["facets"] = facets(self.get_queryset(), params)
+        return response
+
+    def retrieve(self, request, pk=None):
+        """One bill (BillDetail); a deleted one still in the bin is the contract's 404 with its bin row (2.2)."""
+        invoice = self.get_queryset().select_related("cancelled_by").filter(pk=pk).first()
+        if invoice is not None:
+            return Response(bill_detail(invoice))
+        # live_bin(): not a row v2's undo already brought back, and only the deleter joined, so a row whose firm or
+        # customer v2 deleted still answers (Ruling 1A-6).
+        binned = live_bin().filter(original_id=pk, type_of_invoice=INVOICE_TYPE_OUTWARD).first()
+        if binned is None:
+            raise Http404("No Invoice matches the given query.")
+        return Response({"detail": "This bill was deleted.", "code": "deleted", "binned": bin_row(binned)}, status=404)
 
     @action(detail=False, methods=["get"], url_path="next-number")
     def next_number(self, request):
@@ -223,15 +248,13 @@ class BinViewSet(viewsets.GenericViewSet):
     def get_queryset(self):
         qs = live_bin()
         params = self.request.query_params
-        firm = params.get("business_id") or ""
-        if firm:
-            if not firm.isdecimal():
-                raise serializers.ValidationError({"business_id": ["Pick a firm from the list."]})
+        firm = id_param(params, "business_id", PICK_A_FIRM)
+        if firm is not None:
             qs = qs.filter(business_id=firm)
         fy = fy_param(params)
         if fy is not None:
             qs = qs.filter(invoice_date__range=fy_range(fy))
-        q = (params.get("q") or "").replace("\x00", "").strip()  # psycopg refuses a null character
+        q = text_param(params, "q")
         if q:
             # The customer's name as the row shows it, the bill's own: the customer may be gone since.
             qs = qs.filter(Q(invoice_number__icontains=q) | Q(data__customer_name__icontains=q))
@@ -248,5 +271,4 @@ class BinViewSet(viewsets.GenericViewSet):
             binned = get_object_or_404(BinnedInvoice, pk=pk)
         except Http404:
             raise NotFound("That deleted bill isn't in the bin any more.") from None  # contract 3.2
-        invoice = restore_from_bin(binned, request.user)
-        return Response({"id": invoice.pk, "invoice_number": invoice.invoice_number})
+        return Response(bill_detail(restore_from_bin(binned, request.user)))

@@ -226,6 +226,15 @@ class FirmAndNotesTest(TestCase):
         self.assertEqual(listed, ["  KIRAN GOLD HOUSE 9 of 2026-09-10: place of supply 24, v2 reads 08"])
         self.assertIn("1 bill(s) with a place of supply chosen by hand.", out.getvalue())
 
+    def test_the_rollback_script_reads_the_place_as_every_reader_does(self):
+        # Task 5's carry (1A Task 7): one reading of the place (_chosen), trimmed. "  " is no place, so v2 files that
+        # bill as v3 does, and it isn't listed.
+        sale(self.biz, buyer(), "9", "2026-09-10", place_of_supply="  ")
+        out = StringIO()
+        call_command("prepare_v2_rollback", stdout=out)
+        self.assertNotIn(": place of supply", out.getvalue())
+        self.assertIn("0 bill(s) with a place of supply chosen by hand.", out.getvalue())
+
     def test_the_rollback_script_reads_past_the_cache(self):
         # Fix round 1, Minor 4: a report shows the database (_repair.scope's rule). Both of its readings of the bills,
         # the cancelled ones to set aside and the chosen places, skip cacheops; Redis isn't here, so this checks the

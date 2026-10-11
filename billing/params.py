@@ -9,6 +9,10 @@ from rest_framework.exceptions import ValidationError
 from billing.fy import parse_fy
 from billing.models import Business
 
+# A firm or customer filter that isn't an id (contract 3.1's words for the firm).
+PICK_A_FIRM = "Pick a firm from the list."
+PICK_A_CUSTOMER = "Pick a customer from the list."
+
 
 def fy_param(params):
     """`fy` ("2026-27") as the year it starts; None when absent."""
@@ -46,6 +50,25 @@ def date_param(params, key, today=False):
     if not 2000 <= day.year <= 2099:
         raise ValidationError({key: ["Pick a date from 2000 to 2099."]})
     return day
+
+
+def text_param(params, key):
+    """A text parameter, trimmed, without null characters: psycopg refuses one in a query (Ruling 1A-5)."""
+    return (params.get(key) or "").replace("\x00", "").strip()
+
+
+def id_param(params, key, words):
+    """An optional id parameter ("12") as an int; None when absent.
+
+    Plain digits an id column can hold, else a 400 in `words` (Ruling 1A-5): text was a 500 on the
+    integer column, and so was a number past its range ("9" * 19 on SQLite).
+    """
+    raw = params.get(key) or ""
+    if not raw:
+        return None
+    if not (raw.isascii() and raw.isdigit() and len(raw) <= 18):
+        raise ValidationError({key: [words]})
+    return int(raw)
 
 
 def firm_param(params):

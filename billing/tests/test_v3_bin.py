@@ -151,6 +151,15 @@ class BinTest(TestCase):
         # Review M4: psycopg refuses a null character in a query; the search reads past it
         self.assertEqual(self.client.get(reverse("bin-list"), {"q": "27\x00"}).data["count"], 1)
 
+    def test_a_firm_no_id_column_holds_gets_words(self):
+        # 1A Task 7 (Ruling 1A-5): the bin list reads its firm as the bills list does (id_param): plain digits an id
+        # column can hold. A 19-digit id was a 500 on SQLite, and "٣" (an Arabic-Indic 3) read as firm 3.
+        self.delete()
+        for raw in ("9" * 19, "٣"):
+            with self.subTest(raw=raw):
+                r = self.client.get(reverse("bin-list"), {"business_id": raw})
+                self.assertEqual((r.status_code, r.data), (400, {"business_id": ["Pick a firm from the list."]}))
+
     def test_a_255_character_customer_name_still_deletes(self):
         # Review M8: the audit row's name keeps to its column's 255 characters; Postgres refuses more.
         Customer.objects.filter(pk=self.cust.pk).update(name="A" * 255)

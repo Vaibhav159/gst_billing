@@ -5,11 +5,12 @@ invoices inline, alongside direct invoice-number and product hits. Backed
 by the full database, not whatever page the client happened to have loaded.
 """
 
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.models import Customer, Invoice, Product
+from billing.params import text_param
 
 from .permissions import RoleBasedPermission
 
@@ -18,7 +19,7 @@ class QuickSearchView(APIView):
     permission_classes = [RoleBasedPermission]
 
     def get(self, request):
-        q = (request.query_params.get("q") or "").strip()
+        q = text_param(request.query_params, "q")  # psycopg refuses a null character in a query
         if len(q) < 2:
             return Response({"customers": [], "invoices": [], "products": []})
 
@@ -46,11 +47,14 @@ class QuickSearchView(APIView):
                         "total_amount": str(i.total_amount),
                         "type_of_invoice": i.type_of_invoice,
                         "business_id": i.business_id,
+                        "status": i.status,
                     }
                     for i in recent
                 ],
             })
 
+        # A bill whose number is exactly q comes first: "31" finds 31 before 131 (part 0 carry).
+        exact = Case(When(invoice_number__iexact=q, then=Value(0)), default=Value(1), output_field=IntegerField())
         invoices = [
             {
                 "id": i.id,
@@ -59,10 +63,14 @@ class QuickSearchView(APIView):
                 "total_amount": str(i.total_amount),
                 "type_of_invoice": i.type_of_invoice,
                 "customer_name": i.customer.name if i.customer_id else "",
+                "business_id": i.business_id,
+                "status": i.status,
+                "paper": i.paper,
             }
             for i in Invoice.objects.filter(invoice_number__icontains=q)
             .select_related("customer")
-            .order_by("-invoice_date", "-id")[:8]
+            .annotate(exact=exact)
+            .order_by("exact", "-invoice_date", "-id")[:8]
         ]
 
         products = [
