@@ -39,6 +39,33 @@ test("the paper sets its lines and rows as the PDF does, so the screen and the b
   expect(box).toHaveClass("block");
 });
 
+/** A style's lengths in the PDF's points (the paper's px at 96 an inch), its other words as they are. */
+const points = (css: string) => css.split(" ").map((t) => (/^[\d.]+px$/.test(t) ? Math.round(parseFloat(t) * 750) / 1000 : t));
+
+test("the paper's columns are the PDF's, at 96 px an inch, so a name that fits a line of the PDF fits a line of the paper (Ruling 1E-14): 20 pt at each side, the goods 26 | the rest | 50 | 62 | 58 | 30 | 80 pt, the boxes' 240 pt, cells padded 3 pt", () => {
+  const p = bill();
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const paper = screen.getByRole("document");
+  expect(points(`${paper.style.paddingLeft} ${paper.style.paddingRight}`)).toEqual([20, 20]);
+  const [head] = within(within(paper).getByRole("table", { name: "Goods" })).getAllByRole("row");
+  expect(points(head.style.gridTemplateColumns)).toEqual([26, "minmax(0,1fr)", 50, 62, 58, 30, 80]);
+  expect(points(within(head).getByText("Quantity").style.padding)).toEqual([3]);
+  const box = within(paper).getByText("Invoice No.").parentElement!;
+  expect(points(box.parentElement!.parentElement!.style.gridTemplateColumns)).toEqual(["minmax(0,1fr)", 240]);
+  expect(points(box.style.padding)).toEqual([3]);
+});
+
+test("a page that goes on stands its \"continued on page n\" row 20 pt, as the Total row, and the bill's note sets its lines in its own size, as the PDF does (Ruling 1E-14)", () => {
+  const p = bill({ lines: Array.from({ length: 60 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1 })), notes: "Hallmarked by BIS\nSize 14" });
+  const { unmount } = render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[0]} />);
+  const rows = within(screen.getByRole("table", { name: "Goods" })).getAllByRole("row");
+  expect(rows[rows.length - 1]).toHaveTextContent("continued on page 2");
+  expect(points(rows[rows.length - 1].style.minHeight)).toEqual([20]);
+  unmount();
+  render(<Paper b={p} copy={COPY_MARKS[0]} page={p.pages[p.pages.length - 1]} />);
+  expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === "Note: Hallmarked by BIS\nSize 14")).toHaveClass("block");
+});
+
 test("a page after the first has the short header, no QR, and the next page's number at its foot", () => {
   const lines = Array.from({ length: 60 }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}` }));
   const p = bill({ lines, status: "cancelled" });

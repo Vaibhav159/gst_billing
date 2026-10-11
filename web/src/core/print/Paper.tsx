@@ -7,21 +7,22 @@ import { createPortal } from "react-dom";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/core/cn";
 import { Button } from "@/core/ui";
-import type { CopyMark, FreeText, PrintBill, PrintPage, Run } from "./model";
+import { PAGE_FIT, type CopyMark, type FreeText, type PrintBill, type PrintPage, type Run } from "./model";
 import { qrPath } from "./qr";
 
 export const A4_W = 794; // 210 mm at 96 px per inch
 export const A4_H = 1123;
 const SERIF = '"Times New Roman", Times, "Liberation Serif", "Nimbus Roman", serif';
 const GREY = "#4b4b4b";
-const COLS = "30px minmax(0,1fr) 62px 96px 84px 38px 112px";
 /**
- * The paper sets its lines and rows as the PDF does, so it breaks where the PDF does (Ruling 1E-14): Times's own line, 1.12
- * em (react-pdf's, as model.ts's PAGE_FIT measures it), not PROTO's 1.35, and the PDF's rows in points, at the paper's 96
- * px an inch.
+ * The paper is the PDF drawn in HTML, so it breaks where the PDF does and a name that fits a line of the PDF fits a line of
+ * the paper (Ruling 1E-14): its lengths and sizes are BillDocument's, in points at the paper's 96 px an inch, and its line
+ * is Times's own, 1.12 em (react-pdf's, as model.ts's PAGE_FIT measures it; PROTO set 1.35).
  */
 const LINE = 1.12;
-const PT = 4 / 3;
+const pt = (n: number) => (n * 4) / 3;
+/** The goods' columns, the PDF's: Sl No., the description (the rest), HSN/SAC, Quantity, Rate, per, Amount. */
+const COLS = [26, 0, 50, 62, 58, 30, 80].map((w) => (w ? `${pt(w)}px` : "minmax(0,1fr)")).join(" ");
 const NBSP = "\u00a0"; // PROTO's " ": an empty box or line keeps its height
 
 /**
@@ -53,14 +54,14 @@ export function QrSvg({ text, size = 78, label }: { text: string; size?: number;
 }
 
 /**
- * A row of the goods table, at least as tall as the PDF's (18 pt; a Total row passes its 20) and its cells padded 3 pt, as
- * the PDF's are. head: its column headings; filler: the empty row that stretches the table down the sheet.
+ * A row of the goods table, at least as tall as the PDF's (PAGE_FIT.row; a Total row passes its `closing`) and its cells
+ * padded 3 pt, as the PDF's are. head: its column headings; filler: the empty row that stretches the table down the sheet.
  */
 function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode[]; className?: string; style?: CSSProperties; bold?: boolean; head?: boolean; filler?: boolean }) {
   return (
-    <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...(filler ? {} : { minHeight: 18 * PT }), ...style }}>
+    <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...(filler ? {} : { minHeight: pt(PAGE_FIT.row) }), ...style }}>
       {cells.map((c, i) => (
-        <div key={i} role={head ? "columnheader" : "cell"} className={cn("px-1.5 py-1 min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold")}>{c}</div>
+        <div key={i} role={head ? "columnheader" : "cell"} className={cn("min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold")} style={{ padding: pt(3) }}>{c}</div>
       ))}
     </div>
   );
@@ -69,44 +70,45 @@ function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode
 /** One sheet: a page of one copy of one bill. Lines are keyed by their place: an address can repeat a line. */
 export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
   const multi = page.count > 1;
-  // a label stands on its own line, as tall as its own 10 px text (inline, it would take the paper's 12 px line)
-  const label = (t: string) => <span className="block" style={{ fontSize: 10, color: GREY }}>{t}</span>;
+  // a label stands on its own line, as tall as its own 7 pt text (inline, it would take the paper's 9 pt line)
+  const label = (t: string) => <span className="block" style={{ fontSize: pt(7), color: GREY }}>{t}</span>;
   const cell = (i: number, k: string, v: FreeText, extra: string) => (
-    <div key={i} className={cn("px-2 py-1 border-black", extra)} style={{ minHeight: 22 * PT }}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
+    <div key={i} className={cn("border-black", extra)} style={{ padding: pt(3), minHeight: pt(22) }}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
   );
   // a firm without a GSTIN leaves it out of the code's name, as the code leaves its field empty
   const qrName = `QR code: ${[b.number, b.firm.gstin, b.dated, `₹${b.total.amount}`].filter(Boolean).join(", ")}`;
   return (
     <div role="document" data-paper="" aria-label={`Bill ${b.number} on paper, ${copy.label.toLowerCase()} copy${multi ? `, page ${page.index + 1} of ${page.count}` : ""}`}
-      className="relative bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: "18px 28px 24px", fontFamily: SERIF, fontSize: 12, lineHeight: LINE }}>
-      <div className="flex justify-between items-end mb-1" style={{ fontSize: 9.5 }}>
+      className="relative flex flex-col bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: `${pt(14)}px ${pt(20)}px`, fontFamily: SERIF, fontSize: pt(9), lineHeight: LINE }}>
+      <div className="flex justify-between items-end" style={{ fontSize: pt(7.5), marginBottom: pt(3) }}>
         <span style={{ color: GREY }}>{multi ? `Page ${page.index + 1} of ${page.count}` : NBSP}</span>
         <span style={{ fontStyle: "italic" }}>({copy.tag})</span>
       </div>
-      <div className="border border-black flex flex-col" style={{ minHeight: A4_H - 66 }}>
-        <div className="grid border-b border-black" style={{ gridTemplateColumns: page.first ? "92px minmax(0,1fr) 92px" : "minmax(0,1fr)" }}>
+      {/* the box fills the sheet down to its foot, as the PDF's does */}
+      <div className="border border-black flex flex-col flex-1">
+        <div className="grid border-b border-black" style={{ gridTemplateColumns: page.first ? `${pt(80)}px minmax(0,1fr) ${pt(80)}px` : "minmax(0,1fr)" }}>
           {page.first ? <span aria-hidden="true" /> : null}
-          <div role="heading" aria-level={2} className="text-center self-center py-1.5">
-            <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: "0.03em" }}>Tax Invoice</span>
-            {!page.first ? <span style={{ fontSize: 11, color: GREY }}> (continued, page {page.index + 1})</span> : null}
+          <div role="heading" aria-level={2} className="text-center self-center" style={{ paddingTop: pt(5), paddingBottom: pt(5) }}>
+            <span style={{ fontSize: pt(12), fontWeight: 700, letterSpacing: "0.03em" }}>Tax Invoice</span>
+            {!page.first ? <span style={{ fontSize: pt(7.5), color: GREY }}> (continued, page {page.index + 1})</span> : null}
           </div>
           {page.first ? (
-            <div className="border-l border-black flex flex-col items-center justify-center py-1">
-              <QrSvg text={b.qr} label={qrName} />
-              <span style={{ fontSize: 8, color: GREY }}>Scan to check</span>
+            <div className="border-l border-black flex flex-col items-center justify-center" style={{ paddingTop: pt(3), paddingBottom: pt(3) }}>
+              <QrSvg text={b.qr} label={qrName} size={pt(58)} />
+              <span style={{ fontSize: pt(6.5), color: GREY }}>Scan to check</span>
             </div>
           ) : null}
         </div>
 
         {page.first ? (
-          <div className="grid border-b border-black" style={{ gridTemplateColumns: "minmax(0,1fr) 310px" }}>
+          <div className="grid border-b border-black" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(240)}px` }}>
             <div className="border-r border-black flex flex-col">
-              <div className="px-2 py-1.5 border-b border-black">
-                <div style={{ fontSize: 14.5, fontWeight: 700 }}><RupeeText>{b.firm.name}</RupeeText></div>
+              <div className="border-b border-black" style={{ padding: pt(5) }}>
+                <div style={{ fontSize: pt(11), fontWeight: 700, marginBottom: pt(1) }}><RupeeText>{b.firm.name}</RupeeText></div>
                 {b.firm.lines.map((l, i) => <div key={i}><RupeeText>{l}</RupeeText></div>)}
               </div>
               {b.parties.map((p, i) => (
-                <div key={i} className={cn("px-2 py-1.5", i === 0 && "border-b border-black")}>
+                <div key={i} className={cn(i === 0 && "border-b border-black")} style={{ padding: pt(5) }}>
                   {label(p.label)}
                   <div className="font-bold"><RupeeText>{p.name}</RupeeText></div>
                   {p.lines.map((l, j) => <div key={j}><RupeeText>{l}</RupeeText></div>)}
@@ -118,7 +120,7 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
             </div>
           </div>
         ) : (
-          <div className="grid border-b border-black px-2 py-1.5 gap-x-4" style={{ gridTemplateColumns: "minmax(0,1fr) auto", fontSize: 11.5 }}>
+          <div className="grid border-b border-black gap-x-4" style={{ gridTemplateColumns: "minmax(0,1fr) auto", fontSize: pt(8.5), padding: pt(5) }}>
             {b.short.map((runs, i) => <div key={i} className={i % 2 ? "text-right" : undefined}><Runs runs={runs} /></div>)}
           </div>
         )}
@@ -131,7 +133,7 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
               <Row key={i} cells={[l.sl, (
                 <span key="n">
                   <span className="font-bold"><RupeeText>{l.name}</RupeeText></span>
-                  {l.note ? <span className="block" style={{ fontStyle: "italic", fontSize: 10.5, paddingLeft: 14 }}><RupeeText>{l.note}</RupeeText></span> : null}
+                  {l.note ? <span className="block" style={{ fontStyle: "italic", fontSize: pt(7.5), paddingLeft: pt(8) }}><RupeeText>{l.note}</RupeeText></span> : null}
                 </span>
               ), l.hsn, l.qty, l.rate, l.per, <span key="a" className="font-bold">{l.amount}</span>]} />
             );
@@ -139,21 +141,21 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
           {page.last ? (
             <>
               {b.taxes.map((t) => <Row key={t.key} cells={["", <span key="l" className="block text-right font-bold" style={{ fontStyle: "italic" }}>{t.head}</span>, "", "", t.rate, "", <span key="a" className="font-bold">{t.amount}</span>]} />)}
-              {b.note ? <Row cells={["", <span key="n" className="block" style={{ fontStyle: "italic", fontSize: 11 }}>Note: <RupeeText>{b.note}</RupeeText></span>, "", "", "", "", ""]} /> : null}
+              {b.note ? <Row cells={["", <span key="n" className="block" style={{ fontStyle: "italic", fontSize: pt(8.5) }}>Note: <RupeeText>{b.note}</RupeeText></span>, "", "", "", "", ""]} /> : null}
             </>
           ) : null}
           <Row filler cells={["", "", "", "", "", "", ""]} />
           {page.last ? (
-            <Row bold className="border-t border-black" style={{ minHeight: 20 * PT }} cells={["", <span key="t" className="block text-right">Total</span>, "", b.total.qty, "", "", <span key="g" style={{ fontSize: 13 }}><RupeeText>{`₹ ${b.total.amount}`}</RupeeText></span>]} />
+            <Row bold className="border-t border-black" style={{ minHeight: pt(PAGE_FIT.closing) }} cells={["", <span key="t" className="block text-right">Total</span>, "", b.total.qty, "", "", <span key="g" style={{ fontSize: pt(10) }}><RupeeText>{`₹ ${b.total.amount}`}</RupeeText></span>]} />
           ) : (
-            <Row className="border-t border-black" style={{ minHeight: 20 * PT }} cells={["", <span key="t" className="block text-right" style={{ fontStyle: "italic" }}>continued on page {page.index + 2}</span>, "", "", "", "", ""]} />
+            <Row className="border-t border-black" style={{ minHeight: pt(PAGE_FIT.closing) }} cells={["", <span key="t" className="block text-right" style={{ fontStyle: "italic" }}>continued on page {page.index + 2}</span>, "", "", "", "", ""]} />
           )}
         </div>
 
         {page.last ? (
           <>
-            <div className="border-t border-b border-black px-2 py-1">
-              <div className="flex justify-between">{label("Amount Chargeable (in words)")}<span style={{ fontSize: 10, fontStyle: "italic" }}>E. & O.E</span></div>
+            <div className="border-t border-b border-black" style={{ padding: `${pt(3)}px ${pt(5)}px` }}>
+              <div className="flex justify-between">{label("Amount Chargeable (in words)")}<span style={{ fontSize: pt(7.5), fontStyle: "italic" }}>E. & O.E</span></div>
               <div className="font-bold">{b.words}</div>
             </div>
             <table aria-label="Tax by HSN/SAC" className="w-full border-collapse" style={{ fontSize: 11 }}>
@@ -176,33 +178,34 @@ export function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: P
                 })}
               </tbody>
             </table>
-            <div className="px-2 py-1 border-b border-black" style={{ fontSize: 11 }}>Tax Amount (in words) : <span className="font-bold">{b.taxWords}</span></div>
-            <div className="grid" style={{ gridTemplateColumns: "minmax(0,1fr) 330px", fontSize: 11 }}>
-              <div className="border-r border-black px-2 py-1.5 flex flex-col justify-between gap-3">
+            <div className="border-b border-black" style={{ fontSize: pt(8), padding: pt(3) }}>Tax Amount (in words) : <span className="font-bold">{b.taxWords}</span></div>
+            <div className="grid" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(240)}px`, fontSize: pt(8) }}>
+              <div className="border-r border-black flex flex-col justify-between gap-3" style={{ padding: pt(5) }}>
                 <div>Company&apos;s PAN : <span className="font-bold">{b.firm.pan}</span></div>
                 <div>
                   <div role="heading" aria-level={3} className="font-bold underline">Declaration</div>
-                  <div style={{ fontSize: 10.5 }}>{b.declaration}</div>
+                  <div style={{ fontSize: pt(7.5) }}>{b.declaration}</div>
                 </div>
               </div>
               <div className="flex flex-col">
                 {b.firm.bank ? (
-                  <div className="px-2 py-1.5 border-b border-black">
+                  <div className="border-b border-black" style={{ padding: pt(5) }}>
                     <div>Company&apos;s Bank Details</div>
-                    <div className="grid" style={{ gridTemplateColumns: "112px minmax(0,1fr)" }}>
+                    <div className="grid" style={{ gridTemplateColumns: `${pt(82)}px minmax(0,1fr)` }}>
                       {b.firm.bank.map(([k, v], i) => [<span key={`${i}k`}>{k}</span>, <span key={`${i}v`} className="font-bold">: <RupeeText>{v}</RupeeText></span>])}
                     </div>
                   </div>
                 ) : null}
-                <div className="px-2 py-1.5 flex-1 flex flex-col justify-between text-right min-h-[78px]">
+                <div className="flex-1 flex flex-col justify-between text-right" style={{ padding: pt(5), minHeight: pt(PAGE_FIT.sign) }}>
                   <div className="font-bold">for <RupeeText>{b.firm.name}</RupeeText></div>
-                  {b.firm.signature ? <img src={b.firm.signature} alt={`Signature for ${b.firm.name}`} className="self-end object-contain" style={{ maxHeight: 42, maxWidth: 150 }} /> : null}
+                  {/* the signature in the PDF's own box, 90 by 30 pt, whatever its size */}
+                  {b.firm.signature ? <img src={b.firm.signature} alt={`Signature for ${b.firm.name}`} className="self-end object-contain" style={{ width: pt(90), height: pt(PAGE_FIT.signature) }} /> : null}
                   <div>Authorised Signatory</div>
                 </div>
               </div>
             </div>
-            <div className="border-t border-black text-center py-1" style={{ fontSize: 10.5 }}>SUBJECT TO {b.jurisdiction.toUpperCase()} JURISDICTION</div>
-            <div className="border-t border-black text-center py-1" style={{ fontSize: 10, color: GREY }}>This is a Computer Generated Invoice</div>
+            <div className="border-t border-black text-center py-1" style={{ fontSize: pt(7.5) }}>SUBJECT TO {b.jurisdiction.toUpperCase()} JURISDICTION</div>
+            <div className="border-t border-black text-center py-1" style={{ fontSize: pt(7), color: GREY }}>This is a Computer Generated Invoice</div>
           </>
         ) : null}
       </div>
