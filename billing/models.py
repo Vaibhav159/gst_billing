@@ -800,6 +800,8 @@ class LineItem(AbstractBaseModel):
 
     @classmethod
     def get_invoice_summary(cls, invoice_id):
+        from billing.services.purchase_reads import LinePaise
+
         invoice_summary_data = cls.objects.filter(invoice_id=invoice_id).aggregate(
             total_amount=Coalesce(Sum("amount"), Decimal(0)),
             total_cgst_tax=Sum("cgst"),
@@ -807,7 +809,7 @@ class LineItem(AbstractBaseModel):
             total_igst_tax=Sum("igst"),
             total_items=Count("id"),
             total_tax=Sum(F("cgst") + F("sgst") + F("igst")),
-            amount_without_tax=Sum(F("quantity") * F("rate")),
+            amount_without_tax=Sum(LinePaise(F("quantity"), F("rate"))),  # per line half-up (X-55)
         )
 
         invoice_summary_data["round_off"] = cls.custom_round_off(

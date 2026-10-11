@@ -115,6 +115,13 @@ def document_series(numbers, elsewhere=(), cancelled=()):
     return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
 
 
+def _line_taxable():
+    """quantity x rate rounded half-up to paise per line, before SQL adds the lines (X-55)."""
+    from billing.services.purchase_reads import LinePaise
+
+    return LinePaise(F("quantity"), F("rate"))
+
+
 def _months(items):
     """[(output tax, input credit), ...] per calendar month of `items`, in order.
 
@@ -159,7 +166,7 @@ def gst_summary(view, request):
         items
         .values("invoice__type_of_invoice", "gst_tax_rate")
         .annotate(
-            taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            taxable=Coalesce(Sum(_line_taxable()), Decimal("0")),
             cgst=Coalesce(Sum("cgst"), Decimal("0")),
             sgst=Coalesce(Sum("sgst"), Decimal("0")),
             igst=Coalesce(Sum("igst"), Decimal("0")),
@@ -194,7 +201,7 @@ def gst_summary(view, request):
         .filter(invoice__type_of_invoice="outward")
         .values("hsn_code")
         .annotate(
-            taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            taxable=Coalesce(Sum(_line_taxable()), Decimal("0")),
             cgst=Coalesce(Sum("cgst"), Decimal("0")),
             sgst=Coalesce(Sum("sgst"), Decimal("0")),
             igst=Coalesce(Sum("igst"), Decimal("0")),
@@ -601,13 +608,13 @@ def gstr_export(view, request):
     inward_items = items_all.filter(invoice__type_of_invoice="inward")
 
     ot = outward_items.aggregate(
-        txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+        txval=Coalesce(Sum(_line_taxable()), Decimal("0")),
         cgst=Coalesce(Sum("cgst"), Decimal("0")),
         sgst=Coalesce(Sum("sgst"), Decimal("0")),
         igst=Coalesce(Sum("igst"), Decimal("0")),
     )
     it = inward_items.aggregate(
-        txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+        txval=Coalesce(Sum(_line_taxable()), Decimal("0")),
         cgst=Coalesce(Sum("cgst"), Decimal("0")),
         sgst=Coalesce(Sum("sgst"), Decimal("0")),
         igst=Coalesce(Sum("igst"), Decimal("0")),
