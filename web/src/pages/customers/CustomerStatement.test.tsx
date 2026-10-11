@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { onlineManager } from "@tanstack/react-query";
 import { useCustomer, useCustomerSearch } from "@/core/api/customers";
 import { __setNetState } from "@/core/api/network";
+import { ShareHost } from "@/core/print/ShareHost";
 import CustomerStatement from "./CustomerStatement";
 import { makeStatementPdf } from "./statementPdf";
 import { ANIL, FIRMS, handClock, mount, pass, serve, type Call } from "./testing";
@@ -13,7 +14,7 @@ vi.mock("./statementPdf", () => ({ makeStatementPdf: vi.fn(async () => new Blob(
 const routes = [
   { path: "/customers", element: <p>all customers</p> },
   { path: "/customers/:id", element: <p>the customer page</p> },
-  { path: "/customers/:id/statement", element: <CustomerStatement /> },
+  { path: "/customers/:id/statement", element: <><CustomerStatement /><ShareHost /></> },
   { path: "/sales/:id", element: <p>the bill</p> },
 ];
 const b = (id: number, date: string, total: string, paid: string, mode: string, status = "active") => ({
@@ -48,6 +49,7 @@ afterEach(() => {
   act(() => __setNetState("online"));
   delete (navigator as { share?: unknown }).share;
   delete (navigator as { canShare?: unknown }).canShare;
+  delete (navigator as { userActivation?: unknown }).userActivation;
   (window as unknown as { __phone?: boolean }).__phone = false;
 });
 
@@ -299,4 +301,158 @@ test("an address that names no customer on file says so, with the way to all cus
   expect(await screen.findByText("This customer isn't on file", { selector: "p" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "All customers" })).toHaveAttribute("href", "/customers");
   expect(calls.filter((c) => c.url.includes("statement"))).toEqual([]);
+});
+
+
+const manyBills = (count: number) => ({ ...STATEMENT, bills: Array.from({ length: count }, (_, i) => b(i + 1, "2026-09-02", "100.00", "billing", "cash")) });
+function heldPdf() {
+  let ready!: (blob: Blob) => void;
+  vi.mocked(makeStatementPdf).mockImplementationOnce(() => new Promise<Blob>((resolve) => { ready = resolve; }));
+  return () => ready(new Blob(["%PDF-1.3 held"], { type: "application/pdf" }));
+}
+
+test("a 200-bill period opens without making a PDF; Download makes one on press and saves it", async () => {
+  handClock();
+  const ready = heldPdf();
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByRole("table");
+  expect(makeStatementPdf).not.toHaveBeenCalled();
+  const download = screen.getByRole("button", { name: "Download PDF" });
+  expect(download).toBeEnabled();
+  fireEvent.click(download);
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  expect(download).toHaveAttribute("title", "Making the PDF…");
+  expect(clicked).toEqual([]);
+  await act(async () => { ready(); });
+  expect(clicked).toEqual(["Anil-Gupta_statement_FY-2026-27.pdf"]);
+  fireEvent.click(download);
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  expect(clicked).toHaveLength(2);
+});
+
+test.each([100, 150])("a %i-bill period still makes its PDF ahead", async (count) => {
+  handClock();
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(count) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByRole("table");
+  await pass(0);
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "Download PDF" })).toBeEnabled();
+});
+
+test("a 200-bill phone Share makes its PDF on press and uses the host's late path", async () => {
+  handClock();
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  const ready = heldPdf();
+  const share = vi.fn(async () => {});
+  Object.assign(navigator, { share, canShare: () => true, userActivation: { isActive: false } });
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByText("Bills · FY 2026-27");
+  expect(makeStatementPdf).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Share PDF" }));
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  await act(async () => { ready(); });
+  const dialog = screen.getByRole("dialog", { name: "Your PDF is ready" });
+  expect(share).not.toHaveBeenCalled();
+  expect(clicked).toEqual([]);
+  await pass(400); // past the sheet's 350 ms click guard
+  Object.assign(navigator, { userActivation: { isActive: true } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Share" }));
+  await pass(0);
+  expect(share).toHaveBeenCalledTimes(1);
+  expect(share).toHaveBeenCalledWith(expect.objectContaining({ files: [expect.objectContaining({ name: "Anil-Gupta_statement_FY-2026-27.pdf" })] }));
+});
+
+test.each(["Download PDF", "Print", "Share PDF"])("a period switch while %s makes the PDF never offers the old period", async (action) => {
+  handClock();
+  const ready = heldPdf();
+  const share = vi.fn(async () => {});
+  Object.assign(navigator, { share, canShare: () => true, userActivation: { isActive: false } });
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": (c: Call) => c.params.start_date === "2026-04-01" ? { status: 200, data: manyBills(200) } : answer(c) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByRole("table");
+  fireEvent.click(screen.getByRole("button", { name: action }));
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("radio", { name: "October 2026" }));
+  await pass(0);
+  screen.getByText("No bills to Anil Gupta in October 2026");
+  await act(async () => { ready(); });
+  expect(clicked).toEqual([]);
+  expect(open).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog", { name: "Your PDF is ready" })).not.toBeInTheDocument();
+  expect(screen.queryByText("The PDF is ready.")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download PDF" })).toBeDisabled();
+});
+
+test("a big period's first Print makes the file without opening a tab; a second press prints synchronously", async () => {
+  handClock();
+  const ready = heldPdf();
+  const open = vi.spyOn(window, "open").mockReturnValue({ addEventListener: vi.fn() } as unknown as Window);
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByRole("table");
+  expect(makeStatementPdf).not.toHaveBeenCalled();
+  const print = screen.getByRole("button", { name: "Print" });
+  fireEvent.click(print);
+  await act(async () => { ready(); });
+  expect(open).not.toHaveBeenCalled();
+  expect(screen.getByText("The PDF is ready.")).toHaveAttribute("role", "status");
+  expect(print).toHaveFocus();
+  fireEvent.click(print);
+  expect(open).toHaveBeenCalledWith("blob:statement", "_blank");
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+});
+
+test("switching periods between Print presses drops the ready file and status", async () => {
+  handClock();
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByRole("table");
+  fireEvent.click(screen.getByRole("button", { name: "Print" }));
+  await pass(0);
+  expect(screen.getByText("The PDF is ready.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: "September 2026" }));
+  await pass(0);
+  screen.getByText("Bills · September 2026");
+  expect(screen.queryByText("The PDF is ready.")).not.toBeInTheDocument();
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Print" }));
+  expect(makeStatementPdf).toHaveBeenCalledTimes(2);
+  expect(open).not.toHaveBeenCalled();
+  await pass(0);
+  expect(screen.getByText("The PDF is ready.")).toBeInTheDocument();
+});
+
+test("the phone's first Print offers and focuses a visible Print button for the second press", async () => {
+  handClock();
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  const ready = heldPdf();
+  const open = vi.spyOn(window, "open").mockReturnValue({ addEventListener: vi.fn() } as unknown as Window);
+  serve({ "GET customers/7/": ANIL, "GET customers/7/statement/": manyBills(200) });
+  mount(routes, ["/customers/7/statement"]);
+  await pass(400);
+  screen.getByText("Bills · FY 2026-27");
+  fireEvent.click(screen.getByRole("button", { name: "Print or download the statement" }));
+  const menu = screen.getByRole("dialog", { name: "Statement" });
+  await pass(400); // past the sheet's 350 ms click guard
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /^Print / }));
+  await pass(0);
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  await act(async () => { ready(); });
+  expect(open).not.toHaveBeenCalled();
+  const print = screen.getByRole("button", { name: "Print" });
+  expect(print).toHaveFocus();
+  fireEvent.click(print);
+  expect(open).toHaveBeenCalledWith("blob:statement", "_blank");
 });

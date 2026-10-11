@@ -13,7 +13,7 @@ function later<T>() {
   return { promise, resolve };
 }
 // the hook only hands data to the maker, so a period's label stands in for the whole statement
-const period = (label: string) => ({ periodLabel: label }) as StatementPdfData;
+const period = (label: string, bills = 1) => ({ periodLabel: label, statement: { bills: Array.from({ length: bills }, (_, id) => ({ id })) } }) as StatementPdfData;
 const pdfOf = (what: string) => new Blob([`%PDF-1.3 ${what}`], { type: "application/pdf" });
 const NAME = "Anil-Gupta_statement_FY-2026-27.pdf";
 const objectUrls = { createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL };
@@ -39,19 +39,19 @@ test("the PDF is made as soon as there's a statement; a period just picked never
   const septPdf = pdfOf("September");
   const octPdf = pdfOf("October");
   const { result, rerender } = renderHook(({ data }) => useStatementPdf(data), { initialProps: { data: null as StatementPdfData | null } });
-  expect(result.current).toEqual({ blob: null, failed: false });
+  expect(result.current).toMatchObject({ blob: null, failed: false });
   expect(makeStatementPdf).not.toHaveBeenCalled();
 
   rerender({ data: SEPT });
   expect(makeStatementPdf).toHaveBeenLastCalledWith(SEPT);
-  expect(result.current).toEqual({ blob: null, failed: false });
+  expect(result.current).toMatchObject({ blob: null, failed: false });
   await act(async () => { sept.resolve(septPdf); });
   expect(result.current.blob).toBe(septPdf);
   expect(result.current.failed).toBe(false);
 
   rerender({ data: OCT });
   expect(makeStatementPdf).toHaveBeenLastCalledWith(OCT);
-  expect(result.current).toEqual({ blob: null, failed: false });
+  expect(result.current).toMatchObject({ blob: null, failed: false });
   await act(async () => { oct.resolve(octPdf); });
   expect(result.current.blob).toBe(octPdf);
 });
@@ -72,7 +72,7 @@ test("a PDF that comes after its period was left is dropped, and one that couldn
   vi.mocked(makeStatementPdf).mockRejectedValueOnce(new Error("the font didn't load"));
   rerender({ data: period("FY 2026-27") });
   await act(async () => {});
-  expect(result.current).toEqual({ blob: null, failed: true });
+  expect(result.current).toMatchObject({ blob: null, failed: true });
 });
 
 test("Print opens the PDF in a new tab and prints it once it has loaded; a tab the browser stopped is false", () => {
@@ -121,6 +121,32 @@ test("Share hands the file to the share sheet: shared or cancelled; unsupported 
   share.mockRejectedValueOnce(new DOMException("Share canceled", "AbortError"));
   expect(await sharePdf(blob, NAME, "Statement · Anil Gupta")).toBe("cancelled");
   // refused for any other reason: the page downloads it instead
-  share.mockRejectedValueOnce(new DOMException("Not allowed", "NotAllowedError"));
+  share.mockRejectedValueOnce(new TypeError("Sharing failed"));
   expect(await sharePdf(blob, NAME, "Statement · Anil Gupta")).toBe("unsupported");
+});
+
+
+test("151 bills wait for a press, which makes once; a period switch drops both the file and waiting deliveries", async () => {
+  const one = later<Blob>();
+  const two = later<Blob>();
+  vi.mocked(makeStatementPdf).mockReturnValueOnce(one.promise).mockReturnValueOnce(two.promise);
+  const FIRST = period("First", 151);
+  const SECOND = period("Second", 200);
+  const { result, rerender, unmount } = renderHook(({ data }) => useStatementPdf(data), { initialProps: { data: FIRST } });
+  expect(makeStatementPdf).not.toHaveBeenCalled();
+  let first!: Promise<Blob | null>;
+  act(() => { first = result.current.make(); });
+  expect(result.current.making).toBe(true);
+  act(() => { void result.current.make(); });
+  expect(makeStatementPdf).toHaveBeenCalledTimes(1);
+  rerender({ data: SECOND });
+  expect(result.current.making).toBe(false);
+  await act(async () => { one.resolve(pdfOf("First")); });
+  expect(await first).toBeNull();
+  expect(result.current.blob).toBeNull();
+  let second!: Promise<Blob | null>;
+  act(() => { second = result.current.make(); });
+  unmount();
+  await act(async () => { two.resolve(pdfOf("Second")); });
+  expect(await second).toBeNull();
 });

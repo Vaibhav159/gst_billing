@@ -1,4 +1,4 @@
-// The statement's PDF. react-pdf and the document load on demand, the first time a statement is opened, so neither
+// The statement's PDF. react-pdf and the document load on demand, the first time a PDF is made, so neither
 // is in the app's first download.
 import { createElement } from "react";
 import type { StatementPdfData } from "./statementDoc";

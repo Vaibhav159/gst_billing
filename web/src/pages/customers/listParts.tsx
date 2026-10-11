@@ -49,17 +49,18 @@ export function FirmChips({ firms, value, onChange }: { firms: Firm[]; value: Fi
  * Call and WhatsApp for a customer: a tel: link, and WhatsApp's "Resend <last bill>" (it opens the bill, where Send is)
  * and "Message <first name>" (a chat). Nothing for a number that isn't a 10-digit mobile.
  */
-export function useContact(c: Pick<Customer, "name" | "mobile_number">, last: LastBill | null): { tel: string | null; items: MenuItem[] } {
+export function useContact(c: Pick<Customer, "name" | "mobile_number">, last: LastBill | null): { tel: string | null; items: MenuItem[]; chat: (() => boolean) | null } {
   const { can, whyNot } = useAuth();
   const { show } = useToast();
   const digits = mobileDigits(c.mobile_number);
   // @/core/ids's rule for a mobile number, on the number as stored (as the form checks it): none, a landline, a short
   // one or the country code twice gets no Call and no WhatsApp
-  if (!digits || mobileProblem(c.mobile_number)) return { tel: null, items: [] };
+  if (!digits || mobileProblem(c.mobile_number)) return { tel: null, items: [], chat: null };
   const chat = () => {
     const w = window.open(`https://wa.me/91${digits}`, "_blank");
     if (w) w.opener = null;
     else show({ tone: "brand", title: "WhatsApp didn't open", body: `The browser stopped the new tab. Allow pop-ups for this app, or message ${c.name} on +91 ${formatMobile(digits)}.` });
+    return Boolean(w);
   };
   const items: MenuItem[] = [];
   if (last) {
@@ -69,7 +70,7 @@ export function useContact(c: Pick<Customer, "name" | "mobile_number">, last: La
     });
   }
   items.push({ label: `Message ${firstName(c.name)}`, icon: MessageCircle, hint: "Opens a WhatsApp chat", onSelect: chat });
-  return { tel: `tel:+91${digits}`, items };
+  return { tel: `tel:+91${digits}`, items, chat };
 }
 
 /** The row's ⋯: Call (phones) · WhatsApp · New bill · Statement, as on the customer page. */
