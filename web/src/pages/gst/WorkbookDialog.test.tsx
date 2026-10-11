@@ -59,7 +59,7 @@ test("reconciliation downloads need gst.download while report exports allow a vi
   view.unmount(); renderApp(<WorkbookDialog {...props} />, { me: auth }); await ready();
 });
 
-test("an audit failure says the file downloaded and does not offer to download it again", async () => {
+test("an audit failure says the file downloaded after saving it exactly once", async () => {
   serve({ "POST audit-logs/log/": () => ({ status: 500 }) });
   renderApp(<WorkbookDialog {...props} />); await ready();
   fireEvent.click(screen.getByRole("button", { name: "Download Excel" }));
