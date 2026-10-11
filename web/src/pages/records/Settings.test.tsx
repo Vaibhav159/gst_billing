@@ -108,6 +108,7 @@ test("an All firms list still opens a new bill under the person's default, befor
   mountForm("/sales/new");
   await screen.findByRole("combobox", { name: /Customer/ });
   await waitFor(() => expect(calls.find((call) => call.url === "sales/next-number/")?.params.business_id).toBe(4));
+  expect(screen.getByText("Your default firm, from Settings")).toBeInTheDocument();
 });
 
 test("late personal-row responses preserve the other row's saved preference", async () => {

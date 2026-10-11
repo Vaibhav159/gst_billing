@@ -112,7 +112,7 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
   const lookUp = deciding && Boolean(draftId) && !fresher && !local?.gone;
   const unfinished = useUnfinishedBills(lookUp, { fresh: true });
   const listed = lookUp ? unfinished.bills.find((d) => d.id === draftId) : undefined;
-  const { firmId: scopeFirm, ready, defaultFirmId, defaultReady, defaultProblem, retryDefaults } = useScope();
+  const { firmId: scopeFirm, ready, defaultFirmId, defaultSource, defaultReady, defaultProblem, retryDefaults } = useScope();
   const today = todayIST();
   const fromId = idParam(params.get("from"));
   const remakeId = idParam(params.get("remake"));
@@ -140,7 +140,7 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
     return <Page icon={FilePlus2} title={title} back="/sales"><Card><EmptyState title="The default firm couldn't load" actions={<Button onClick={retryDefaults}>Try again</Button>}>{defaultProblem.message}</EmptyState></Card></Page>;
   }
   const known = (id: number | null) => id !== null && firms.some((x) => x.id === id);
-  const fallback = typeof scopeFirm === "number" && known(scopeFirm) ? { firmId: scopeFirm, firmSource: "scope" as const } : { firmId: defaultFirmId ?? firms[0].id, firmSource: "first" as const };
+  const fallback = typeof scopeFirm === "number" && known(scopeFirm) ? { firmId: scopeFirm, firmSource: "scope" as const } : defaultFirmId !== null && defaultSource !== null ? { firmId: defaultFirmId, firmSource: defaultSource } : { firmId: firms[0].id, firmSource: "first" as const };
   const bill = source.data ?? null;
   let start: Start;
   const draft = fresher ? { ...fresher, onDevice: true } : listed;

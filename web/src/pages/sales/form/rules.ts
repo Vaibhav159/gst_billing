@@ -159,7 +159,7 @@ export const errorOrder = (lines: FormLine[]) => ["firm", "number", "date", "cus
 export function firmHint({ mode, source, paper, moving, canMove }: { mode: "new" | "edit"; source: string; paper: boolean; moving: string; canMove: boolean }): string {
   if (mode === "edit") return moving || (canMove ? "A bill can move to another firm while its month is open." : "A bill stays in its firm and number series.");
   if (paper) return "The firm whose paper bill book it is";
-  return ({ scope: "Follows the firm picked in the top bar", first: "Pick the firm whose bill book this is", draft: "From the unfinished bill", copy: "Same firm as the bill it comes from" } as Record<string, string>)[source] ?? "Bill number follows the firm";
+  return ({ scope: "Follows the firm picked in the top bar", mine: "Your default firm, from Settings", shop: "The shop's default firm, from Settings", first: "Pick the firm whose bill book this is", draft: "From the unfinished bill", copy: "Same firm as the bill it comes from" } as Record<string, string>)[source] ?? "Bill number follows the firm";
 }
 
 /** Worth a word on a line: a weight typed as ".5" (PROTO useBillForm.js:286). */

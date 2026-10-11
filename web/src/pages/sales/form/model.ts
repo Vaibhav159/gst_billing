@@ -57,7 +57,7 @@ export type Origin =
   | null;
 
 /** Which firm the bill starts in, for the hint under Firm. */
-export type FirmSource = "scope" | "mine" | "first" | "paper" | "draft" | "copy" | "bill";
+export type FirmSource = "scope" | "mine" | "shop" | "first" | "paper" | "draft" | "copy" | "bill";
 
 export type Start = {
   mode: "new" | "edit";

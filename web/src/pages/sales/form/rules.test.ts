@@ -235,6 +235,8 @@ test.each(["gms", "pcs"])("an amount-only %s line compares against how it opened
 test("the hint under Firm says where the firm came from, or where an edit moves the bill", () => {
   expect(firmHint({ mode: "new", source: "scope", paper: false, moving: "", canMove: true })).toBe("Follows the firm picked in the top bar");
   expect(firmHint({ mode: "new", source: "first", paper: false, moving: "", canMove: true })).toBe("Pick the firm whose bill book this is");
+  expect(firmHint({ mode: "new", source: "mine", paper: false, moving: "", canMove: true })).toBe("Your default firm, from Settings");
+  expect(firmHint({ mode: "new", source: "shop", paper: false, moving: "", canMove: true })).toBe("The shop's default firm, from Settings");
   expect(firmHint({ mode: "new", source: "paper", paper: true, moving: "", canMove: true })).toBe("The firm whose paper bill book it is");
   expect(firmHint({ mode: "edit", source: "bill", paper: false, moving: "", canMove: true })).toBe("A bill can move to another firm while its month is open.");
   expect(firmHint({ mode: "edit", source: "bill", paper: false, moving: "Moves the bill to MEERA ORNAMENTS as MO/2026-27/9. KGH/2026-27/31 is left unused.", canMove: true }))
