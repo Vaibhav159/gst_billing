@@ -463,10 +463,19 @@ class Invoice(AbstractBaseModel):
             # and the firm it froze must not stay on a bill this save puts back in another (Ruling 1A-26). The
             # admin's history revert builds its bill rather than reading it, so it has no other.
             before = (type(self).objects.nocache().select_for_update().filter(pk=self.pk)
-                      .values_list("business_id", flat=True).first())
-            if str(before) != str(self.business_id):
+                      .only("business_id", "invoice_date", "type_of_invoice", "itc_month").first())
+            moved = before is not None and str(before.business_id) != str(self.business_id)
+            if moved:
                 self.firm_snapshot = None
                 fields.append("firm_snapshot")  # Ruling 1A-23: the one v3 column v2's paths write, and only to NULL
+            if before is not None and before.type_of_invoice == "inward":
+                from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
+                assert_inward_unlocked(before)
+                assert_period_unlocked(self.business_id, self.invoice_date, "edit")
+                changed_date = self._meta.get_field("invoice_date").to_python(self.invoice_date) != before.invoice_date
+                if moved or changed_date:
+                    self.itc_month = None
+                    fields.append("itc_month")
             self.save(update_fields=fields, **kwargs)
 
     class Meta:

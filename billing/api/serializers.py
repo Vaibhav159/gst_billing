@@ -220,6 +220,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         model = Invoice
         fields = [
             "id",
+            "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "source", "linked_sale",
             "invoice_number",
             "invoice_date",
             "total_amount",
@@ -256,6 +257,7 @@ class InwardBillListSerializer(serializers.ModelSerializer):
         model = Invoice
         fields = [
             "id",
+            "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "source", "linked_sale",
             "invoice_number",
             "invoice_date",
             "total_amount",

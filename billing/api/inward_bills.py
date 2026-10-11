@@ -28,7 +28,7 @@ from billing.tax_rules import GST_SLABS, gstin_problem, has_gstin, is_interstate
 from billing.utils import AIInvoiceProcessor
 
 from .inward_bills_service import compute_lines, find_duplicate, gstin_conflict, gstin_matches
-from .permissions import RoleBasedPermission
+from .permissions import RoleBasedPermission, V3PermissionIfPlaced
 from .serializers import InwardBillListSerializer, InwardBillSerializer
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,8 @@ def _store_file_and_preview(invoice, source_file):
 
 
 class InwardBillListCreateView(APIView):
-    permission_classes = [RoleBasedPermission]
+    v3_actions = {"POST": "purchase.create"}
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
     parser_classes = [MultiPartParser, FormParser]
     pagination_class = InwardBillPagination
 
@@ -245,6 +246,10 @@ class InwardBillListCreateView(APIView):
         # field), and a stale 0 here would clobber the total just written.
         invoice.total_amount = total
         Invoice.objects.filter(pk=invoice.pk).update(total_amount=total)
+        from billing.cache import invalidate
+        supplier.is_supplier = True
+        supplier.save(update_fields=["is_supplier"])
+        invalidate(Invoice, LineItem)
         _store_file_and_preview(invoice, request.FILES.get("file"))
 
         # Converting a phone capture: attach its stored photo as the bill's
@@ -314,7 +319,7 @@ class SupplierGstinConflict(Exception):
 
 
 class InwardBillDetailView(APIView):
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
 
     def get(self, request, pk):
         invoice = _inward_qs().filter(pk=pk).first()
@@ -326,7 +331,8 @@ class InwardBillDetailView(APIView):
 class InwardBillExtractView(APIView):
     """AI pre-fill only — never writes to the DB."""
 
-    permission_classes = [RoleBasedPermission]
+    v3_actions = {"POST": "purchase.create"}
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
@@ -414,7 +420,8 @@ class InwardBillExtractView(APIView):
 class InwardCaptureListCreateView(APIView):
     """The capture inbox: snap now, sort later."""
 
-    permission_classes = [RoleBasedPermission]
+    v3_actions = {"POST": "capture"}
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
@@ -467,7 +474,8 @@ class InwardCaptureListCreateView(APIView):
 
 
 class InwardCaptureDetailView(APIView):
-    permission_classes = [RoleBasedPermission]
+    v3_actions = {"DELETE": "capture.discard"}
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
 
     def get(self, request, pk):
         c = InwardCapture.objects.filter(pk=pk).select_related("business").first()

@@ -10,7 +10,7 @@ from simple_history.admin import SimpleHistoryAdmin
 
 from billing.api.mixins import drop_settled_party_rows, settled_party_rows
 from billing.constants import INVOICE_TYPE_OUTWARD
-from billing.period_lock import assert_period_unlocked
+from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
 from billing.services.bin import bin_bill
 
 
@@ -27,6 +27,8 @@ class PeriodLockAdminMixin:
             return
         try:
             assert_period_unlocked(inv.business_id, inv.invoice_date, action)
+            if inv.type_of_invoice == "inward":
+                assert_inward_unlocked(inv)
         except APIException as e:
             raise PermissionDenied(str(e.detail)) from e
 

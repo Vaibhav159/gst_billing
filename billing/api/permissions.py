@@ -171,3 +171,19 @@ def _asked_type(request, under, unsaid):
     if under:
         data = data.get(under) if isinstance(data, dict) else None
     return data.get("type_of_invoice", unsaid) if isinstance(data, dict) else unsaid
+
+
+def line_parent_permission(request, view, obj=None):
+    """An inward line needs purchase.edit; a line cannot invent its parent's type."""
+    if obj is not None:
+        return "purchase.edit" if obj.invoice.type_of_invoice == "inward" else "bill.edit"
+    if getattr(view, "detail", False):
+        return LATER
+    from billing.cache import uncached
+    from billing.models import Invoice
+    data = request.data if isinstance(request.data, dict) else {}
+    raw = str(view.kwargs.get("invoice_id") or data.get("invoice") or data.get("invoice_id") or "")
+    if not raw.isascii() or not raw.isdigit() or len(raw) > 18:
+        return LATER  # The handler owns malformed/missing-id responses.
+    kind = uncached(Invoice).filter(pk=raw).values_list("type_of_invoice", flat=True).first()
+    return "purchase.edit" if kind == "inward" else "bill.edit"
