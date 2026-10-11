@@ -7,7 +7,7 @@ import { problemOf } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { date, dateShort, inr, monthLabel, plural, qty } from "@/core/format";
-import { rateText } from "@/core/sales/words";
+import { andList, rateText } from "@/core/sales/words";
 import { useFirms, useScope } from "@/core/scope";
 import { Page, Card, Button, ButtonLink, IconButton, Money, Figure, Banner, EmptyState, DL, Table, Th, Td, Tr, Menu, QueryView, ConfirmDialog, useToast, type MenuItem } from "@/core/ui";
 import { useView } from "@/core/view";
@@ -76,7 +76,7 @@ function Detail({ p, all, setAll }: { p: Product; all: boolean; setAll: (v: bool
   const menu: MenuItem[] = [
     { label: "Edit product", icon: Pencil, disabled: !owner, hint: owner ? undefined : whyNot("product.edit"), to: `/products/${p.id}/edit` },
     { divider: true },
-    { label: "Delete product…", icon: Trash2, tone: "danger", disabled: !owner || used, hint: !owner ? whyNot("product.edit") : used ? `On ${plural(p.uses.sales, "sales bill")}, ${plural(p.uses.cancelled, "cancelled bill")}, ${plural(p.uses.purchases, "purchase bill")} and ${plural(p.uses.bin, "bill")} in the bin. Mark it Bought only to hide it instead.` : "It's on no bills", onSelect: () => setDel(true) },
+    { label: "Delete product…", icon: Trash2, tone: "danger", disabled: !owner || used, hint: !owner ? whyNot("product.edit") : used ? `On ${andList([p.uses.sales && plural(p.uses.sales, "sales bill"), p.uses.cancelled && plural(p.uses.cancelled, "cancelled bill"), p.uses.purchases && plural(p.uses.purchases, "purchase bill"), p.uses.bin && `${plural(p.uses.bin, "bill")} in the bin`].filter((w): w is string => Boolean(w)))}. Mark it Bought only to hide it instead.` : "It's on no bills", onSelect: () => setDel(true) },
   ];
   const details = <DL rows={[
     ["HSN code", <span key="h"><span className="tnum">{p.hsn_code}</span><span className="block text-xs text-muted">{p.hsn_text || "Printed on every bill line"}</span></span>],

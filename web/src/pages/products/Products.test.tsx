@@ -1,8 +1,10 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { mount, VIEWER } from "@/pages/customers/testing";
 import { CATALOG, PRODUCT, PRODUCT_DETAIL, recordsServer } from "@/test/records";
+import type { Call } from "@/test/server";
 import Products from "./Products";
 import ProductDetail from "./ProductDetail";
+import { markSaved } from "@/pages/customers/lib";
 
 const routes = [{ path: "/products", element: <Products /> }, { path: "/products/:id", element: <ProductDetail /> }];
 beforeEach(() => { (window as unknown as { __phone: boolean }).__phone = false; vi.useFakeTimers({ toFake: ["Date"] }); });
@@ -82,4 +84,39 @@ test("list and detail show the effective kind when no kind was stored", async ()
   expect(await screen.findByText("Diamond · Plain and Rajkot designs")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "Gold necklace 22K" }));
   expect(await screen.findByText("Diamond")).toBeInTheDocument();
+});
+test("the delete hint names only the bill kinds the product is on", async () => {
+  recordsServer({ "GET catalog/12/": { ...PRODUCT_DETAIL, uses: { sales: 0, cancelled: 0, purchases: 0, bin: 1 } } });
+  mount(routes, ["/products/12"]);
+  fireEvent.click(await screen.findByRole("button", { name: "More" }));
+  expect(await screen.findByText("On 1 bill in the bin. Mark it Bought only to hide it instead.")).toBeInTheDocument();
+});
+test("export follows the server's reports.export permission", async () => {
+  recordsServer();
+  mount(routes, ["/products"], { me: { ...VIEWER, permissions: ["view"] } });
+  expect(await screen.findByText("Gold necklace 22K")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Export 17 products" })).toBeDisabled();
+});
+test("a just-saved product already on the page is not fetched again", async () => {
+  markSaved("product", 12);
+  const calls = recordsServer();
+  mount(routes, ["/products"]);
+  expect(await screen.findByText("Gold necklace 22K")).toBeInTheDocument();
+  await new Promise((done) => setTimeout(done, 50));
+  expect(calls.some((c) => c.url === "catalog/12/")).toBe(false);
+});
+test("a just-saved product from a later page flashes first without hiding a loaded row", async () => {
+  markSaved("product", 40);
+  recordsServer({ "GET catalog/40/": { ...PRODUCT_DETAIL, id: 40, name: "Silver anklet" } });
+  mount(routes, ["/products"]);
+  expect(await screen.findByText("Silver anklet")).toBeInTheDocument();
+  expect(screen.getByText("Gold necklace 22K")).toBeInTheDocument();
+});
+test("showing all lines keeps the page and the focus while the lines load", async () => {
+  recordsServer({ "GET catalog/12/": ({ params }: Call) => params.lines === "all" ? new Promise<never>(() => {}) : { status: 200, data: { ...PRODUCT_DETAIL, line_count: 12 } } });
+  mount(routes, ["/products/12"]);
+  const button = await screen.findByRole("button", { name: "Show all 12 lines" });
+  button.focus();
+  fireEvent.click(button);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Show the latest 8" })).toHaveFocus());
 });

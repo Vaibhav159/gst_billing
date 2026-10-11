@@ -45,11 +45,12 @@ export default function Products() {
   const [sort, setSort] = useState<CatalogFilters["ordering"]>("name");
   const [exporting, setExporting] = useState(false);
   const query = useCatalog({ firmId, fy, q: typed, show, gst_rate: rate, ordering: sort });
-  const saved = useProduct(flash, { firmId, fy });
   const first = query.data?.pages[0];
   const loaded = query.data?.pages.flatMap((p) => p.results) ?? [];
-  // The newly added product flashes even when its name sorts after the first page.
-  const rows = saved.data && !q.trim() && show === "all" && !rate && !loaded.some((p) => p.id === flash) ? [saved.data, ...loaded].slice(0, loaded.length || 1) : loaded;
+  // The newly added product flashes even when its name sorts after the first page; it's fetched only when the loaded rows lack it.
+  const waiting = flash !== null && query.isSuccess && !query.isPlaceholderData && !q.trim() && show === "all" && !rate && !loaded.some((p) => p.id === flash);
+  const saved = useProduct(waiting ? flash : null, { firmId, fy });
+  const rows = waiting && saved.data ? [saved.data, ...loaded] : loaded;
   const moreFocus = useMoreFocus(rows.map((p) => p.id));
   const scope = scopeName(firms, firmId);
   const clear = () => { setQ(""); setShow("all"); setRate(""); };
@@ -63,7 +64,7 @@ export default function Products() {
   };
   const exportLabel = first ? `Export ${plural(first.total_products, "product")}` : "Export";
   const actions = <>{can("product.edit") ? <ButtonLink to="/import?type=products" icon={Upload}>Import</ButtonLink> : null}
-    <Button icon={Download} onClick={() => void exportList()} disabled={!first} loading={exporting}>{exportLabel}</Button>
+    <Button icon={Download} onClick={() => void exportList()} disabled={!first || !can("reports.export")} title={can("reports.export") ? undefined : whyNot("reports.export")} loading={exporting}>{exportLabel}</Button>
     {can("product.edit") ? <ButtonLink to="/products/new?from=list" variant="primary" icon={Plus}>Add product</ButtonLink> : <Button variant="primary" icon={Plus} disabled title={whyNot("product.edit")}>Add product</Button>}</>;
   const filters = <><SearchInput value={q} onChange={setQ} placeholder={isPhone ? "Name, HSN or purity" : "Name, HSN, purity or description"} label={isPhone ? "Search products" : "Search products (press /)"} className={isPhone ? "" : "w-[300px]"} data-page-search />
     {isPhone ? <FirmChips firms={firms} value={firmId} onChange={setFirmId} /> : null}
@@ -73,7 +74,7 @@ export default function Products() {
   const empty = <EmptyState icon={Search} title={q.trim() ? `No product matches “${q.trim()}”` : "No products match these filters"} actions={<><Button onClick={clear}>Clear search and filters</Button>{can("product.edit") ? <ButtonLink variant="primary" icon={Plus} to={`/products/new?from=list${q.trim() && !/^\d+$/.test(q.trim()) ? `&name=${encodeURIComponent(q.trim())}` : ""}`}>Add a product</ButtonLink> : null}</>}>Search looks at names, HSN codes, purity (22K, 999) and descriptions.</EmptyState>;
   return <Page icon={Package} title="Products" back={isPhone ? "/more" : undefined} context={first ? `${plural(first.total_products, "product")} · HSN, GST rate and unit print on every bill · sold figures for FY ${fy}, ${scope}` : "Loading the list…"}
     phoneSubtitle={first ? `${plural(first.total_products, "product")} · sold in FY ${fy} · ${scope}` : "Loading…"} actions={actions}
-    phoneActions={<Menu title="Products" items={[{ label: "Import products", icon: Upload, disabled: !can("product.edit"), hint: can("product.edit") ? "From a spreadsheet, checked before anything is added" : whyNot("product.edit"), to: "/import?type=products" }, { label: exportLabel, icon: Download, disabled: !first || exporting, onSelect: () => void exportList() }]} trigger={(p) => <IconButton {...p} label="Import or export products" icon={MoreVertical} />} />}
+    phoneActions={<Menu title="Products" items={[{ label: "Import products", icon: Upload, disabled: !can("product.edit"), hint: can("product.edit") ? "From a spreadsheet, checked before anything is added" : whyNot("product.edit"), to: "/import?type=products" }, { label: exportLabel, icon: Download, disabled: !first || exporting || !can("reports.export"), hint: can("reports.export") ? undefined : whyNot("reports.export"), onSelect: () => void exportList() }]} trigger={(p) => <IconButton {...p} label="Import or export products" icon={MoreVertical} />} />}
     actionBar={can("product.edit") ? <ButtonLink to="/products/new?from=list" variant="primary" size="lg" icon={Plus}>Add product</ButtonLink> : undefined}>
     {!can("product.edit") ? <WhyNote>{whyNot("product.edit")}</WhyNote> : null}
     {isPhone ? filters : <div className="flex flex-wrap items-center gap-3">{filters}</div>}

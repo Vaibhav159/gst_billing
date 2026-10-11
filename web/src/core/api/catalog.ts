@@ -83,7 +83,13 @@ export function useCatalog(f: CatalogFilters) {
 }
 export function useProduct(id: number | null, scope: ProductScope, all = false) {
   const params = scope.firmId === null ? null : { ...scopeParams(scope), ...(all ? { lines: "all" } : {}) };
-  return useQuery({ queryKey: catalogKeys.one(id, params), queryFn: id === null || params === null ? skipToken : async ({ signal }) => toProductDetail((await api.get(`catalog/${id}/`, { params, signal })).data) });
+  return useQuery({ queryKey: catalogKeys.one(id, params), queryFn: id === null || params === null ? skipToken : async ({ signal }) => toProductDetail((await api.get(`catalog/${id}/`, { params, signal })).data),
+    // asking for more lines keeps the product on screen (and the focus on its button); another product or scope never shows the last one's figures
+    placeholderData: (prev, query) => {
+      const was = query?.queryKey[3] as { fy?: string; business_id?: number } | null;
+      return query?.queryKey[2] === id && was && params && was.fy === params.fy && was.business_id === params.business_id ? prev : undefined;
+    },
+  });
 }
 export function useCatalogSearch(typed: string, enabled = true) {
   const q = typed.trim().slice(0, 100);
