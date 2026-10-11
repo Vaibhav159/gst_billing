@@ -9,6 +9,7 @@ import rupeeSignFont from "./rupeeSignFont";
 // invoice. Upgrade: Noto Sans Devanagari as a fallback family, about 187 kB, in the PDF's on-demand chunk only.
 export const RUPEE_FONT = "RupeeSign";
 Font.register({ family: RUPEE_FONT, src: rupeeSignFont });
+Font.registerHyphenationCallback((word: string, hyphenate?: (w: string) => string[]) => (/\d/.test(word) || !hyphenate ? [word] : hyphenate(word)));
 
 type Style = Styles[string];
 const SIGN: Style = { fontFamily: RUPEE_FONT };

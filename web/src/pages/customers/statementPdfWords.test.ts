@@ -4,25 +4,11 @@
 // compressed streams, which is why statementPdf.test.tsx reads only the plain parts). Each page's content is inflated
 // with zlib and its text read: Helvetica's strings are hex codes in Windows-1252, so every word comes back as drawn,
 // in drawing order. Only the ₹, drawn in its own one-glyph font, doesn't.
-import { inflateSync } from "node:zlib";
+import { pdfWords } from "@/core/print/testing";
 import type { StatementBill } from "@/core/api/customers";
 import type { StatementPdfData } from "./statementDoc";
 import { makeStatementPdf } from "./statementPdf";
 
-const WIN = new TextDecoder("windows-1252");
-/** The PDF's text: each page's runs joined as they're drawn. */
-async function drawn(blob: Blob): Promise<string> {
-  const buf = Buffer.from(await blob.arrayBuffer());
-  const pages: string[] = [];
-  for (const m of buf.toString("latin1").matchAll(/\/Length (\d+)[^>]*>>\s*stream\r?\n/g)) {
-    const start = m.index + m[0].length;
-    let body: string;
-    try { body = inflateSync(buf.subarray(start, start + Number(m[1]))).toString("latin1"); } catch { continue; }
-    if (!/\bBT\b/.test(body)) continue; // a font, not a page
-    pages.push([...body.matchAll(/\[([^\]]*)\]\s*TJ/g)].map((tj) => [...tj[1].matchAll(/<([0-9a-f]*)>/gi)].map((h) => WIN.decode(Buffer.from(h[1], "hex"))).join("")).join(""));
-  }
-  return pages.join("\n");
-}
 /** The head: what's drawn before the register's note. */
 const head = (text: string) => text.slice(0, text.indexOf("A register of bills"));
 const times = (text: string, words: string) => text.split(words).length - 1;
@@ -47,7 +33,7 @@ function data(pan: string, periodLabel: string): StatementPdfData {
 }
 
 test("the PAN beside the mobile, amounts to the paisa, and the cancelled bill named as not counted", async () => {
-  const text = await drawn(await makeStatementPdf(data("ABCDE1234F", "FY 2026-27")));
+  const text = (await pdfWords(await makeStatementPdf(data("ABCDE1234F", "FY 2026-27")))).join("\n");
   expect(text).toContain("Mobile 98290 41122 · PAN ABCDE1234F");
   expect(text).toContain("Billed · 3 bills · 1 cancelled bill not counted");
   expect(text).toContain("87,083.21"); // a bill's row
@@ -55,7 +41,7 @@ test("the PAN beside the mobile, amounts to the paisa, and the cancelled bill na
 }, 30_000);
 
 test("no PAN: none is named; own dates: the range is the period's name, so the head prints it once", async () => {
-  const text = await drawn(await makeStatementPdf(data("", "1 Apr to 8 Oct 2026")));
+  const text = (await pdfWords(await makeStatementPdf(data("", "1 Apr to 8 Oct 2026")))).join("\n");
   expect(text).toContain("Mobile 98290 41122");
   expect(text).not.toContain("PAN");
   expect(times(head(text), "1 Apr to 8 Oct 2026")).toBe(1);
@@ -65,14 +51,14 @@ test("no PAN: none is named; own dates: the range is the period's name, so the h
 test("a GSTIN placeholder on file prints no GSTIN label, never GSTIN URP", async () => {
   const d = data("", "FY 2026-27");
   d.customer.gstin = "URP";
-  const text = await drawn(await makeStatementPdf(d));
+  const text = (await pdfWords(await makeStatementPdf(d))).join("\n");
   expect(head(text)).not.toContain("No GSTIN");
   expect(text).not.toContain("GSTIN URP");
 }, 30_000);
 
 
 test.each([{ pan: "", label: "without a PAN" }, { pan: "ABCDE1234F", label: "with a PAN" }])("a B2C statement head omits No GSTIN $label", async ({ pan }) => {
-  const text = await drawn(await makeStatementPdf(data(pan, "FY 2026-27")));
+  const text = (await pdfWords(await makeStatementPdf(data(pan, "FY 2026-27")))).join("\n");
   expect(head(text)).not.toContain("No GSTIN");
   if (pan) expect(head(text)).toContain(`PAN ${pan}`);
 }, 30_000);
@@ -80,7 +66,7 @@ test.each([{ pan: "", label: "without a PAN" }, { pan: "ABCDE1234F", label: "wit
 test("a stored GSTIN typo with digits is printed as stored", async () => {
   const d = data("", "FY 2026-27");
   d.customer.gstin = "08ABCDE1234A1Z";
-  const text = await drawn(await makeStatementPdf(d));
+  const text = (await pdfWords(await makeStatementPdf(d))).join("\n");
   expect(head(text)).toContain("GSTIN 08ABCDE1234A1Z");
   expect(head(text)).not.toContain("No GSTIN");
 }, 30_000);

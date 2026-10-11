@@ -1,6 +1,7 @@
 // What printing's tests share (only tests import this file): a react-pdf document's element tree, a real PDF's plain
 // parts, bills at the edges of the page plan, as overrides of the contract's example (core/sales/fixtures), and the step
 // past ShareHost's dialog's guard.
+import { inflateSync } from "node:zlib";
 import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
 import { act, waitFor } from "@testing-library/react";
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
@@ -45,10 +46,37 @@ export const flat = (style: unknown): Record<string, unknown> => Object.assign({
 export const rupeeTexts = (n: PdfNode) => nodes(n, "TEXT").filter((t) => t.children.some((c) => typeof c === "string" && c.includes("₹")));
 
 /* ── A real file ───────────────────────────────────────── */
-/** A PDF's bytes as text (jsdom's Blob reads through a FileReader; compressed streams don't survive, plain objects do). */
+/** Node's Blob reads directly; jsdom's Blob uses FileReader. */
+async function pdfBytes(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === "function") return blob.arrayBuffer();
+  return new Promise<ArrayBuffer>((done, fail) => {
+    const r = new FileReader();
+    r.onload = () => done(r.result as ArrayBuffer);
+    r.onerror = () => fail(r.error);
+    r.readAsArrayBuffer(blob);
+  });
+}
+/** A PDF's plain objects (compressed streams only read intact in the Node environment). */
 export async function pdfText(blob: Blob): Promise<string> {
-  const buf = await new Promise<ArrayBuffer>((done) => { const r = new FileReader(); r.onload = () => done(r.result as ArrayBuffer); r.readAsArrayBuffer(blob); });
-  return new TextDecoder("latin1").decode(buf);
+  return new TextDecoder("latin1").decode(await pdfBytes(blob));
+}
+/**
+ * Each page's text in drawing order, inflated from a real PDF in a Node-environment test. Built-in Times and Helvetica
+ * use Windows-1252; only the ₹ in its own one-glyph font doesn't decode. jsdom's PDF browser build garbles compressed
+ * streams, so its tests read only the plain objects with pdfText.
+ */
+export async function pdfWords(blob: Blob): Promise<string[]> {
+  const buf = Buffer.from(await pdfBytes(blob));
+  const win = new TextDecoder("windows-1252");
+  const pages: string[] = [];
+  for (const m of buf.toString("latin1").matchAll(/\/Length (\d+)[^>]*>>\s*stream\r?\n/g)) {
+    const start = m.index + m[0].length;
+    let body: string;
+    try { body = inflateSync(buf.subarray(start, start + Number(m[1]))).toString("latin1"); } catch { continue; }
+    if (!/\bBT\b/.test(body)) continue; // a font, not a page
+    pages.push([...body.matchAll(/\[([^\]]*)\]\s*TJ/g)].map((tj) => [...tj[1].matchAll(/<([0-9a-f]*)>/gi)].map((h) => win.decode(Buffer.from(h[1], "hex"))).join("")).join(""));
+  }
+  return pages;
 }
 /** The sheets react-pdf made: its page tree's count. */
 export const sheetsIn = (pdf: string) => Number(pdf.match(/\/Type \/Pages\s*\/Count (\d+)/)?.[1]);
