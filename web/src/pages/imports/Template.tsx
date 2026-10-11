@@ -24,10 +24,6 @@ export function templateRows(firm: ImportFirm, purchases = true, day = todayIST(
   if (purchases) rows.push([], ["Inward Supply"], HEAD, ["1", "SUPPLIER-1", day, "Example unregistered supplier", "", "Old jewellery", "7113", "0%", "1.000", "100.00", "100.00", "", "", "", "", "Cash"]);
   return rows;
 }
-export function templateCsv(firm: ImportFirm, purchases = true, day = todayIST()): string {
-  const cell = (value: string) => `"${(/^[=+\-@\t\r]/.test(value) ? `'${value}` : value).replace(/"/g, '""')}"`;
-  return `\ufeff${templateRows(firm, purchases, day).map(row => row.map(cell).join(",")).join("\r\n")}\r\n`;
-}
 /** Data projection only: 3D Task 1 owns Excel encoding, text safety and sheet naming. */
 export async function templateXlsx(firms: ImportFirm[], purchases = true, day = todayIST()): Promise<Blob> {
   const { excelBlob, uniqueSheetNames } = await import("@/core/excel/writer");
@@ -46,6 +42,8 @@ export function ImportTemplate({ open, onClose, firms }: { open: boolean; onClos
   const current = firms[Number(sheet)] ?? firms[0];
   const rows = current ? templateRows(current, buy) : [], letters = HEAD.map((_, i) => String.fromCharCode(65 + i));
   const tabs = [...firms.map((firm, i) => ({ value: String(i), label: firm.name })), { value: "rules", label: "Instructions" }];
+  // With no firms, the Instructions tab is the one shown, so it keeps the keyboard focus stop.
+  const shown = tabs.some(t => t.value === sheet) ? sheet : "rules";
   async function download() {
     setBusy(true); setError("");
     try { saveFile(await templateXlsx(firms, buy), "Bills import template.xlsx"); onClose(); }
@@ -53,8 +51,8 @@ export function ImportTemplate({ open, onClose, firms }: { open: boolean; onClos
     finally { setBusy(false); }
   }
   return <Dialog open={open} onClose={onClose} size="xl" title="The import template" description="A sheet for each of your firms with its GSTIN, sales and purchase sections, and the instructions." footer={<><Button onClick={onClose}>Close</Button><Button variant="primary" icon={Download} disabled={!firms.length} loading={busy} onClick={() => void download()}>Download Bills import template.xlsx</Button></>}>
-    <div className="flex flex-col gap-3">{error ? <p role="alert" className="text-neg">{error}</p> : null}<div className="flex flex-wrap items-end justify-between gap-3"><Tabs label="Template sheets" value={sheet} onChange={setSheet} idBase="tpl" tabs={tabs} className="flex-1 min-w-[300px]" /><Checkbox label="Include the purchase (Inward) sections" checked={buy} onChange={setBuy} className="mb-2" /></div>
-      {sheet === "rules" ? <ol className="flex flex-col gap-2 list-decimal pl-5 text-fg2">{TEMPLATE_RULES.map(rule => <li key={rule}>{rule}</li>)}</ol> : current ? <div className="scroll-x rounded-ctl border border-line" role="region" aria-label={`Sheet ${current.name}`} tabIndex={0}><table className="text-xs border-collapse min-w-full"><thead><tr><th className="sticky left-0 bg-raised border-b border-r border-rule w-9" aria-label="Row" />{letters.map(letter => <th key={letter} scope="col" className="bg-raised border-b border-r border-rule px-2 py-1 font-medium text-muted">{letter}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}><th scope="row" className="sticky left-0 bg-raised border-b border-r border-rule px-2 py-1 font-medium text-muted tnum text-right">{i + 1}</th>{letters.map((letter, column) => <td key={letter} className={cn("border-b border-r border-rule px-2 py-1 whitespace-nowrap", row[0] === "S.No." && "font-semibold bg-field", row.length === 1 && /supply/i.test(row[0]) && "font-semibold text-brand", i === 0 && column === 0 && "font-semibold")}>{row[column] ?? ""}</td>)}</tr>)}</tbody></table></div> : <p>Add a firm before downloading a template.</p>}
+    <div className="flex flex-col gap-3">{error ? <p role="alert" className="text-neg">{error}</p> : null}<div className="flex flex-wrap items-end justify-between gap-3"><Tabs label="Template sheets" value={shown} onChange={setSheet} idBase="tpl" panelId="tpl-panel" tabs={tabs} className="flex-1 min-w-[300px]" /><Checkbox label="Include the purchase (Inward) sections" checked={buy} onChange={setBuy} className="mb-2" /></div>
+      <div role="tabpanel" id="tpl-panel" aria-labelledby={`tpl-${shown}`}>{shown === "rules" ? <ol className="flex flex-col gap-2 list-decimal pl-5 text-fg2">{TEMPLATE_RULES.map(rule => <li key={rule}>{rule}</li>)}</ol> : current ? <div className="scroll-x rounded-ctl border border-line" role="region" aria-label={`Sheet ${current.name}`} tabIndex={0}><table className="text-xs border-collapse min-w-full"><thead><tr><th className="sticky left-0 bg-raised border-b border-r border-rule w-9" aria-label="Row" />{letters.map(letter => <th key={letter} scope="col" className="bg-raised border-b border-r border-rule px-2 py-1 font-medium text-muted">{letter}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}><th scope="row" className="sticky left-0 bg-raised border-b border-r border-rule px-2 py-1 font-medium text-muted tnum text-right">{i + 1}</th>{letters.map((letter, column) => <td key={letter} className={cn("border-b border-r border-rule px-2 py-1 whitespace-nowrap", row[0] === "S.No." && "font-semibold bg-field", row.length === 1 && /supply/i.test(row[0]) && "font-semibold text-brand", i === 0 && column === 0 && "font-semibold")}>{row[column] ?? ""}</td>)}</tr>)}</tbody></table></div> : <p>Add a firm before downloading a template.</p>}</div>
     </div>
   </Dialog>;
 }

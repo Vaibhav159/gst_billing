@@ -5,10 +5,9 @@ import { saveFile } from "@/core/print/files";
 import { excelBlob } from "@/core/excel/writer";
 import { readExcel } from "@/core/excel/reader";
 import { bytesOf } from "@/core/files/zip";
-import { parseCsv } from "./parse";
 import { readSheet } from "./columns";
 import { groupBills } from "./model";
-import { ImportTemplate, templateCsv, templateRows, templateXlsx, TEMPLATE_RULES } from "./Template";
+import { ImportTemplate, templateRows, templateXlsx, TEMPLATE_RULES } from "./Template";
 vi.mock("@/core/print/files", () => ({ saveFile: vi.fn() }));
 // Mock the exact published writer for failure/consumer checks; the last test uses the real codec.
 vi.mock("@/core/excel/writer", async importOriginal => ({ ...await importOriginal<typeof import("@/core/excel/writer")>(), excelBlob: vi.fn() }));
@@ -16,16 +15,21 @@ const firms = [{ id: 3, name: "Kiran Gold House", gst_number: "08ABCDE1234F1Z0" 
 const sharedOutput = new Blob(["3D-owned writer test double"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 beforeEach(() => { vi.mocked(excelBlob).mockReset().mockResolvedValue(sharedOutput); vi.mocked(saveFile).mockClear(); });
 afterEach(() => vi.useRealTimers());
-it("keeps the CSV round-trip, firm identity and sections without a making column", () => {
-  const csv = templateCsv(firms[0], true, "2026-10-08"), rows = parseCsv(csv);
+it("keeps the template rows readable, with firm identity and sections and no making column", () => {
+  const rows = templateRows(firms[0], true, "2026-10-08");
   const bills = groupBills(readSheet({ name: "Template", rows }), "purchase");
-  expect(rows[1]).toEqual(["GSTIN: 08ABCDE1234F1Z0"]); expect(csv).not.toContain("Making");
+  expect(rows[1]).toEqual(["GSTIN: 08ABCDE1234F1Z0"]); expect(JSON.stringify(rows)).not.toMatch(/making/i);
   expect(bills.map(b => b.kind)).toEqual(["sale", "purchase"]); expect(bills[0].lines).toHaveLength(2);
-  expect(templateCsv(firms[0], false)).not.toContain("Inward Supply");
+  expect(JSON.stringify(templateRows(firms[0], false))).not.toContain("Inward Supply");
 });
-it("quotes firm names safely for CSV", () => {
-  const csv = templateCsv({ ...firms[0], name: '=FORMULA("A,B")' });
-  expect(parseCsv(csv)[0][0]).toBe("'=FORMULA(\"A,B\")");
+it("exports no unused CSV builder", async () => {
+  expect("templateCsv" in await import("./Template")).toBe(false);
+});
+it("keeps the Instructions tab reachable with no firms and labels the preview as its tab's panel", () => {
+  renderApp(<ImportTemplate open onClose={() => {}} firms={[]} />);
+  const tab = screen.getByRole("tab", { name: "Instructions" });
+  expect(tab).toHaveAttribute("tabindex", "0"); expect(tab).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tabpanel", { name: "Instructions" })).toHaveTextContent("One sheet per firm.");
 });
 it("passes every firm and Instructions to the shared writer and returns its exact Blob", async () => {
   expect(await templateXlsx(firms, true, "2026-10-08")).toBe(sharedOutput);
