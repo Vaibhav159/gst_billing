@@ -75,7 +75,7 @@ function SettingsBody({ settings, firms, person }: { settings: ShopSettings; fir
     {rows.busy[key] ? "Saving…" : rows.pending[key] ? <span className="inline-flex flex-wrap items-center gap-2 text-neg">
       Not saved yet · kept on this device{rows.errors[key] ? <span>{rows.errors[key]}</span> : null}
       <Button size="sm" variant="ghost" disabled={rows.pending[key]?.scope === "shop" ? !shop : Boolean(rows.busy.reset || (key === "reset" && (rows.busy.myFirm || rows.busy.phoneMode || rows.busy.setup)))} onClick={() => void rows.retry(key)}>Try again</Button>
-    </span> : rows.saved[key] ? <span className="text-sale">Saved</span> : null}
+    </span> : rows.errors[key] ? <span className="text-neg">Not saved: {rows.errors[key]}</span> : rows.saved[key] ? <span className="text-sale">Saved</span> : null}
   </span>;
   const go = (id: string) => {
     const section = document.getElementById(id);

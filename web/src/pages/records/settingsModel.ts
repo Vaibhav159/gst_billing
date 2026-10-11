@@ -57,7 +57,10 @@ export function useSettingRows(person: number) {
       setSaved((before) => ({ ...before, [key]: true }));
       return true;
     } catch (error) {
-      setErrors((before) => ({ ...before, [key]: problemOf(error).message }));
+      const problem = problemOf(error);
+      // only a choice that didn't get through is kept to send again; one the server refused would be refused again
+      if (!["offline", "unreachable", "server"].includes(problem.kind)) keep((before) => Object.fromEntries(Object.entries(before).filter(([id]) => id !== key)));
+      setErrors((before) => ({ ...before, [key]: problem.message }));
       return false;
     } finally {
       active.current.delete(key);

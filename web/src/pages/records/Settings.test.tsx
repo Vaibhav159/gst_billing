@@ -191,3 +191,18 @@ test("a row that is saving keeps the keyboard on its control and ignores further
   fireEvent.click(screen.getByRole("radio", { name: /^Expert/ }));
   expect(calls.filter((call) => call.method === "PATCH").map((call) => call.data)).toEqual([{ defaultBusinessId: "4" }, { phoneMode: "easy" }]);
 });
+test("a choice the server refused says why and is not kept on the device to be sent again", async () => {
+  serve({
+    "GET firms/": { results: FIRMS }, "GET preferences/": { data: {} }, "GET setup/": SETUP,
+    "GET shop-settings/": { copies: "original", show_bank: true, share_message: DEFAULT_SHARE_MESSAGE, default_business: 3 },
+    "PUT shop-settings/": () => ({ status: 400, data: { default_business: ["Pick a firm from the list."] } }),
+  });
+  mountSettings();
+  const select = await screen.findByLabelText("The shop's default firm");
+  fireEvent.change(select, { target: { value: "4" } });
+  expect(await screen.findByText(/Pick a firm from the list\./)).toBeInTheDocument();
+  expect(screen.queryByText(/Not saved yet/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  expect(select).toHaveValue("3");
+  expect(Object.keys(localStorage).filter((key) => key.startsWith("gst3.pending-settings.")).map((key) => localStorage.getItem(key))).not.toContainEqual(expect.stringContaining("default_business"));
+});
