@@ -20,7 +20,7 @@ vi.mock("@react-pdf/renderer", () => { rendererLoaded(); return {}; });
 
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((route) => [route, ...all(route.children ?? [])]);
 
-test("the real routes warm all 14 lazy screens and Search records once, with no PDF renderer or API fetch", async () => {
+test("the real routes warm all 17 lazy screens and Search records once, with no PDF renderer or API fetch", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   let idle!: IdleRequestCallback;
@@ -33,7 +33,7 @@ test("the real routes warm all 14 lazy screens and Search records once, with no 
     const pages = [...new Set(all(appRoutes).flatMap(({ element }) =>
       isValidElement(element) && typeof element.type !== "string" && "load" in element.type
         ? [element.type as unknown as Code] : []))];
-    expect(pages).toHaveLength(14);
+    expect(pages).toHaveLength(17);
     const expected: Code[] = [...pages, paletteCode];
     expect(queues).toHaveLength(1);
     expect(queues[0]).toHaveLength(expected.length);

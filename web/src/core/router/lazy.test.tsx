@@ -13,6 +13,7 @@ import { Button, Dialog, Page, ToastProvider } from "@/core/ui";
 import Placeholder from "@/pages/core/Placeholder";
 import CustomerPage from "@/pages/customers/CustomerPage";
 import BillPage from "@/pages/sales/BillPage";
+import PurchaseList from "@/pages/purchases/PurchaseList";
 import { fakeToday } from "@/pages/sales/form/testing";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { lazyPage, loadedPage, type LazyPage } from "./lazyPage";
@@ -55,15 +56,16 @@ function heldBack<T extends ComponentType<object>>(page: T): [LazyPage<T>, () =>
   return [lazyPage(() => new Promise<{ default: T }>((resolve) => { arrive = () => resolve({ default: page }); })), () => arrive()];
 }
 
-test("every built page of Selling loads on demand: bills, customers and v2's number links (placeholders aside)", () => {
-  const pages = all(appRoutes).filter((r) => /^\/(sales|customers)(\/|$)|^\/billing\/invoice\/:bizSlug/.test(r.path ?? "") && (r.element as ReactElement | undefined)?.type !== Placeholder);
-  expect(pages.map((r) => r.path)).toEqual(expect.arrayContaining(["/sales", "/sales/:id", "/customers", "/customers/:id"]));
+test("every built sales and purchase page loads on demand, including customers and v2's number links (placeholders aside)", () => {
+  const pages = all(appRoutes).filter((r) => /^\/(sales|customers|purchases)(\/|$)|^\/billing\/invoice\/:bizSlug/.test(r.path ?? "") && (r.element as ReactElement | undefined)?.type !== Placeholder);
+  expect(pages.map((r) => r.path)).toEqual(expect.arrayContaining(["/sales", "/sales/:id", "/customers", "/customers/:id", "/purchases", "/purchases/:id", "/purchases/new", "/purchases/:id/edit"]));
   expect(pages.filter((r) => !isLazy(r.element)).map((r) => r.path)).toEqual([]);
 });
 
 test("a route still says which screen it opens: a lazy page's loaded component, a placeholder's own", async () => {
   expect(await loadedPage(route("/sales/:id")?.element)).toBe(BillPage);
-  expect(await loadedPage(route("/purchases")?.element)).toBe(Placeholder);
+  expect(await loadedPage(route("/purchases")?.element)).toBe(PurchaseList);
+  expect(await loadedPage(route("/suppliers")?.element)).toBe(Placeholder);
   expect(await loadedPage(undefined)).toBeUndefined();
 });
 

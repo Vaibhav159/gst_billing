@@ -34,6 +34,8 @@ type Quick = {
   // gst_tax_rate: a fraction as a string ("0.0300"); a server from before v3 doesn't send it
   products: { id: number; name: string; hsn_code: string; gst_tax_rate?: string }[];
 };
+type PurchaseHit = { id: number; invoice_number: string; invoice_date: string; total_amount: string; supplier: { name: string } };
+type SupplierHit = { id: number; name: string; gst_number: string; city: string };
 
 /**
  * The server's records as rows: customers; sales bills by number or by a customer found, each once, the exact number
@@ -105,6 +107,16 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
     // a search that fails says so at once: no retry, and offline it still asks (and fails) instead of waiting
     retry: false, networkMode: "always", staleTime: 30_000,
   });
+  const purchases = useQuery({
+    queryKey: ['purchases', 'search', term], enabled: open && term.length >= 2,
+    queryFn: async ({ signal }) => (await api.get('purchases/', { params: { q: term, page_size: 5, summary: 0 }, signal })).data.results as PurchaseHit[],
+    retry: false, networkMode: 'always', staleTime: 30_000,
+  });
+  const suppliers = useQuery({
+    queryKey: ['suppliers', 'search', term], enabled: open && term.length >= 2,
+    queryFn: async ({ signal }) => (await api.get('suppliers/', { params: { q: term, page_size: 5 }, signal })).data.results as SupplierHit[],
+    retry: false, networkMode: 'always', staleTime: 30_000,
+  });
   // deleted bills, for whoever may restore them (design §6: bill.delete): search/quick/ doesn't hold the bin, so it's a
   // second request per term, once typing has paused, through the app's one bin reader (Ruling 1B-9), kept 30 s
   const canBin = can("bill.delete");
@@ -156,8 +168,12 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
     const out: Result[] = [...suggestions(q, { firms, today: todayIST(), canCreate: can("bill.create"), customers: records?.customers ?? [] }), ...actions.filter((a) => match(a.label)), ...pages.filter((p) => match(p.label))];
     // the records come in together, once the server has answered for this text (or couldn't: the firms are this app's own)
     if (settled) out.push(...(records ? recordRows(records, asked, deleted) : []), ...firmRows(firms, t));
+    if (current) {
+      for (const b of rankBills(purchases.data ?? [], asked)) out.push({ group: 'Purchase bills', label: b.invoice_number, icon: ShoppingBag, hint: `${b.supplier.name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}`, to: `/purchases/${b.id}` });
+      for (const s of suppliers.data ?? []) out.push({ group: 'Suppliers', label: s.name, icon: Truck, hint: [s.gst_number, s.city].filter(Boolean).join(' · ') || 'Supplier', to: `/suppliers/${s.id}` });
+    }
     return out.slice(0, 24);
-  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted]);
+  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted, current, purchases.data, suppliers.data]);
   const go = (r: Result) => { onClose(); navigate(r.to); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((x) => Math.max(0, Math.min(results.length - 1, x + 1))); }
@@ -191,6 +207,7 @@ const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteR
   let lastGroup: string | null = null;
   return (
     <>
+        {current && (purchases.isError || suppliers.isError) ? <div className="px-3 py-2"><p role="status" className="text-muted">Some purchases or suppliers could not be searched. Try again.</p><Button size="sm" aria-label="Search purchases and suppliers again" onClick={() => { void qc.refetchQueries({ queryKey: ['purchases', 'search', term] }); void qc.refetchQueries({ queryKey: ['suppliers', 'search', term] }); }}>Try again</Button></div> : null}
         {status ? <p role="status" className={cn("px-3 text-center text-muted", trouble ? "pt-6 pb-1" : "py-6")}>{status}</p> : null}
         {trouble ? <div className="flex justify-center pb-3"><Button size="sm" onClick={retry}>Try again</Button></div> : null}
         <ul id="palette-list" role="listbox" aria-label="Results" className={cn("flex flex-col max-h-[52vh] overflow-y-auto -mx-2", !results.length && "hidden")}>

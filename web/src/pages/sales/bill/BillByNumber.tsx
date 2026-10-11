@@ -12,7 +12,7 @@ import { problemOf } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { salesKeys, useSalesPage, type SalesQuery } from "@/core/api/sales";
 import { date, fyOf, inr, toPaise } from "@/core/format";
-import { sameNumber } from "@/core/sales/numbers";
+import { inwardKey as purchaseNumberKey } from "@/core/purchases/model";
 import { cancelledMark } from "@/core/sales/words";
 import { useFirms } from "@/core/scope";
 import { Badge, Banner, Button, ButtonLink, Card, EmptyState, ListRow, ListSkeleton, LoadError, Page, StaleNote } from "@/core/ui";
@@ -23,37 +23,30 @@ export function businessSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-/** A bill as v2's invoices/ lists it (an inward one is a purchase); total in paise. */
+/** A purchase as purchases/ lists it; total in paise. */
 type V2Row = { id: number; invoice_number: string; invoice_date: string; business_name: string; customer_name: string; total: number | null };
 const toV2Row = (w: Record<string, unknown>): V2Row => ({
   id: Number(w.id), invoice_number: String(w.invoice_number ?? ""), invoice_date: String(w.invoice_date ?? ""), business_name: String(w.business_name ?? ""),
-  customer_name: String(w.customer_name ?? ""), total: toPaise(w.total_amount as string | number | null | undefined),
+  customer_name: String((w.supplier as { name?: string } | undefined)?.name ?? ""), total: toPaise(w.total_amount as string | number | null | undefined),
 });
 const v2RowsOf = (d: unknown): Record<string, unknown>[] => { const r = (d as { results?: unknown } | null)?.results; return Array.isArray(r) ? r : []; };
 
-/** The most rows v2's invoices/ gives in one answer (its pagination's max_page_size). */
-const V2_MOST = 1000;
-/** The link's FY as v2's date filter: "2026-27" -> 2026-04-01 to 2027-03-31. */
-const fyDates = (fy: string) => (/^\d{4}-\d{2}$/.test(fy) ? { start_date: `${fy.slice(0, 4)}-04-01`, end_date: `${Number(fy.slice(0, 4)) + 1}-03-31` } : {});
-const inwardKey = (number: string, business: number | null, fy: string) => salesKeys.v2Purchase(`${business ?? "all"}/${fy}/${number}`);
-/** The purchases (v2's inward bills) with exactly this number, or tooMany when over 1000 have it somewhere in theirs. */
+const inwardKey = (number: string, business: number | null, fy: string) => ["purchases", "v2-number", business, fy, number] as const;
+/** The purchases with this number spelt one way, or tooMany when over 1000 have it somewhere in theirs. */
 type Inward = { rows: V2Row[]; tooMany: false } | { rows: null; tooMany: true };
 function useInwardByNumber(number: string, business: number | null, fy: string, enabled: boolean) {
   return useQuery({
     queryKey: inwardKey(number, business, fy), enabled, retry: false,
     queryFn: async ({ signal }): Promise<Inward> => {
-      const params = { invoice_number: number, type_of_invoice: "inward", ...(business !== null ? { business_id: business } : {}), ...fyDates(fy) };
-      const ask = async (page_size: number) => (await api.get("invoices/", { params: { ...params, page_size }, signal })).data;
-      let d = await ask(20);
-      // v2 matches the number anywhere in a bill's number, newest first, so an older exact one can lie past these rows:
-      // the rest are asked for once (each ask follows a person opening a link: nothing asks on a timer)
-      const count = Number((d as { count?: unknown } | null)?.count) || 0;
-      if (count > v2RowsOf(d).length) {
-        if (count > V2_MOST) return { rows: null, tooMany: true };
-        d = await ask(count);
+      const params = { q: number, ...(business !== null ? { business_id: business } : {}), ...(fy ? { fy } : {}), summary: 0 };
+      const rows: V2Row[] = [];
+      for (let page = 1; page <= 5; page += 1) {
+        const d = (await api.get("purchases/", { params: { ...params, page, page_size: 200 }, signal })).data;
+        if (Number(d.count) > 1000) return { rows: null, tooMany: true };
+        rows.push(...v2RowsOf(d).map(toV2Row));
+        if (rows.length >= Number(d.count) || !v2RowsOf(d).length) break;
       }
-      // only the exact number counts here
-      return { rows: v2RowsOf(d).map(toV2Row).filter((r) => sameNumber(r.invoice_number, number)), tooMany: false };
+      return { rows: rows.filter(r => purchaseNumberKey(r.invoice_number) === purchaseNumberKey(number)), tooMany: false };
     },
   });
 }
@@ -110,7 +103,7 @@ export function BillByNumber({ number, firmSlug = "", fy = "" }: { number: strin
   }
   if (!inward.data) return <Asking title={title} q={inward} retry={again(inKey)} />;
   if (inward.data.tooMany) return <TooMany number={number} firm={firm} fy={fy} />;
-  // the link's firm and year, which v2 matched on its side (its list filters by a firm's id and dates only)
+  // The link's firm and year remain checked before offering a result.
   const purchases = inward.data.rows.filter((r) => named(r) && (!fy || (r.invoice_date !== "" && fyOf(r.invoice_date) === fy)));
   const choices: Choice[] = [
     ...sales,
@@ -183,15 +176,21 @@ function PickBill({ number, choices, note }: { number: string; choices: Choice[]
   );
 }
 
-/** An id that isn't a sale (sales/ answered 404): v2 kept purchases in the same table, so its invoices/{id}/ says whether it's one. */
+/** An old invoice ID that is not a sale is checked through the purchase contract, including its deleted state. */
 export function NotASale({ id }: { id: number }) {
   const qc = useQueryClient();
   const v2 = useQuery({
-    queryKey: salesKeys.v2Invoice(id), retry: false,
-    queryFn: async ({ signal }) => String((await api.get(`invoices/${id}/`, { signal })).data?.type_of_invoice ?? ""),
+    queryKey: ["purchases", "v2-id", id], retry: false,
+    queryFn: async ({ signal }) => {
+      try { await api.get(`purchases/${id}/`, { signal }); return true; }
+      catch (error) {
+        if (problemOf(error).code === 'deleted') return true;
+        throw error;
+      }
+    },
   });
-  if (v2.data === "inward") return <Navigate to={`/purchases/${id}`} replace />;
+  if (v2.data === true) return <Navigate to={`/purchases/${id}`} replace />;
   // v2 has no bill with this id either, or not a purchase: it isn't here. Not knowing (no answer) is said, with Try again
   if (v2.data !== undefined || (v2.isError && problemOf(v2.error).kind === "notfound")) return <MissingBill id={String(id)} />;
-  return <Asking title="Sales bill" q={v2} retry={() => { void qc.refetchQueries({ queryKey: salesKeys.v2Invoice(id) }); }} />;
+  return <Asking title="Sales bill" q={v2} retry={() => { void qc.refetchQueries({ queryKey: ["purchases", "v2-id", id] }); }} />;
 }

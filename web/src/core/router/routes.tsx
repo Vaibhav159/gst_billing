@@ -22,8 +22,11 @@ const PrintPage = lazyPage(() => import("@/pages/sales/print/PrintPage"));
 const ScanPage = lazyPage(() => import("@/pages/sales/print/ScanPage"));
 const BatchPrint = lazyPage(() => import("@/pages/sales/print/BatchPrint"));
 const BulkExport = lazyPage(() => import("@/pages/sales/print/BulkExport"));
+const PurchaseList = lazyPage(() => import('@/pages/purchases/PurchaseList'));
+const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
+const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 
-const warmPages = idlePages([SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, ...customerPages, paletteCode]);
+const warmPages = idlePages([SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -74,6 +77,7 @@ export const V2_REDIRECTS: [string, (p: Record<string, string>) => string][] = [
   ["/billing/invoice/edit/:id", (p) => `/sales/${p.id}/edit`], ["/billing/invoice/:id/print", (p) => `/sales/${p.id}/print`], ["/billing/invoice/:id/print-classic", (p) => `/sales/${p.id}/print`], ["/billing/invoice/:id", (p) => `/sales/${p.id}`],
   ["/billing/batch-print", () => "/sales/batch"], ["/billing/bulk-pdf", () => "/sales/export"],
   ["/billing/inward-bills", () => "/purchases"], ["/billing/inward-bills/add", () => "/purchases/new"], ["/billing/inward-bills/capture", () => "/purchases/capture"], ["/billing/inward-bills/:id", (p) => `/purchases/${p.id}`],
+  ["/inward-bills/:id", (p) => `/purchases/${p.id}`],
   ["/billing/product/list", () => "/products"], ["/billing/product/new", () => "/products/new"], ["/billing/product/import", () => "/import"],
   ["/billing/product/edit/:id", (p) => `/products/${p.id}/edit`], ["/billing/product/:id", (p) => `/products/${p.id}`],
   ["/billing/gst-summary", () => "/gst"], ["/billing/gstr-export", () => "/gst"], ["/billing/reports", () => "/reports"],
@@ -101,6 +105,10 @@ export const appRoutes: RouteObject[] = [{
       children: [
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,
+        { path: '/purchases', element: <PurchaseList /> },
+        { path: '/purchases/new', element: <PurchaseFormPage />, handle: { hideNav: true } },
+        { path: '/purchases/:id/edit', element: <PurchaseFormPage />, handle: { hideNav: true } },
+        { path: '/purchases/:id', element: <PurchasePage /> },
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         { path: "/sales/paper", element: <PaperBookPage /> },
