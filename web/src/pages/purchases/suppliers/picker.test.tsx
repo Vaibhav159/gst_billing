@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderApp } from '@/test/render';
-import { serve } from '@/test/server';
+import { serve, type Call } from '@/test/server';
 import { tick } from '@/test/clock';
 import type { SupplierRef } from '@/core/purchases/types';
 import { SupplierPicker } from './SupplierPicker';
@@ -18,7 +18,7 @@ const list = () => screen.getByRole('listbox', { name: 'Suppliers' });
 const opened = async () => within(await screen.findByRole('listbox', { name: 'Suppliers' }));
 
 test('the supplier list loads beyond the first 100', async () => {
-  const calls = serve({ 'GET suppliers/': c => ({ status: 200, data: c.params.page === 1 ? page(1, 100, true) : page(101, 50, false) }) });
+  const calls = serve({ 'GET suppliers/': (c: Call) => ({ status: 200, data: c.params.page === 1 ? page(1, 100, true) : page(101, 50, false) }) });
   renderApp(<SupplierPicker value={null} onChange={() => {}} />);
   fireEvent.focus(screen.getByRole('combobox'));
   expect(await (await opened()).findByRole('option', { name: /Supplier 100\b/ })).toBeInTheDocument();

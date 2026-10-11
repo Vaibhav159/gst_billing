@@ -110,7 +110,7 @@ test('an edit sends only the supplier fields, not the id or extra keys it was op
   await tick(400);
   fireEvent.click(screen.getByRole('button', { name: 'Save supplier' }));
   await waitFor(() => expect(calls.some(c => c.method === 'PUT')).toBe(true));
-  expect(Object.keys(calls.find(c => c.method === 'PUT')!.data).sort()).toEqual(['address', 'city', 'email', 'gst_number', 'mobile_number', 'name', 'pan_number', 'state_name']);
+  expect(Object.keys(calls.find(c => c.method === 'PUT')!.data as object).sort()).toEqual(['address', 'city', 'email', 'gst_number', 'mobile_number', 'name', 'pan_number', 'state_name']);
 });
 test('a refusal on a field the sheet does not show still says it was not saved', async () => {
   serve({ 'POST suppliers/': () => ({ status: 400, data: { mobile: ['Phone numbers have 10 digits.'] } }) });

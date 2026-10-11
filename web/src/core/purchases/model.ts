@@ -1,4 +1,4 @@
-import { fyOf, inr, toPaise } from '@/core/format';
+import { fyOf, groupIN } from '@/core/format';
 import { scaled } from '@/core/sales/maths';
 import { SLABS } from '@/core/sales/slabs';
 import type { SupplierRef, UsualRate } from './types';
@@ -27,6 +27,11 @@ export function slabFrom(raw: unknown): string | null {
 // These dates explain credit choices; the server alone decides locks, defaults, eligibility and lapsed credit.
 export const creditDeadline = (invoiceDate: string): string => `${Number(fyOf(invoiceDate).slice(0, 4)) + 1}-11-30`;
 export const lastCreditMonth = (invoiceDate: string): string => `${Number(fyOf(invoiceDate).slice(0, 4)) + 1}-10`;
+/** A rate as typed, to its last decimal: 6878.012 stays ₹6,878.012, never rounded to paise. */
+function rateWords(rate: string): string {
+  const [whole, frac = ''] = rate.trim().split('.');
+  return `₹${groupIN(Number(whole))}.${frac.replace(/0+$/, '').padEnd(2, '0')}`;
+}
 export function rateCheck({ rate, unit, name, usual }: { rate: string; unit: string; name: string; usual: UsualRate | null | undefined }): { x: number; text: string; fix: { rate: string; label: string; why: string } | null } | null {
   const entered = scaled(rate, 3), normal = usual?.rate ? scaled(usual.rate, 3) : null;
   if (!entered || !normal || !usual) return null;
@@ -39,7 +44,7 @@ export function rateCheck({ rate, unit, name, usual }: { rate: string; unit: str
     const rounded = (2n * entered + BigInt(per)) / (2n * BigInt(per));
     const fixed = `${rounded / 1000n}.${String(rounded % 1000n).padStart(3, '0')}`;
     const perWord = per === 1000 && ['g', 'gms'].includes(unit) ? 'kg' : `${per} ${unit}`;
-    fix = { rate: fixed, label: `Use ${inr(toPaise(fixed) ?? 0)}/${unit}`, why: `the rate per ${perWord}` };
+    fix = { rate: fixed, label: `Use ${rateWords(fixed)}/${unit}`, why: `the rate per ${perWord}` };
   }
-  return { x, text: `${inr(toPaise(rate) ?? 0)}/${unit} is about ${x >= 5 ? `${Math.round(x)} times` : `1/${Math.round(1 / x)} of`} ${where} for ${name} (${inr(toPaise(usual.rate) ?? 0)}/${unit}). Check the item and the rate.`, fix };
+  return { x, text: `${rateWords(rate)}/${unit} is about ${x >= 5 ? `${Math.round(x)} times` : `1/${Math.round(1 / x)} of`} ${where} for ${name} (${rateWords(usual.rate ?? '')}/${unit}). Check the item and the rate.`, fix };
 }

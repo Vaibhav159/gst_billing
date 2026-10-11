@@ -50,7 +50,7 @@ export function DeletePurchases({ bills, onClose, onDone }: { bills: PurchaseRow
       setGone((before) => new Set([...before, ...removed]));
       if (bins.length) show({ title: `Deleted ${plural(bins.length, "purchase bill")}`, body: "They're in the Audit log, where they can be restored.", action: { label: "Undo", onClick: () => { void (async () => {
         let returned = 0;
-        try { for (const bin of bins) { await restore.mutateAsync(bin.binId); returned++; setGone((before) => new Set([...before].filter((id) => id !== bin.billId))); } show({ title: `Restored ${plural(returned, "purchase bill")}`, body: "Back in Purchases and in the credit figures." }); }
+        try { for (const bin of bins) { try { await restore.mutateAsync(bin.binId); } catch (e) { if (problemOf(e).code !== "already_restored") throw e; } returned++; setGone((before) => new Set([...before].filter((id) => id !== bin.billId))); } show({ title: `Restored ${plural(returned, "purchase bill")}`, body: "Back in Purchases and in the credit figures." }); }
         catch (e) { show({ tone: "neg", title: "Not all purchases were restored", body: `${returned} came back. ${problemOf(e).message}` }); }
       })(); } } });
     }

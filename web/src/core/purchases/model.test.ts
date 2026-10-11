@@ -28,5 +28,7 @@ test('rate warning flags x5 and one fifth and offers an exact decimal correction
   const usual = { rate: '6878.000', from: 'them' as const, last: null };
   expect(rateCheck({ rate: '6878.001', unit: 'gms', name: 'Gold', usual })).toBeNull();
   expect(rateCheck({ rate: '68780.123', unit: 'gms', name: 'Gold', usual })?.fix?.rate).toBe('6878.012');
+  expect(rateCheck({ rate: '68780.123', unit: 'gms', name: 'Gold', usual })?.fix?.label).toBe('Use ₹6,878.012/gms');
+  expect(rateCheck({ rate: '68780.123', unit: 'gms', name: 'Gold', usual })?.text).toMatch(/^₹68,780\.123\/gms is about 10 times .*\(₹6,878\.00\/gms\)/);
   expect(rateCheck({ rate: '1375.600', unit: 'gms', name: 'Gold', usual })?.text).toContain('1/5 of what you usually pay them');
 });

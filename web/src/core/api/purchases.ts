@@ -102,14 +102,19 @@ export function useDeletePurchases() {
     for (const id of ids) {
       let binned: PurchaseBinRow | null = null;
       try { binned = toPurchaseBin((await api.delete(`purchases/${id}/`, { data: { reason } })).data); }
-      catch (error) { if (problemOf(error).kind !== 'notfound') throw error; }
+      catch (error) {
+        // already in the bin (another tab, an earlier try) is done; a bill never found is a refusal, not a deletion
+        const p = problemOf(error), already = p.kind === 'notfound' && p.code === 'deleted' ? (p.body as { binned?: unknown }).binned : undefined;
+        if (!already) throw error;
+        binned = toPurchaseBin(already);
+      }
       onEach(id, binned);
     }
   }, onSettled: () => invalidatePurchases(qc) });
 }
 export function useCheckPurchase() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (id: number): Promise<{ id: number; needs_review: false }> => { await api.post(`purchases/${id}/checked/`); return { id, needs_review: false }; }, onSuccess: () => invalidatePurchases(qc) });
+  return useMutation({ mutationFn: async (id: number): Promise<{ id: number; needs_review: boolean }> => { const { data } = await api.post(`purchases/${id}/checked/`); return { id: Number(data?.id ?? id), needs_review: Boolean(data?.needs_review) }; }, onSuccess: () => invalidatePurchases(qc) });
 }
 export function useMovePurchaseCredit() {
   const qc = useQueryClient();

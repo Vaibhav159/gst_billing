@@ -57,3 +57,19 @@ test.each(["captured page", "staff's own source file"])("%s has no Remove action
   await screen.findByRole("heading", { name: "Source" });
   expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
 });
+
+test("Undo counts a bill someone else already restored and goes on to the next", async () => {
+  const { calls } = salesServer([
+    ["DELETE", "purchases/905/", () => purchaseBinWire()],
+    ["DELETE", "purchases/906/", () => purchaseBinWire({ id: 5, original_id: 906 })],
+    ["POST", "purchases/bin/4/restore/", () => refuse(409, { code: "already_restored", detail: "Someone already restored this purchase." })],
+    ["POST", "purchases/bin/5/restore/", () => purchaseDetailWire({ id: 906 })],
+  ]);
+  renderApp(<DeletePurchases bills={[toPurchaseRow(purchaseRowWire()), toPurchaseRow(purchaseRowWire({ id: 906, invoice_number: "UBS/26-27/0851" }))]} onClose={() => {}} onDone={() => {}} />);
+  await pause();
+  await userEvent.click(screen.getByRole("button", { name: "Delete 2 purchase bills" }));
+  await userEvent.click(await screen.findByRole("button", { name: /^Undo/ }));
+  expect(await screen.findByText("Restored 2 purchase bills")).toBeInTheDocument();
+  expect(screen.queryByText("Not all purchases were restored")).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["purchases/bin/4/restore/", "purchases/bin/5/restore/"]);
+});

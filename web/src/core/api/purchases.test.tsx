@@ -131,3 +131,20 @@ test('offline writes fail immediately without a queue and conflict writes are se
   await act(async () => { await expect(remove.result.current.mutateAsync({ id: 905, reason: '' })).rejects.toThrow(); });
   expect(calls.map(c => c.method)).toEqual(['POST', 'DELETE']);
 });
+test('check returns what the server answered, not an assumed result', async () => {
+  serve({ 'POST purchases/905/checked/': { id: 905, needs_review: true } });
+  const { wrapper } = setup();
+  const checked = renderHook(() => useCheckPurchase(), { wrapper });
+  await act(async () => { expect(await checked.result.current.mutateAsync(905)).toEqual({ id: 905, needs_review: true }); });
+});
+test('bulk delete counts a bill already in the bin as done, but stops at a bill that was never found', async () => {
+  const calls = serve({
+    'DELETE purchases/1/': () => ({ status: 404, data: { code: 'deleted', detail: 'This purchase was deleted.', binned: purchaseBinWire({ id: 8, original_id: 1 }) } }),
+    'DELETE purchases/2/': () => ({ status: 404, data: { detail: 'Not found.' } }),
+    'DELETE purchases/3/': purchaseBinWire({ original_id: 3 }),
+  });
+  const { wrapper } = setup(), done: [number, number | null][] = [];
+  const batch = renderHook(() => useDeletePurchases(), { wrapper });
+  await act(async () => { await expect(batch.result.current.mutateAsync({ ids: [1, 2, 3], reason: '', onEach: (id, bin) => done.push([id, bin?.id ?? null]) })).rejects.toThrow(); });
+  expect(done).toEqual([[1, 8]]); expect(calls.map((c) => c.url)).toEqual(['purchases/1/', 'purchases/2/']);
+});
