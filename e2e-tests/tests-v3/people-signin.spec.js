@@ -88,7 +88,7 @@ test("signing out another device refuses its next request and leaves this device
 
 test("SMS ships off and Forgot password explains the owner's existing route", async ({ page, request, browser, baseURL }) => {
   const options = await privateCall(request, "GET", "auth/options/", undefined, null);
-  test.skip(options.sms_reset, "This check requires SMS_RESET_ENABLED off; full SMS-on replay is covered by server fake-provider tests and mocked web tests, because the contract has no browser-accessible fake-code fixture.");
+  test.skip(options.sms_reset, "This check requires SMS_RESET_ENABLED off; people-sms.spec.js covers the enabled sandbox fake provider after 4B lands (P4-11).");
   const guest = await anotherPage(browser, baseURL, page.viewportSize());
   await guest.goto("/login"); await opened(guest);
   await guest.getByRole("button", { name: "Forgot your password?", exact: true }).click();
