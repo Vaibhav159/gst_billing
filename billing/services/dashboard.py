@@ -52,9 +52,21 @@ def latest_changes():
     return answer
 
 
+def filing_totals(ids, year):
+    from billing.services.filing import year_filings
+    return year_filings(ids, year)
+
+
 def past_returns(firms, year):
-    """Contract §5: no filing-derived block before Task 6 lands."""
-    return None
+    values = filing_totals([f.pk for f in firms], year)
+    rows = []
+    for firm in firms:
+        row = values.get(firm.pk, {})
+        day = row.get("last_gstr3b_filed_on")
+        rows.append({"firm": {"id": firm.pk, "name": firm.name, "gst_number": firm.gst_number or ""},
+                     "months_filed": row.get("months_filed", 0), "last_gstr3b_filed_on": day.isoformat() if day else None,
+                     "cash_paid": money(row.get("cash_paid") or ZERO)})
+    return rows
 
 
 def dashboard(user, firms, year, today):

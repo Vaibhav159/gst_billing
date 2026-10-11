@@ -57,6 +57,9 @@ def test_recorded_returns_past_cash_and_legacy():
         assert row["gstr3b"]["cash_paid"] == "17.00"
         assert not {"pay_3b", "file_gstr1", "gaps"} & {r["kind"] for r in data["items"]}
         viewer = client_for(person("p5-filing-viewer", "viewer"))
+        past = viewer.get("/api/dashboard/", {"business_id": f.pk, "fy": "2025-26"}).json()["returns_year"][0]
+        assert past["cash_paid"] == "23.00"
+        assert past["months_filed"] == 1
         old = firm("LEGACY")
         FiledPeriod.objects.create(business=old, year=2026, month=9)
         legacy = viewer.get("/api/due-next/", {"business_id": old.pk, "returns": "1"}).json()["returns"]["firms"][0]
