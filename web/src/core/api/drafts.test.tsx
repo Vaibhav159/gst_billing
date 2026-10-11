@@ -116,33 +116,19 @@ test("a copy of a bill finished on another device is let go; one sent since the 
 });
 
 test("a sync asks again when the cached list is old, so a synced copy finished elsewhere is forgotten", async () => {
-  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  // beforeEach fakes Date for staleness; wait for the hook's asynchronous renders, not a guessed notification tick.
   keepOnDevice(copy({ synced: true, syncedAt: 1 }));
   let finishedElsewhere = false;
-  let askedAgain!: () => void;
-  const secondAsk = new Promise<void>((resolve) => { askedAgain = resolve; });
-  const { calls } = salesServer([["GET", "drafts/", () => {
-    if (finishedElsewhere) askedAgain();
-    return { results: finishedElsewhere ? [] : [row()] };
-  }]]);
-  const { wrapper, qc } = setup();
+  const { calls } = salesServer([["GET", "drafts/", () => ({ results: finishedElsewhere ? [] : [row()] })]]);
+  const { wrapper } = setup();
   const list = renderHook(() => useUnfinishedBills(), { wrapper });
-  await act(async () => {
-    await qc.getQueryCache().find({ queryKey: draftKeys.list() })?.promise;
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  expect(list.result.current.bills.map((b) => b.id)).toEqual([ID]);
+  await waitFor(() => expect(list.result.current.bills.map((b) => b.id)).toEqual([ID]));
   finishedElsewhere = true;
   vi.setSystemTime(Date.now() + 11_000);
   renderHook(() => useDraftSync(), { wrapper });
-  await act(async () => {
-    await secondAsk;
-    await qc.getQueryCache().find({ queryKey: draftKeys.list() })?.promise;
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  expect(keptDraft(ID)).toBeNull();
+  await waitFor(() => expect(keptDraft(ID)).toBeNull());
   expect(methods(calls, "GET")).toHaveLength(2);
-  expect(list.result.current.bills).toEqual([]);
+  await waitFor(() => expect(list.result.current.bills).toEqual([]));
 });
 
 test("a sync never sends an older version of a bill changed while it ran", async () => {

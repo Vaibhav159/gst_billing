@@ -183,7 +183,10 @@ export function useBillForm(start: Start, formKey?: string) {
   const fyNow = fyOf(today);
   // A partially typed year (28/09/20) isn't a bill date this form can save. A cleared date asks for no book.
   const settledDate = useDebounced(f.date, 300);
-  const queryDate = settledDate && settledDate <= today && [fyNow, prevFy(fyNow)].includes(fyOf(settledDate)) ? settledDate : "";
+  const allowedDate = (iso: string) => Boolean(iso) && iso <= today && [fyNow, prevFy(fyNow)].includes(fyOf(iso));
+  const dateAllowed = allowedDate(f.date);
+  const dateWaiting = dateAllowed && f.date !== settledDate;
+  const queryDate = allowedDate(settledDate) ? settledDate : "";
   const dateReady = Boolean(queryDate) && queryDate === f.date;
   const nextFor = [keep ? null : f.firmId, keep ? "" : queryDate] as const;
   const next = useNextNumber(...nextFor, reading && dateReady);
@@ -197,7 +200,9 @@ export function useBillForm(start: Start, formKey?: string) {
   const nextNow = dateReady && next.data && current(salesKeys.nextNumber(...nextFor)) ? next.data : undefined;
   const bookNow = f.date && monthOf(f.date) === monthOf(queryDate) && book.data && current(salesKeys.paperBook(...bookFor)) ? book.data : undefined;
   const suggestion = f.paper && !edit ? (bookNow && !bookNow.locked ? String(bookNow.next.counter) : "") : nextNow ? String(nextNow.counter) : "";
-  const numberText = keep && bill ? bill.invoice_number : f.numberTyped ? f.number : suggestion;
+  // Keep the last suggestion visible through the date's debounce; waitingForNext still holds Save for its fresh answer.
+  const pendingNumber = dateWaiting ? (f.paper && !edit ? book.data?.next.counter : next.data?.counter) : undefined;
+  const numberText = keep && bill ? bill.invoice_number : f.numberTyped ? f.number : suggestion || (pendingNumber === undefined ? "" : String(pendingNumber));
   // (a firm's format doesn't change with a save: an older answer gives it as well as a fresh one)
   const stored = keep && bill ? bill.invoice_number : storedFor(next.data, numberText);
   const typedNow = useDebounced(f.numberTyped && !keep ? f.number.trim() : "", 300);
@@ -211,7 +216,8 @@ export function useBillForm(start: Start, formKey?: string) {
   useEffect(() => { if (known?.code === "" && refusedNumber?.number === stored) setNumberRefusal(null); }, [known, refusedNumber, stored]);
   // no number yet, with the next one being asked for: the first answer, or a fresh one in place of one a write marked.
   // Nothing is wrong with it meanwhile: it's coming (Ruling 1D-15)
-  const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline" && (f.paper && !edit ? book.isFetching && !bookNow : next.isFetching && !nextNow);
+  const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline"
+    && (dateWaiting || (f.paper && !edit ? book.isFetching && !bookNow : next.isFetching && !nextNow));
   const numberError = (!known && refusedNumber?.number === stored ? refusedNumber.message : "")
     || (keep || waitingForNext ? "" : numberProblem(numberText, nextNow?.invoice_number ?? "", stored) || (known?.code ? known.problem : ""));
   const numberNote = !numberError && known?.note ? known.note : "";
@@ -219,8 +225,8 @@ export function useBillForm(start: Start, formKey?: string) {
   // its way in place of one from before a save. One that failed (a 500, the network) or can't be sent (no firm, or no
   // date it could read) is no answer, like an unchecked one: the number is checked when the bill saves, never "Checking…"
   // for ever (T4 re-review)
-  const asking = f.numberTyped && !keep && f.firmId !== null && Boolean(f.date) && Boolean(f.number.trim()) && net !== "offline"
-    && (typedNow !== f.number.trim() || check.isPending || (check.isFetching && !answer));
+  const asking = f.numberTyped && !keep && f.firmId !== null && dateAllowed && Boolean(f.number.trim()) && net !== "offline"
+    && (dateWaiting || typedNow !== f.number.trim() || check.isPending || (check.isFetching && !answer));
   const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : waitingForNext ? "waiting" : asking && !answer ? "checking" : "unknown";
   const setNumber = useCallback((text: string) => set({ number: text, numberTyped: true }), [set]);
   const takeSuggestion = useCallback(() => set({ number: "", numberTyped: false }), [set]);
