@@ -5,6 +5,11 @@ v3 reads and writes sales here, never through v2's invoices/, whose contract sta
 permission key in v3_actions; V3Permission refuses the rest.
 """
 
+import re
+from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
+
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
@@ -16,14 +21,42 @@ from rest_framework.response import Response
 
 from billing import numbering
 from billing.cache import uncached
-from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, SENT_VIA_CHOICES
+from billing.constants import (
+    BILL_ACTIVE,
+    BILL_CANCELLED,
+    GST_CODE,
+    INVOICE_TYPE_OUTWARD,
+    SENT_VIA_CHOICES,
+    UNIT_CHOICES,
+)
 from billing.fy import fy_label, fy_of, fy_range
-from billing.models import BinnedInvoice, Business, Invoice
+from billing.models import BinnedInvoice, Business, Customer, Invoice
 from billing.params import PICK_A_FIRM, date_param, firm_param, fy_param, id_param, month_param, text_param
 from billing.period_lock import closed_months
-from billing.services.bill_reads import Reads, bill_detail, bill_rows, facets, filter_bills, ordered, summary
+from billing.services.bill_reads import (
+    Reads,
+    bill_detail,
+    bill_rows,
+    facets,
+    filter_bills,
+    line_taxable,
+    ordered,
+    summary,
+)
 from billing.services.bin import bin_bill, bin_row, live_bin, restore_from_bin
-from billing.services.sales import cancel_bill, mobile_of, move_bill, record_send, renumber_bill, sent_block
+from billing.services.sales import (
+    MOST,
+    cancel_bill,
+    mobile_of,
+    move_bill,
+    record_send,
+    refile_heads,
+    renumber_bill,
+    save_bill,
+    save_eway,
+    sent_block,
+)
+from billing.tax_rules import GST_SLABS, to_paise
 from billing.text import person, stamp
 
 from .permissions import V3Permission
@@ -51,18 +84,30 @@ SAY_WHY = "Say why in a few words. It goes into the audit log."
 
 class Reason(serializers.CharField):
     """A reason (or other text, like a send's number) refused in the contract's one sentence, `words`,
-    whatever is wrong with it: missing when it's needed, null, blank, not text, too long or a null
-    character. Never DRF's own words (Ruling 1A-5)."""
+    whatever is wrong with it: missing when it's needed, null, blank, not text, too long (`long`, when
+    given) or a null character. Never DRF's own words (Ruling 1A-5)."""
 
-    def __init__(self, words, **kwargs):
-        self.words = words
+    def __init__(self, words, long=None, **kwargs):
+        self.words, self.long = words, long or words
         super().__init__(**kwargs)
 
     def run_validation(self, data=serializers.empty):
         try:
             return super().run_validation(data)
-        except serializers.ValidationError:
-            raise serializers.ValidationError(self.words) from None
+        except serializers.ValidationError as refused:
+            raise serializers.ValidationError(self.long if "max_length" in refused.get_codes() else self.words) from None
+
+
+# What no column can store: a null character (psycopg refuses it) and a lone surrogate (no UTF-8 for it).
+_UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
+
+
+class Text(Reason):
+    """Typed text (a name, a note): what no column can store is dropped, not refused, and null is no text ("")."""
+
+    def run_validation(self, data=serializers.empty):
+        value = super().run_validation(_UNSTORABLE.sub("", data) if isinstance(data, str) else data)
+        return "" if value is None else value
 
 
 class CancelSerializer(serializers.Serializer):
@@ -97,9 +142,10 @@ class SentSerializer(serializers.Serializer):
 
 
 class TypedNumber(serializers.Field):
-    """A bill number as typed: text, or a JSON number read as its digits. Anything else (missing, null, a list,
-    an object, true) is no number typed, which the number check refuses in the contract's words with the next
-    free number; a null character or a space reaches that check too, which names Rule 46 (Ruling 1A-5)."""
+    """A number as typed (a bill number, a line's figure or HSN code): text, or a JSON number read as its digits.
+    Anything else (missing, null, a list, an object, true) is nothing typed, which the check after it refuses in the
+    contract's words (the bill number's with the next free number); a null character or a space reaches that check
+    too, which names Rule 46 for a bill number (Ruling 1A-5)."""
 
     def __init__(self):
         super().__init__(required=False)
@@ -120,18 +166,185 @@ class RenumberSerializer(serializers.Serializer):
 PICK_THE_FIRM = "Pick the firm to move it to."
 
 
-class FirmField(serializers.PrimaryKeyRelatedField):
-    """A firm by its id, read when the request comes, around cacheops (Ruling 1A-34): the move freezes this firm
-    on the bill, so it must be the firm as it is now."""
+class Picked(serializers.PrimaryKeyRelatedField):
+    """A firm or a customer by its id, read when the request comes, around cacheops (Ruling 1A-34): a bill freezes the
+    firm as it is now, and shows the customer as they are. Missing, null, blank, not plain digits (1.5, "٣", true)
+    or not on file: the one sentence, `words` (Ruling 1A-5)."""
+
+    def __init__(self, model, words, **kwargs):
+        self.model = model
+        super().__init__(error_messages=dict.fromkeys(("required", "null", "does_not_exist", "incorrect_type"), words),
+                         **kwargs)
 
     def get_queryset(self):
-        return uncached(Business)
+        return uncached(self.model)
+
+    def to_internal_value(self, data):
+        plain = isinstance(data, str) and data.isascii() and data.isdigit()
+        if not (plain or (isinstance(data, int) and not isinstance(data, bool))):
+            self.fail("incorrect_type", data_type=type(data).__name__)
+        return super().to_internal_value(data)
 
 
 class MoveSerializer(RenumberSerializer):
-    # Missing, null, blank, not an id or no such firm: the one sentence (Ruling 1A-5).
-    business = FirmField(error_messages={"required": PICK_THE_FIRM, "null": PICK_THE_FIRM,
-                                         "does_not_exist": PICK_THE_FIRM, "incorrect_type": PICK_THE_FIRM})
+    business = Picked(Business, PICK_THE_FIRM)
+
+
+# A line's figures (contract 2.3). The slabs are tax_rules' own list; the units in the rate's words ("Type the rate
+# per piece."): one unit, in words.
+SLABS = frozenset(GST_SLABS)
+WEIGHED_IN_GRAMS = ("gms", "g")
+WEIGHED = ("kg", "ct", "oz", "tola")
+PER = {"gms": "gram", "g": "gram", "kg": "kg", "ct": "carat", "oz": "ounce", "tola": "tola", "pcs": "piece",
+       "nos": "piece", "unit": "unit", "mtr": "metre", "ltr": "litre", "ml": "ml", "box": "box", "pair": "pair",
+       "set": "set", "dozen": "dozen"}
+# The most a quantity or a tax head holds (numeric(10, 3)); MOST is a rate's, a line's amount's and a bill's total's.
+LINE_MOST = Decimal("9999999.999")
+ADD_ONE = "Add at least one item: pick a product, then type its weight."
+
+
+def _amount(text):
+    """A decimal from what was sent ("12.345", or a JSON number's digits), or None when it isn't one with at most 3
+    places that a bill's columns can hold: "NaN", "1e400", 40 digits or another script's digits are none (Ruling
+    1A-5)."""
+    text = str(text).strip()
+    try:
+        value = Decimal(text) if text.isascii() else None
+    except (InvalidOperation, ValueError):
+        return None
+    if value is None or not value.is_finite() or -value.as_tuple().exponent > 3 or abs(value) > MOST:
+        return None
+    return value
+
+
+class Lines(serializers.ListSerializer):
+    """A bill's lines. Words about the lines as a whole are a plain list (["Add at least one item: …"]), never DRF's
+    own list checks, which nest theirs under non_field_errors; a line's are keyed by its position (contract §1). A
+    line that isn't an object carries no item: its name is missing."""
+
+    def to_internal_value(self, data):
+        if not isinstance(data, list) or not data:
+            raise serializers.ValidationError([ADD_ONE])
+        if len(data) > 200:
+            raise serializers.ValidationError(["A bill can have at most 200 items."])
+        return super().to_internal_value(data)
+
+    def run_child_validation(self, data):
+        return super().run_child_validation(data if isinstance(data, Mapping) else {})
+
+
+class LineSerializer(serializers.Serializer):
+    """One line as sent (contract 2.3). Its figures come as text or JSON numbers; validate() reads them in the words
+    of the line's unit."""
+
+    product_name = Text("Type the item's name.", long="Keep the item's name to 255 characters.", max_length=255)
+    hsn_code = TypedNumber()
+    gst_percent = TypedNumber()
+    quantity = TypedNumber()
+    unit = serializers.ChoiceField(choices=[u for u, _ in UNIT_CHOICES], default="gms",
+                                   error_messages=dict.fromkeys(("invalid_choice", "null"), "Pick a unit from the list."))
+    rate = TypedNumber()
+    note = Text("Keep the note to 60 characters; it prints under the item.", max_length=60, required=False,
+                allow_blank=True, allow_null=True, default="")
+
+    class Meta:
+        list_serializer_class = Lines
+
+    def validate(self, attrs):
+        unit, errors = attrs["unit"], {}
+        if not re.fullmatch(r"[0-9]{4,8}", attrs["hsn_code"].strip()):
+            errors["hsn_code"] = ["Type the HSN code, 4 to 8 digits (7113 for jewellery)."]
+        percent = _amount(attrs["gst_percent"])
+        if percent not in SLABS:
+            errors["gst_percent"] = ["Choose the GST rate. Gold and silver jewellery is 3%; cut diamonds are 0.25%."]
+        quantity, rate = _amount(attrs["quantity"]), _amount(attrs["rate"])
+        if quantity is None or not 0 < quantity <= LINE_MOST:
+            errors["quantity"] = ["Type the weight in grams, like 12.345." if unit in WEIGHED_IN_GRAMS else
+                                  "Type the weight, like 1.250." if unit in WEIGHED else "Type how many pieces."]
+        if rate is None or rate <= 0:
+            errors["rate"] = [f"Type the rate per {PER[unit]}."]
+        elif not errors:
+            # The line as the builder (billing.services.line_items) will work it out: its amount and its tax, all of
+            # it on one head when inter-state, must fit their columns.
+            taxable = line_taxable(SimpleNamespace(quantity=quantity, rate=rate))
+            tax = to_paise(taxable * percent / 100)
+            if taxable + tax > MOST or tax > LINE_MOST:
+                errors["rate"] = ["This item comes to more than one bill can hold. Check the weight and the rate."]
+        if errors:
+            raise serializers.ValidationError(errors)
+        return {**attrs, "hsn_code": attrs["hsn_code"].strip(), "gst_percent": format((percent + 0).normalize(), "f"),
+                "quantity": quantity, "rate": rate}
+
+
+CHOOSE_A_CUSTOMER = "Choose who this bill is for. Pick Walk-in customer for a counter sale."
+
+
+class SaleSerializer(serializers.Serializer):
+    """What POST and PUT sales/ take (part 1 API contract, 2.3), each problem in the contract's words. draft_id is
+    Task 10's: left alone here."""
+
+    business = Picked(Business, "Pick the firm.")
+    customer = Picked(Customer, CHOOSE_A_CUSTOMER)
+    invoice_number = TypedNumber()
+    invoice_date = serializers.DateField(error_messages={
+        **dict.fromkeys(("required", "null"), "Type the date of the bill."),
+        **dict.fromkeys(("invalid", "datetime"), "Type the date like 2026-09-30.")})
+    payment_mode = serializers.ChoiceField(
+        choices=["", "cash", "bank", "credit", "mixed"], required=False, default="",
+        error_messages=dict.fromkeys(("invalid_choice", "null"),
+                                     "Choose how it was paid: cash, UPI / bank, udhaar, or part cash, part UPI."))
+    place_of_supply = serializers.ChoiceField(
+        choices=list(GST_CODE), required=False, allow_null=True, default=None,
+        error_messages={"invalid_choice": "Choose the state the goods are delivered to."})
+    notes = Text("Keep the note to 500 characters.", max_length=500, required=False, allow_blank=True, allow_null=True,
+                 default="")
+    paper = serializers.BooleanField(required=False, default=False, error_messages=dict.fromkeys(
+        ("invalid", "null"), "Say whether the bill is from the paper bill book: true or false."))
+    replaces = serializers.IntegerField(required=False, allow_null=True, default=None, error_messages=dict.fromkeys(
+        ("invalid", "max_string_length"), "Only a cancelled bill can be made again."))
+    lines = LineSerializer(many=True, error_messages=dict.fromkeys(("required", "null"), ADD_ONE))
+
+
+class EwaySerializer(serializers.Serializer):
+    """What PUT sales/{id}/eway/ takes (contract 2.8): each field optional; what's sent replaces what's stored, and a
+    null text clears it."""
+
+    eway_bill_number = Text("An e-way bill number has 12 digits; this has 0.", required=False, allow_blank=True,
+                            allow_null=True)
+    transport_mode = serializers.ChoiceField(choices=["Road", "Rail", "Air", "Ship"], required=False,
+                                             error_messages=dict.fromkeys(("invalid_choice", "null"),
+                                                                          "Choose Road, Rail, Air or Ship."))
+    transporter_name = Text("Type the transporter's name.", long="Keep the transporter's name to 255 characters.",
+                            max_length=255, required=False, allow_blank=True, allow_null=True)
+    transporter_gstin = Text("A transporter's GSTIN or transporter ID has 15 characters.", required=False,
+                             allow_blank=True, allow_null=True)
+    vehicle_number = Text("Type it like RJ14AB1234 (state, district, letters, 4 digits).", required=False,
+                          allow_blank=True, allow_null=True)
+    vehicle_type = serializers.ChoiceField(
+        choices=["Regular", "ODC"], required=False,
+        error_messages=dict.fromkeys(("invalid_choice", "null"), "Choose Regular or Over dimensional cargo (ODC)."))
+    distance_km = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=4000,
+                                           error_messages=dict.fromkeys(("invalid", "min_value", "max_value",
+                                                                         "max_string_length"),
+                                                                        "Type the distance in whole kilometres, 1 to 4,000."))
+
+    def validate_eway_bill_number(self, value):
+        digits = re.sub(r"[^0-9]", "", value)  # spaces dropped (contract 2.8)
+        if value.strip() and len(digits) != 12:
+            raise serializers.ValidationError(f"An e-way bill number has 12 digits; this has {len(digits)}.")
+        return digits
+
+    def validate_transporter_gstin(self, value):
+        gstin = value.strip().upper()
+        if gstin and len(gstin) != 15:
+            raise serializers.ValidationError("A transporter's GSTIN or transporter ID has 15 characters.")
+        return gstin
+
+    def validate_vehicle_number(self, value):
+        vehicle = re.sub(r"[\s-]", "", value).upper()
+        if vehicle and not re.fullmatch(r"[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}", vehicle):
+            raise serializers.ValidationError("Type it like RJ14AB1234 (state, district, letters, 4 digits).")
+        return vehicle
 
 
 class Pages(PageNumberPagination):
@@ -149,8 +362,9 @@ class SalesViewSet(viewsets.GenericViewSet):
     permission_classes = [V3Permission]
     pagination_class = Pages
     lookup_value_regex = r"\d+"
-    v3_actions = {"cancel": "bill.cancel", "destroy": "bill.delete", "sent": "bill.send",
-                  "renumber": "bill.edit", "move": "bill.edit"}
+    v3_actions = {"create": "bill.create", "update": "bill.edit", "cancel": "bill.cancel", "destroy": "bill.delete",
+                  "sent": "bill.send", "renumber": "bill.edit", "move": "bill.edit", "eway": "bill.edit",
+                  "fix_heads": "bill.edit"}
 
     def get_queryset(self):
         # sales() reads around cacheops (Ruling 1A-34). Built for each request for tests/test_v3_cacheops.py, which
@@ -187,6 +401,26 @@ class SalesViewSet(viewsets.GenericViewSet):
         if binned is None:
             raise Http404("No Invoice matches the given query.")
         return Response({"detail": "This bill was deleted.", "code": "deleted", "binned": bin_row(binned)}, status=404)
+
+    def create(self, request):
+        """POST sales/: a bill from the paper book or the counter (2.3); 201 with its BillDetail."""
+        return Response(bill_detail(save_bill(valid(SaleSerializer, request.data), request.user)), status=201)
+
+    def update(self, request, pk=None):
+        """PUT sales/{id}/: the bill changed (2.3); its BillDetail."""
+        invoice = self.get_object()
+        return Response(bill_detail(save_bill(valid(SaleSerializer, request.data), request.user, invoice)))
+
+    @action(detail=True, methods=["put"])
+    def eway(self, request, pk=None):
+        """PUT sales/{id}/eway/: the e-way bill's details (2.8); the BillDetail."""
+        invoice = save_eway(self.get_object(), request.user, valid(EwaySerializer, request.data))
+        return Response(bill_detail(invoice))
+
+    @action(detail=True, methods=["post"], url_path="fix-heads")
+    def fix_heads(self, request, pk=None):
+        """POST sales/{id}/fix-heads/: the tax heads re-filed for the place of supply (2.9); the BillDetail."""
+        return Response(bill_detail(refile_heads(self.get_object(), request.user)))
 
     @action(detail=False, methods=["get"], url_path="next-number")
     def next_number(self, request):

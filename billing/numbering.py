@@ -172,9 +172,12 @@ def shape_problem(typed, final, following):
 
 
 def checked_number(business, day, typed, exclude_invoice=None):
-    """The number to store for `typed` on `day`, or 400 (its shape) / 409 (in use)."""
+    """The number to store for `typed` on `day`, or 400 (its shape) / 409 (in use).
+
+    The next free number is read (the FY's numbers) only for the words about an empty number (Ruling 1A-39).
+    """
     final = format_number(business, day, typed)
-    problem = shape_problem(typed, final, next_number(business, day)["invoice_number"])
+    problem = shape_problem(typed, final, next_number(business, day)["invoice_number"] if not final else "")
     if problem:
         raise ValidationError({"invoice_number": [problem]})
     refuse_taken(business, day, final, exclude_invoice=exclude_invoice)

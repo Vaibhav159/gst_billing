@@ -5,6 +5,8 @@ check the month (assert_sales_open), write it and its audit row in one transacti
 """
 
 import re
+from datetime import date
+from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.db.models import F
@@ -13,12 +15,14 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import invalidate
-from billing.constants import BILL_ACTIVE, BILL_CANCELLED
-from billing.models import AuditLog, Invoice
-from billing.numbering import checked_number, refuse_taken
+from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD
+from billing.fy import fy_of
+from billing.models import AuditLog, Invoice, LineItem
+from billing.numbering import checked_number, format_number, refuse_taken
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
-from billing.text import stamp
+from billing.tax_rules import default_place_of_supply, normalize_rate, normalize_tax_heads, supply_interstate
+from billing.text import day_text, inr, money, stamp
 
 CANCELLED_WORDS = "Cancelled bills can't be changed. Make it again from the bill instead."
 
@@ -188,3 +192,162 @@ def move_bill(invoice, user, business, typed):
             changes={"business": {"old": old_business.pk, "new": business.pk},
                      "invoice_number": {"old": old_number, "new": number}})
     return invoice, old_business, old_number
+
+
+# The header fields an edit reports old -> new (audit `changes`).
+EDIT_FIELDS = ("business", "customer", "invoice_number", "invoice_date", "payment_mode", "place_of_supply", "notes",
+               "total_amount")
+# The most a bill's total (numeric(12, 3)) can hold.
+MOST = Decimal("999999999.999")
+
+
+def _audit_values(invoice):
+    """EDIT_FIELDS as they are, the parties by id."""
+    return {f: getattr(invoice, f + "_id" if f in ("business", "customer") else f) for f in EDIT_FIELDS}
+
+
+def _audit_text(value):
+    """A value as the audit log keeps it, as v2's snapshots do (text, None as None); money to the paisa."""
+    return None if value is None else money(value) if isinstance(value, Decimal) else str(value)
+
+
+def _changes(before, after, fields):
+    """{field: {"old", "new"}} for each of `fields` whose value changed."""
+    return {f: {"old": _audit_text(before[f]), "new": _audit_text(after[f])} for f in fields if before[f] != after[f]}
+
+
+def _date_problem(day):
+    """Why a bill can't take `day` (contract 2.3; Ruling 1A-32), or ""."""
+    if day < date(2000, 1, 1):
+        return "Pick a date from 2000 to 2099."
+    if day > timezone.localdate():
+        return f"{day_text(day)} is after today. A bill can't be dated in the future."
+    return ""
+
+
+def _remade(replaces):
+    """The cancelled bill a new bill makes again, row-locked so two saves can't both make it again; or a 400."""
+    target = Invoice.objects.sales().select_for_update().filter(pk=replaces).first()
+    if target is None or target.status != BILL_CANCELLED:
+        raise ValidationError({"replaces": ["Only a cancelled bill can be made again."]})
+    again = Invoice.objects.sales().filter(replaces=target.pk).order_by("pk").first()
+    if again is not None:
+        raise ValidationError({"replaces": [f"{target.invoice_number} was made again already, as {again.invoice_number}."]})
+    return target
+
+
+def save_bill(data, user, invoice=None):
+    """POST sales/ (no `invoice`) or PUT sales/{id}/ from validated data (part 1 API contract, 2.3).
+
+    Paper first: the number is the one typed, never one made up. The lines go through the one
+    builder (billing.services.line_items), which works out every figure the server's way. The
+    number is checked only when it, the firm or the FY changes, so an older bill whose number
+    predates the rules can still be edited (and a date, only when it changes); a new firm freezes
+    that firm on the bill. The audit row is written before the answer is read, so the answer
+    shows it.
+    """
+    from billing.services.bin import v2_snapshot
+    from billing.services.line_items import build_line_items
+
+    business, customer, day = data["business"], data["customer"], data["invoice_date"]
+    with transaction.atomic():
+        old = locked_bill(invoice) if invoice else None
+        if old is not None:
+            refuse_cancelled(old)
+            assert_sales_open(old.business_id, old.invoice_date, "edit")
+            before = _audit_values(old)
+        problem = _date_problem(day) if old is None or day != old.invoice_date else ""
+        if problem:
+            raise ValidationError({"invoice_date": [problem]})
+        assert_sales_open(business, day, "edit" if old else "create")
+        moved = old is not None and business.pk != old.business_id
+        number = format_number(business, day, data["invoice_number"])
+        if old is not None and not moved and fy_of(day) == fy_of(old.invoice_date) and number == old.invoice_number.strip():
+            number = old.invoice_number  # unchanged: kept as stored, never checked again
+        else:
+            number = checked_number(business, day, data["invoice_number"], exclude_invoice=old.pk if old else None)
+        replaces = data["replaces"] if old is None else old.replaces
+        if old is None and replaces is not None:
+            replaces = _remade(replaces).pk
+        chosen = data["place_of_supply"]
+        if chosen == default_place_of_supply(business, customer):
+            chosen = None  # NULL means the rule: stored only when it differs (rollback-safe)
+
+        bill = old or Invoice(paper=data["paper"], replaces=replaces, type_of_invoice=INVOICE_TYPE_OUTWARD)
+        if old is not None and customer.pk != old.customer_id:
+            bill.sent_to = ""  # a one-off number typed for the old customer is no number for the new one
+        bill.business, bill.customer, bill.invoice_number, bill.invoice_date = business, customer, number, day
+        bill.payment_mode, bill.place_of_supply, bill.notes = data["payment_mode"], chosen, data["notes"]
+        if old is None or moved:
+            bill.firm_snapshot = firm_snapshot(business)
+        lines, total = build_line_items(bill, [
+            {"product_name": li["product_name"], "hsn_code": li["hsn_code"], "quantity": li["quantity"],
+             "rate": li["rate"], "unit": li["unit"], "note": li["note"],
+             "gst_tax_rate": normalize_rate(li["gst_percent"], assume="percent")}
+            for li in data["lines"]], source="api")
+        if total > MOST:
+            raise ValidationError({"lines": ["These items come to more than one bill can hold. Split them into two bills."]})
+        bill.total_amount = total
+        if old is not None:
+            stale = LineItem.objects.filter(invoice=bill)
+            stale._raw_delete(stale.db)  # no per-line signal; the total is set above
+        save_number(bill)
+        LineItem.objects.bulk_create(lines)
+        invalidate(Invoice, LineItem)  # the raw delete sends nothing, and v2's cached lists hold the bill
+        if old is None:
+            paper = f" · From the paper bill book, dated {day_text(day)}" if bill.paper else ""
+            log(bill, user, "created", f"{customer.name} · {inr(total)}{paper}", snapshot=v2_snapshot(bill))
+        else:
+            changes = _changes(before, _audit_values(bill), EDIT_FIELDS)
+            log(bill, user, "updated", f"Updated {', '.join(changes)}" if changes else "Updated the lines",
+                changes=changes or None)
+    return Invoice.objects.sales().select_related("customer", "business").get(pk=bill.pk)
+
+
+EWAY_FIELDS = ("eway_bill_number", "transporter_name", "transporter_gstin", "vehicle_number", "vehicle_type",
+               "transport_mode", "distance_km")
+
+
+def save_eway(invoice, user, data):
+    """PUT sales/{id}/eway/: the e-way bill's details, as made on the GST portal, so they print. What's sent replaces
+    what's stored; a save that changes nothing writes nothing."""
+    with transaction.atomic():
+        invoice = locked_bill(invoice)
+        refuse_cancelled(invoice)
+        assert_sales_open(invoice.business_id, invoice.invoice_date, "edit")
+        stored = {f: getattr(invoice, f) for f in EWAY_FIELDS}
+        merged = {**stored, **data}
+        if merged["transport_mode"] == "Road" and merged["eway_bill_number"] and not merged["vehicle_number"]:
+            raise ValidationError({"vehicle_number": [
+                "By road, the e-way bill needs the vehicle number. Add it here, or later on the portal (Part B)."]})
+        changes = _changes(stored, merged, EWAY_FIELDS)
+        if changes:
+            for f in changes:
+                setattr(invoice, f, merged[f])
+            invoice.save(update_fields=[*changes, "updated_at"])
+            log(invoice, user, "updated",
+                f"E-way bill {invoice.eway_bill_number}" if invoice.eway_bill_number else "Transport details",
+                changes=changes)
+    return invoice
+
+
+def refile_heads(invoice, user):
+    """POST sales/{id}/fix-heads/: each line's tax onto the heads the bill's place of supply gives,
+    every line's tax (and so the total) kept. One write for every line that moves; none when none does."""
+    from billing.services.bill_reads import lines_of
+
+    with transaction.atomic():
+        invoice = locked_bill(invoice)
+        refuse_cancelled(invoice)
+        assert_sales_open(invoice.business_id, invoice.invoice_date, "edit")
+        inter, now, moved = supply_interstate(invoice), timezone.now(), []
+        for li in lines_of([invoice])[invoice.pk]:
+            heads = normalize_tax_heads(li.cgst, li.sgst, li.igst, inter)
+            if heads != (li.cgst, li.sgst, li.igst):
+                (li.cgst, li.sgst, li.igst), li.updated_at = heads, now
+                moved.append(li)
+        if moved:
+            LineItem.objects.bulk_update(moved, ["cgst", "sgst", "igst", "updated_at"])
+            invalidate(LineItem)  # bulk_update sends no signal
+            log(invoice, user, "updated", "Tax heads re-filed for the place of supply")
+    return invoice

@@ -127,6 +127,25 @@ class ReadsAroundTheCacheTest(TransactionTestCase):
                     self.assertEqual(self.client.post(url, body, format="json").status_code, 200)
             r = self.client.delete(reverse("sale-detail", args=[self.twin.pk]), {"reason": "Twice"}, format="json")
             self.assertEqual(r.status_code, 200)
+            # A new bill made again from a cancelled one; an edit of the restored bill to another customer and place;
+            # the e-way details; the tax heads.
+            line = {"product_name": "Gold Ring 22K", "hsn_code": "711319", "gst_percent": "3", "quantity": "1",
+                    "unit": "gms", "rate": "6500"}
+            r = self.client.post(reverse("sale-list"), {
+                "business": self.kgh.pk, "customer": self.rathore.pk, "invoice_number": "KGH/2026-27/50",
+                "invoice_date": "2026-09-12", "payment_mode": "bank", "replaces": self.gone.pk, "lines": [line]},
+                format="json")
+            self.assertEqual(r.status_code, 201, r.data)
+            back = self.binned.original_id
+            for method, url, body in (
+                ("put", reverse("sale-detail", args=[back]), {
+                    "business": self.kgh.pk, "customer": self.rathore.pk, "invoice_number": "KGH-27",
+                    "invoice_date": "2026-09-24", "payment_mode": "cash", "place_of_supply": "24", "lines": [line]}),
+                ("put", reverse("sale-eway", args=[back]), {"eway_bill_number": "123456789012", "vehicle_number": "RJ14AB1234"}),
+                ("post", reverse("sale-fix-heads", args=[back]), None),
+            ):
+                with self.subTest(url=url):
+                    self.assertEqual(getattr(self.client, method)(url, body, format="json").status_code, 200)
             # A refusal reads too: the closed month's words name its firm.
             r = self.client.post(reverse("sale-cancel", args=[self.august.pk]), {"reason": "Returned"}, format="json")
             self.assertEqual((r.status_code, r.data["code"]), (409, "month_closed"))
