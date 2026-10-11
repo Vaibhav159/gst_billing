@@ -72,6 +72,8 @@ it("keeps the replacement plan visible and cannot apply when its new preview fai
   renderApp(<Restore />); choose(); await confirm();
   expect(await screen.findByRole("button", { name: "Check the plan again" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Add 2 customers" })).toBeDisabled();
+  expect(screen.queryByText("That file can't be restored")).not.toBeInTheDocument();
+  expect(screen.getByText("The check didn't finish")).toBeVisible();
   expect(calls.filter((c) => c.url === "backup/restore/")).toHaveLength(1);
 });
 
@@ -233,6 +235,8 @@ it("walks large backups by year with separate confirmations, opaque uploads and 
   await act(async () => finishFirst({ status: 200, data: yearResult(years[0].fy) }));
   expect(await screen.findByRole("button", { name: "Add 1,800 sales bills" })).toBeEnabled();
   expect(screen.getByText("2025-26 · Added 1,204 sales bills")).toBeVisible();
+  expect(screen.getByText("Financial year 2026-27")).toHaveAttribute("role", "status");
+  expect(screen.getByText("Financial year 2026-27")).toHaveFocus();
   expect(screen.queryByText("Finished checking 2 financial years")).not.toBeInTheDocument();
   expect(applies(calls)).toHaveLength(1);
   await confirm("1,800 sales bills");
@@ -320,7 +324,7 @@ it("can finish checking an already-present year after an uncertain answer withou
     finish.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
   expect(await screen.findByText("Finished checking 2 financial years")).toBeVisible();
-  expect(screen.getByText("2026-27 · Nothing to add")).toBeVisible();
+  expect(screen.getByText("2026-27 · Already on file (after an unconfirmed restore)")).toBeVisible();
   expect(screen.queryByText("2026-27 · Added 1,800 sales bills")).not.toBeInTheDocument();
   expect(applies(calls)).toHaveLength(2);
 });

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Check, FileJson, Lock, RotateCcw, SkipForward, Upload } from "lucide-react";
 import { applyRestore, previewRestore, type RestoreKind, type RestorePlan, type RestorePreview, type RestoreYear } from "@/core/api/backup";
@@ -36,13 +36,18 @@ export default function Restore() {
   const [file, setFile] = useState<File | null>(null);
   const [checked, setChecked] = useState<RestorePreview | null>(null);
   const [fileError, setFileError] = useState("");
+  const [checkError, setCheckError] = useState("");
   const [failure, setFailure] = useState<ApiProblem | null>(null);
   const [notice, setNotice] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [over, setOver] = useState(false);
   const [years, setYears] = useState<RestoreYear[]>([]);
   const [fy, setFy] = useState<string>();
-  const [completed, setCompleted] = useState<{ fy: string; plan: RestorePlan; applied: boolean }[]>([]);
+  const [completed, setCompleted] = useState<{ fy: string; plan: RestorePlan; applied: boolean; unconfirmed?: boolean }[]>([]);
+  const [unconfirmed, setUnconfirmed] = useState<string[]>([]);
+  const yearLine = useRef<HTMLParagraphElement>(null);
+  // Each new year replaces the button that opened its confirmation, so move focus to the year it now shows.
+  useEffect(() => { if (fy) yearLine.current?.focus(); }, [fy]);
   const [finished, setFinished] = useState(false);
   const preview = useMutation({
     mutationFn: ({ selected, fy }: { selected: File; fy?: string }) => previewRestore(selected, fy),
@@ -55,7 +60,13 @@ export default function Restore() {
         checkPlan(selected, first);
       } else setChecked(data);
     },
-    onError: (error) => { requestPending.current = false; setFileError(problemOf(error).message); },
+    onError: (error) => {
+      requestPending.current = false;
+      const problem = problemOf(error);
+      // A dropped connection says nothing about the file itself.
+      if (problem.kind === "offline" || problem.kind === "unreachable" || problem.kind === "server") setCheckError(problem.message);
+      else setFileError(problem.message);
+    },
   });
   const checkPlan = (selected: File, fy?: string) => {
     if (requestPending.current) return;
@@ -63,7 +74,7 @@ export default function Restore() {
     preview.mutate({ selected, fy });
   };
   const nextYear = (selected: File, current: string) => {
-    setChecked(null); setFileError(""); setFailure(null); setNotice("");
+    setChecked(null); setFileError(""); setCheckError(""); setFailure(null); setNotice("");
     const next = years[years.findIndex((year) => year.fy === current) + 1];
     if (next) { setFy(next.fy); checkPlan(selected, next.fy); }
     else setFinished(true);
@@ -89,7 +100,10 @@ export default function Restore() {
         // Nothing applies until its new fingerprint arrives and the owner checks a fresh confirmation.
         setChecked({ ...checked, plan: changed, fingerprint: "" }); setNotice(problem.message); setFailure(null); checkPlan(selected, fy);
       } else {
-        if (problem.kind === "offline" || problem.kind === "unreachable" || problem.kind === "server") setChecked((current) => current ? { ...current, fingerprint: "" } : current);
+        if (problem.kind === "offline" || problem.kind === "unreachable" || problem.kind === "server") {
+          setChecked((current) => current ? { ...current, fingerprint: "" } : current);
+          if (fy) setUnconfirmed((list) => list.includes(fy) ? list : [...list, fy]);
+        }
         setFailure(problem);
       }
     },
@@ -97,12 +111,12 @@ export default function Restore() {
   const busy = preview.isPending || restore.isPending;
   const openFile = (selected?: File) => {
     if (!selected || busy || requestPending.current || !can("backup.restore")) return;
-    setChecked(null); setConfirm(false); setFile(selected); setFileError(""); setFailure(null); setNotice(""); setYears([]); setFy(undefined); setCompleted([]); setFinished(false); restore.reset();
+    setChecked(null); setConfirm(false); setFile(selected); setFileError(""); setCheckError(""); setFailure(null); setNotice(""); setYears([]); setFy(undefined); setCompleted([]); setUnconfirmed([]); setFinished(false); restore.reset();
     if (!/\.json$/i.test(selected.name)) { setFileError(`${selected.name} isn't a backup file. Backups are .json files, named like gst-backup-2026-10-08.json.`); return; }
     if (selected.size > 25 * 1024 * 1024) { setFileError(`That file is ${Number((selected.size / 1024 / 1024).toFixed(1))} MB. A backup this app can restore is at most 25 MB.`); return; }
     checkPlan(selected);
   };
-  const reset = () => { if (requestPending.current) return; setFile(null); setChecked(null); setFileError(""); setFailure(null); setNotice(""); setConfirm(false); setYears([]); setFy(undefined); setCompleted([]); setFinished(false); preview.reset(); restore.reset(); };
+  const reset = () => { if (requestPending.current) return; setFile(null); setChecked(null); setFileError(""); setCheckError(""); setFailure(null); setNotice(""); setConfirm(false); setYears([]); setFy(undefined); setCompleted([]); setUnconfirmed([]); setFinished(false); preview.reset(); restore.reset(); };
   const doRestore = () => {
     if (!file || !checked?.fingerprint || (checked.years && (!fy || checked.fy !== fy)) || busy || requestPending.current || !can("backup.restore")) return;
     requestPending.current = true;
@@ -128,6 +142,7 @@ export default function Restore() {
       <p className="text-sm text-muted">Restore adds firms, customers, products and bills. It does not restore people, passwords, settings, filing records or the audit log.</p>
       {notice ? <Banner tone="amber" title={notice} /> : null}
       {fileError ? <Banner tone="neg" title="That file can't be restored">{fileError}</Banner> : null}
+      {checkError ? <Banner tone="neg" title="The check didn't finish">{checkError}</Banner> : null}
       {preview.isPending ? <p role="status" aria-live="polite">Reading {file?.name}…</p> : null}
       {!checked && !preview.isPending && !years.length ? chooser : null}
       {file && !result && !finished && (checked || years.length > 0) ? <div className="flex flex-col gap-4 anim-rise">
@@ -135,7 +150,7 @@ export default function Restore() {
           <span className="min-w-0"><span className="block font-medium truncate">{checked?.file.name ?? file.name}</span>{checked ? <span className="block text-sm text-muted">{checked.file.kind_words} · {checked.file.size} · {checked.file.made ? `made ${date(dayOf(checked.file.made))}, ${timeOf(checked.file.made)}` : "Date not recorded"}{checked.file.by ? ` by ${checked.file.by}` : ""}</span> : null}</span>
           <Button size="sm" variant="ghost" onClick={reset} disabled={busy}>Choose another file</Button>
         </div>
-        {fy ? <p className="font-medium">Financial year {fy}</p> : null}
+        {fy ? <p ref={yearLine} tabIndex={-1} role="status" className="font-medium outline-none">Financial year {fy}</p> : null}
       </div> : null}
       {checked && plan && !result ? <div className="flex flex-col gap-4 anim-rise">
         <PlanTable plan={plan} /><PlanDetails plan={plan} />
@@ -144,13 +159,13 @@ export default function Restore() {
         {plan.adds ? <div className="flex flex-wrap items-center gap-3"><Button variant="outline" icon={RotateCcw} disabled={busy || !checked.fingerprint || noValidYear} onClick={() => setConfirm(true)}>Add {plan.words}</Button><span className="text-sm text-muted">Recorded in the Audit log</span></div>
           : <Banner tone={plan.fails ? "muted" : "sale"} icon={plan.fails ? SkipForward : Check} title="Nothing to add">{plan.fails ? "Everything this file could add is already on file; the rest can't be added, for the reasons above." : "Everything in this file is already on file, so a restore would change nothing."}</Banner>}
         {fy && !plan.adds && checked.fingerprint ? <Button disabled={busy} onClick={() => {
-          if (file && !busy && !requestPending.current) { setCompleted((rows) => rows.some((row) => row.fy === fy) ? rows : [...rows, { fy, plan, applied: false }]); nextYear(file, fy); }
+          if (file && !busy && !requestPending.current) { setCompleted((rows) => rows.some((row) => row.fy === fy) ? rows : [...rows, { fy, plan, applied: false, unconfirmed: unconfirmed.includes(fy) }]); nextYear(file, fy); }
         }}>{fy === years.at(-1)?.fy ? "Finish checking this backup" : "Continue to next year"}</Button> : null}
       </div> : null}
-      {file && !finished && !busy && ((checked && !checked.fingerprint) || (!checked && years.length > 0)) ? <Button onClick={() => { setFileError(""); setFailure(null); checkPlan(file, fy); }}>Check the plan again</Button> : null}
+      {file && !finished && !busy && ((checked && !checked.fingerprint) || (!checked && years.length > 0)) ? <Button onClick={() => { setFileError(""); setCheckError(""); setFailure(null); checkPlan(file, fy); }}>Check the plan again</Button> : null}
       {completed.length ? <div className="flex flex-col gap-4" aria-label="Completed financial years">
         {completed.map((row) => <details key={row.fy} className="rounded-ctl border border-rule px-3 py-2">
-          <summary className="cursor-pointer font-medium">{row.fy} · {row.applied ? `Added ${row.plan.words}` : "Nothing to add"}</summary>
+          <summary className="cursor-pointer font-medium">{row.fy} · {row.applied ? `Added ${row.plan.words}` : row.unconfirmed ? "Already on file (after an unconfirmed restore)" : "Nothing to add"}</summary>
           <PlanTable plan={row.plan} /><PlanDetails plan={row.plan} done={row.applied} />
         </details>)}
         <p>Added {plural(completed.reduce((sum, row) => sum + (row.applied ? row.plan.bills.add_count + row.plan.purchases.add_count : 0), 0), "bill")} across these years.</p>
