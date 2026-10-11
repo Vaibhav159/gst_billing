@@ -7,6 +7,7 @@ export { shopSettingsQuery, useShopSettings } from "./shopSettings";
 // (core/api/query.ts): no retry and no queue, so offline a save fails at once. After any bill write, every bill, bin,
 // customer and search query asks again, except a bill whose own answer the write brought back.
 import { queryOptions, skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { invalidateDashboard, putDashboardSent } from "@/core/due/fresh";
 import { todayIST } from "@/core/format";
 import type { BillDetail, BillInput, BillRow, BillStatus, BinRow, EwayInput, SalesPage, Segment, Sent, ShopSettings } from "@/core/sales/types";
 import {
@@ -203,6 +204,7 @@ export function invalidateSales(qc: QueryClient, keep?: number): void {
   for (const queryKey of [["bin"], ["customers"], ["search"], ["gst"], ["reports"], ["catalog"], ["setup"]]) void qc.invalidateQueries({ queryKey });
   // firm numbers and figures change with a bill; the shell's slim list (no params) carries neither, so it isn't fetched again
   void qc.invalidateQueries({ queryKey: ["firms"], predicate: (q) => !(q.queryKey[1] === "list" && Object.keys((q.queryKey[2] as object | undefined) ?? {}).length === 0) });
+  invalidateDashboard(qc);
 }
 
 /** A write that answers with the bill: its page shows that answer at once, and everything else asks again. */
@@ -318,6 +320,7 @@ export type SendVia = "whatsapp" | "share";
  */
 function putSent(qc: QueryClient, id: number, sent: Sent | null): void {
   if (!sent) return;
+  putDashboardSent(qc, id, sent);
   const has = (rows: { id: number }[]) => rows.some((r) => r.id === id);
   const row = <T extends { id: number; sent: Sent | null }>(r: T): T => (r.id === id ? { ...r, sent } : r);
   const page = (p: SalesPage): SalesPage => (has(p.results) ? { ...p, results: p.results.map(row) } : p);

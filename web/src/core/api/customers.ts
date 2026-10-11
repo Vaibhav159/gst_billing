@@ -3,6 +3,7 @@
 // integer paise here; every other field keeps the contract's name. Nothing here polls: lists wait for the firm
 // (firmId !== null) and refetch only when asked for again or after a save.
 import { skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type Query, type QueryClient } from "@tanstack/react-query";
+import { invalidateDashboard } from "@/core/due/fresh";
 import { api } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { plural, toPaise } from "@/core/format";
@@ -302,6 +303,7 @@ export function useSaveCustomer() {
     onSuccess: (c) => {
       qc.setQueryData(customerKeys.one(c.id), c);
       void qc.invalidateQueries({ predicate: refreshedBySave(c.id) });
+      invalidateDashboard(qc);
     },
   });
 }

@@ -6,6 +6,7 @@
 // through the same calls, in the same DraftData.
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { invalidateDashboard } from "@/core/due/fresh";
 import axios from "axios";
 import { useAuth } from "@/core/auth/AuthProvider";
 import {
@@ -156,11 +157,12 @@ function send(qc: QueryClient, id: string): Promise<string | null> {
       row = await putDraft(id, d.business, d.data);
     } catch (e) {
       // saved as a bill already, here or on another device: this device lets it go too
-      if (savedAlready(e)) { finished.add(id); savedAs.set(id, problemOf(e).message); forgetOnDevice(id); drop(qc, id); }
+      if (savedAlready(e)) { finished.add(id); savedAs.set(id, problemOf(e).message); forgetOnDevice(id); drop(qc, id); invalidateDashboard(qc); }
       throw e;
     }
     markSynced(id, d.updated_at, row);
     upsert(qc, row); // discarded meanwhile: hidden as gone, and dropped once its delete lands
+    invalidateDashboard(qc);
     return null;
   });
 }
@@ -172,6 +174,7 @@ function deleteGone(qc: QueryClient, id: string): Promise<void> {
     await deleteDraft(id);
     if (keptDraft(id)?.gone) forgetOnDevice(id); // kept again while the delete was out: that keep goes after it
     drop(qc, id);
+    invalidateDashboard(qc);
   });
 }
 /** The shop's copy of a draft, from the list this page last read. */

@@ -208,7 +208,7 @@ test("saving posts a new customer and patches an old one, keeps the answer, and 
   expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["POST customers/", "PATCH customers/7/"]);
   expect(calls[1].data).toEqual({ pan_number: "ABCDE1234F" });
   expect(qc.getQueryData(["customers", "one", 7])).toMatchObject({ pan: "ABCDE1234F" });
-  const predicate = spy.mock.calls[1][0]!.predicate!;
+  const predicate = spy.mock.calls.filter(([filters]) => filters?.predicate).at(-1)![0]!.predicate!;
   const q = (key: unknown[]) => ({ queryKey: key }) as never;
   // Ctrl K's search ("search", term) shows customers too
   expect([predicate(q(["sales", "list"])), predicate(q(["customers", "list", {}])), predicate(q(["search", "anil"])), predicate(q(["customers", "one", 7])), predicate(q(["prefs", 1]))])
