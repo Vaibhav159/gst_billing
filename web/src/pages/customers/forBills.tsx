@@ -4,6 +4,7 @@
 // - A new customer without leaving the bill (PROTO pages/sales/parts.jsx NewCustomerForm; BillForm.jsx's sheet). The GST
 //   registry's fill-in comes with part 4's lookup.
 // - A customer's PAN or address, added from a bill (PROTO pages/sales/parts.jsx CustomerFixSheet).
+// - The typed customer search with what to say meanwhile (useTypedSearch): 1B's bill filters (Ruling 1B-18).
 // The combobox and FailNote are the kit's (@/core/ui), and failText is Selling's (@/core/sales/words): one home each.
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
@@ -40,7 +41,7 @@ function searchFailed(p: ApiProblem): string {
  * The search for what's typed, once typing pauses (from 2 characters). rows: its answer for exactly what's typed, null
  * until that has come; note: what to say meanwhile, or that it didn't work (rows are then empty).
  */
-function useTypedSearch(typed: string, size?: number): { t: string; rows: CustomerRow[] | null; note: string } {
+export function useTypedSearch(typed: string, size?: number): { t: string; rows: CustomerRow[] | null; note: string } {
   const t = typed.trim();
   const term = useDebounced(t);
   const search = useCustomerSearch(term, { size });
