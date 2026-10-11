@@ -1252,6 +1252,7 @@ class InwardCapture(AbstractBaseModel):
 
 
 class CapturePage(models.Model):
+    original_name = models.CharField(max_length=255, default="", db_default="")
     capture = models.ForeignKey(InwardCapture, on_delete=models.CASCADE, db_constraint=False,
                                 related_name="v3_pages")
     position = models.PositiveSmallIntegerField()
