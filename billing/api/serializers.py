@@ -219,6 +219,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Invoice
+        read_only_fields = Invoice.V3_FIELDS
         fields = [
             "id",
             "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "source", "linked_sale",
@@ -256,6 +257,7 @@ class InwardBillListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Invoice
+        read_only_fields = Invoice.V3_FIELDS
         fields = [
             "id",
             "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "source", "linked_sale",

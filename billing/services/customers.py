@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from django.db.models import Case, Count, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import RowNumber
+from rest_framework.exceptions import ValidationError
 
 from billing.constants import BILL_CANCELLED
 from billing.models import Invoice
@@ -91,6 +92,8 @@ def filter_customers(customers, params):
     reads them (the stored customer_type, else business with a GSTIN, else person; a GSTIN is has_gstin's, read in
     the database by tax_rules.registered)."""
     role = params.get("role")
+    if role not in (None, "", "customers", "suppliers"):
+        raise ValidationError({"role": ["Choose customers or suppliers for the role."]})
     if role in ("customers", "suppliers"):
         customers = customers.nocache().alias(
             has_purchase=Exists(Invoice.objects.purchases().filter(customer_id=OuterRef("pk"))),

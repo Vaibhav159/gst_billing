@@ -78,18 +78,7 @@ def save_purchase(data, user, invoice=None):
             if duplicate:
                 refuse_duplicate(duplicate, number)
         buyer = data.get("buyer_gstin", "")
-        if buyer and buyer != clean_gstin(business.gst_number) and not data.get("buyer_ack", False):
-            other = uncached(Business).filter(gst_number__iexact=buyer).only("name").first()
-            words = (f"This bill is addressed to {other.name}, not {business.name}." if other else
-                     f"This bill isn't addressed to {business.name}'s GSTIN.")
-            raise ValidationError({"buyer_gstin": [words]})
-        problem = gstin_problem(supplier.gst_number)
-        if problem:
-            raise ValidationError({"supplier": [problem]})
         items = [{**item, "gst_tax_rate": normalize_rate(item["gst_percent"], assume="percent")} for item in data["lines"]]
-        problem = itc_refusal(supplier.gst_number, items)
-        if problem:
-            raise ValidationError({"lines": [problem]})
         bill = old or Invoice(type_of_invoice="inward")
         bill.business, bill.customer, bill.invoice_date = business, supplier, day
         bill.invoice_number, bill.payment_mode = number, data.get("payment_mode", "")
@@ -121,6 +110,18 @@ def save_purchase(data, user, invoice=None):
                 return purchase_queryset().get(pk=bill.pk)
             if before["total_amount"] != total:
                 changed.add("total_amount")
+        if buyer and buyer != clean_gstin(business.gst_number) and not data.get("buyer_ack", False):
+            other = uncached(Business).filter(gst_number__iexact=buyer).only("name").first()
+            words = (f"This bill is addressed to {other.name}, not {business.name}." if other else
+                     f"This bill isn't addressed to {business.name}'s GSTIN.")
+            raise ValidationError({"buyer_gstin": [words]})
+        problem = gstin_problem(supplier.gst_number)
+        if problem:
+            raise ValidationError({"supplier": [problem]})
+        problem = itc_refusal(supplier.gst_number, items)
+        if problem:
+            raise ValidationError({"lines": [problem]})
+        if old:
             stale = LineItem.objects.filter(invoice_id=bill.pk)
             stale._raw_delete(stale.db)
         bill.total_amount = total

@@ -84,7 +84,7 @@ class PurchaseLineSerializer(serializers.Serializer):
                 quantity, rate = unit_split(quantity or 0, rate or 0, taxable)
                 attrs["note"] = "Amount only"
         if quantity is None or not 0 < quantity <= LINE_MOST:
-            errors["quantity"] = [f"Type the quantity in {dict(UNIT_CHOICES)[attrs['unit']].lower()}." ]
+            errors["quantity"] = [f"Type the quantity in {dict(UNIT_CHOICES)[attrs['unit']].lower()}."]
         if rate is None or rate <= 0:
             errors["rate"] = ["Type the rate printed on the bill."]
         if errors:

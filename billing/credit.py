@@ -11,6 +11,7 @@ from billing.cache import uncached
 from billing.fy import fy_of
 from billing.models import LineItem
 from billing.period_lock import assert_purchase_open, closed_credit_months, credit_month_closed
+from billing.text import day_text
 
 UNSET = object()
 LEDGER_START = date(2025, 4, 1)
@@ -28,7 +29,7 @@ def last_credit_month(bill_date):
     return date(fy_of(bill_date) + 1, 10, 1)
 
 
-def credit_lapsed(invoice, today=None):
+def credit_lapsed(invoice):
     month = credit_month_of(invoice)
     if month is None or not invoice.itc_eligible or month <= last_credit_month(invoice.invoice_date):
         return False
@@ -45,6 +46,8 @@ def next_month(month):
 
 def open_credit_months(business_id, bill_date, today=None):
     today = today or timezone.localdate()
+    if bill_date > today:
+        raise ValidationError({"invoice_date": [f"That's after today ({day_text(today)}). Check the date on the bill."]})
     if bill_date < LEDGER_START:
         return []
     closed = closed_credit_months([business_id])
