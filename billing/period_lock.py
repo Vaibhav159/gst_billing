@@ -118,3 +118,38 @@ def closed_credit_months(business_ids):
     from billing.models import FiledPeriod
     return set(uncached(FiledPeriod).filter(business_id__in=business_ids).values_list("business_id", "year", "month"))
 
+
+CREDIT_CLOSED_WORDS = {
+    "create": "so a bill can't put its credit there.",
+    "edit": "with this bill's credit in it, so it can't be changed.",
+    "files": "with this bill's credit in it, so it can't be changed.",
+    "checked": "with this bill's credit in it, so it can't be changed.",
+    "credit-month": "with this bill's credit in it, so its credit can't move.",
+    "delete": "with this bill's credit in it, so it can't be deleted.",
+    "restore": "so a deleted bill can't go back into it.",
+}
+
+
+def assert_purchase_open(business, month, action="edit"):
+    from billing.cache import uncached
+    from billing.models import Business, FiledPeriod
+    from billing.refusals import Refusal
+    business_id = getattr(business, "pk", business)
+    if month is None:
+        return
+    if not credit_month_closed(business_id, month):
+        return
+    name = business.name if isinstance(business, Business) else uncached(Business).filter(pk=business_id).values_list("name", flat=True).first()
+    period_id = uncached(FiledPeriod).filter(business_id=business_id, year=month.year, month=month.month).values_list("id", flat=True).first()
+    label = month.strftime("%B %Y")
+    raise Refusal(f"{label}'s GSTR-3B is filed for {name}, {CREDIT_CLOSED_WORDS[action]} "
+                  f"Have the owner unlock {label} in GST returns first.", "month_closed",
+                  locked_period={"id": period_id, "business": business_id, "year": month.year, "month": month.month})
+
+
+def assert_inward_unlocked(invoice, new_date=None):
+    assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
+    if getattr(invoice, "itc_month", None):
+        assert_period_unlocked(invoice.business_id, invoice.itc_month, "edit")
+    if new_date:
+        assert_period_unlocked(invoice.business_id, new_date, "edit")
