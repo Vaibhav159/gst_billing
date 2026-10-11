@@ -119,4 +119,36 @@ describe("Credit and deadlines", () => {
     await screen.findByText("Access refused.");
     expect(screen.queryByText(/No credit at risk/)).not.toBeInTheDocument();
   });
+  it("describes every at-risk bill in the banner with the server's too-late flag for its month", async () => {
+    const [bill] = creditWire.at_risk.bills;
+    const late = { ...bill, id: 78, bill_no: "JGE/1102", tax: "100.00", credit_month: "2026-11", credit_month_due: "2026-12-20" };
+    serve({ "GET businesses/": firms, "GET gst/credit/": { ...creditWire, at_risk: { ...creditWire.at_risk, tax: "1002.40", count: 2, bills: [bill, late] } } });
+    renderApp(<CreditView businessId={3} fy="2026-27" />);
+    await screen.findByRole("table");
+    expect(screen.getByText(/JGE\/1098 is set to go in October 2026's GSTR-3B, due 20 Nov 2026: in time/)).toBeVisible();
+    expect(screen.getByText(/JGE\/1102 is set to go in November 2026's GSTR-3B, due after the last day/)).toBeVisible();
+  });
+  it("names the opening FY and first month from the server rather than fixed words", async () => {
+    const opening = { ...creditWire.opening, as_of: "2024-04-01", carried_out_of_first_month: { ...creditWire.opening.carried_out_of_first_month, month: "2024-04" } };
+    serve({ "GET businesses/": firms, "GET gst/credit/": { ...creditWire, opening } });
+    renderApp(<CreditView businessId={3} fy="2026-27" />);
+    const card = await screen.findByRole("region", { name: "Credit carried into FY 2024-25" });
+    expect(card).toHaveTextContent("April 2024's return starts from this");
+    expect(card).toHaveTextContent("April 2024 ended with ₹16,000.00 carried on.");
+  });
+  it("hides the claim selector by permission, not by role name", async () => {
+    serve({ "GET businesses/": firms, "GET gst/credit/": creditWire });
+    renderApp(<CreditView businessId={3} fy="2026-27" />, { me: { role: "accountant", permissions: ["view"] } });
+    await screen.findByRole("table");
+    expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+  });
+  it("offers a link to every other firm with credit at risk", async () => {
+    const third = { id: 4, name: "RAJ JEWELS", gst_number: "08AAAAA0000A1Z5" };
+    serve({ "GET businesses/": [...firms, third], "GET gst/credit/": { ...creditWire, others_at_risk: [...creditWire.others_at_risk, { business: 4, short: "Raj", count: 2 }] } });
+    renderApp(<><CreditView businessId={3} fy="2026-27" /><Location /></>);
+    await screen.findByRole("table");
+    expect(screen.getByRole("button", { name: "Show Meera" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Show Raj" }));
+    expect(screen.getByLabelText("Location")).toHaveTextContent("/gst?tab=credit&firm=4&fy=2026-27");
+  });
 });
