@@ -70,3 +70,51 @@ test('legacy filing dates are unknown rather than overdue', () => {
   expect(screen.getByText('GSTR-3B').parentElement).toHaveTextContent('Filed before the app');
   expect(screen.queryByText(/days late/)).not.toBeInTheDocument();
 });
+
+test('a month filed before the app never asks for payment or a pay-by date', () => {
+  const m = monthFixture({ stage: 'filed' }); m.record.legacy = true; m.gstr3b!.filed = true;
+  renderApp(<StatusCard month={m} />);
+  expect(screen.queryByText(/Tax to pay in cash/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/pay by/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/carries to/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Tax in cash, worked out by the app/)).toBeInTheDocument();
+  expect(screen.getByText('as filed before the app')).toBeInTheDocument();
+});
+
+test('an unlocked legacy month shows books-now cash without a pay-by date', () => {
+  const m = monthFixture({ stage: 'unlocked' }); m.record.legacy = true;
+  renderApp(<StatusCard month={m} />);
+  expect(screen.getByText(/Tax in cash on the books now/)).toBeInTheDocument();
+  expect(screen.queryByText(/pay by/)).not.toBeInTheDocument();
+  expect(screen.getByText(/GSTR-3B was filed before the app/)).toBeInTheDocument();
+});
+
+test('a filed GSTR-3B with no typed cash says the app worked the figure out', () => {
+  const m = monthFixture({ stage: 'filed' });
+  m.record.gstr1 = record('gstr1'); m.record.gstr3b = { ...record('gstr3b'), cash: null }; m.gstr3b!.filed = true;
+  renderApp(<StatusCard month={m} />);
+  expect(screen.queryByText(/Tax paid in cash/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Tax in cash, worked out by the app/).parentElement).toHaveTextContent('₹200.00');
+  expect(screen.getByText("as filed 19 Oct 2026 · the cash paid wasn't recorded")).toBeInTheDocument();
+});
+
+test('tiles: unlocked shows its filing date, open shows the days so far, and the spoken label carries dates and urgency', () => {
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-06T12:00:00+05:30'));
+  const y = yearFixture();
+  const aug = y.months.find(m => m.month === '2026-08')!; Object.assign(aug, { stage: 'unlocked', gstr1_filed_on: '2026-09-10', gstr3b_filed_on: '2026-09-19' });
+  const jul = y.months.find(m => m.month === '2026-07')!; Object.assign(jul, { gstr1_filed_on: '2026-08-10', gstr3b_filed_on: '2026-08-19' });
+  renderApp(<MonthStrip year={y} month="2026-09" onPick={() => {}} />);
+  const augTile = screen.getByRole('radio', { name: /August 2026/ });
+  expect(augTile).toHaveTextContent('filed 19 Sep'); expect(augTile).not.toHaveTextContent('due');
+  expect(screen.getByRole('radio', { name: /October 2026/ })).toHaveTextContent('1 to 6 Oct');
+  expect(screen.getByRole('radio', { name: /July 2026/ })).toHaveAccessibleName('July 2026: Filed and locked; GSTR-1 filed 10 Aug 2026, GSTR-3B filed 19 Aug 2026');
+  const sep = screen.getByRole('radio', { name: /September 2026/ });
+  expect(sep).toHaveAccessibleName('September 2026: Ready to file, GSTR-1 due 11 Oct, in 5 days');
+  expect(sep.querySelector('.text-neg')).toHaveTextContent('due 11 Oct');
+});
+
+test('the strip stays reachable by keyboard when the selected month is not available', () => {
+  renderApp(<MonthStrip year={yearFixture()} month="2027-01" onPick={() => {}} />);
+  const tabbable = screen.getAllByRole('radio').filter(b => b.tabIndex === 0);
+  expect(tabbable).toHaveLength(1); expect(tabbable[0]).toHaveAccessibleName(/April 2026/);
+});

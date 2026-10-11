@@ -22,7 +22,7 @@ export function dueDates(month: string): Due {
   return { gstr1: `${next}-11`, gstr3b: `${next}-20`, file_from: `${next}-01` };
 }
 
-/** Pass the server's IST today so every month on the screen agrees. */
+/** Pass one IST today (todayIST(); the API sends no server date) for every month on the screen so they agree. */
 export function dueText(today: string, due: string): string {
   const days = daysBetween(today, due);
   if (days > 1) return `in ${days} days`;
