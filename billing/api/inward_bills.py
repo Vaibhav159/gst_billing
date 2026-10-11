@@ -22,7 +22,7 @@ from rest_framework.views import APIView
 
 from billing.api.media import sign_media_path
 from billing.constants import INVOICE_TYPE_INWARD, normalize_payment_mode
-from billing.models import Business, Customer, Invoice, InwardCapture, LineItem
+from billing.models import Business, CapturePage, Customer, Invoice, InwardCapture, LineItem
 from billing.period_lock import assert_period_unlocked
 from billing.tax_rules import GST_SLABS, gstin_problem, has_gstin, is_interstate, itc_refusal, normalize_rate
 from billing.utils import AIInvoiceProcessor
@@ -250,30 +250,22 @@ class InwardBillListCreateView(APIView):
         supplier.is_supplier = True
         supplier.save(update_fields=["is_supplier"])
         invalidate(Invoice, LineItem)
-        _store_file_and_preview(invoice, request.FILES.get("file"))
-
-        # Converting a phone capture: attach its stored photo as the bill's
-        # source file and retire the capture from the inbox.
+        # Reuse the v3 row lock/refusals before writing any file: a capture is filled once.
         capture_id = request.data.get("capture_id")
+        cap = None
         if capture_id:
-          # Row-locked: two concurrent converts of the same capture both read
-          # status="new" and created two inward invoices for one bill.
-          with transaction.atomic():
-              cap = InwardCapture.objects.select_for_update().filter(id=capture_id, status="new").first()
-              if cap and cap.image and not request.FILES.get("file"):
-                  class _StoredUpload:
-                      def __init__(self, f, name):
-                          self._f = f
-                          self.name = name.rsplit("/", 1)[-1]
-                          self.content_type = "image/jpeg"
-                      def read(self, *a): return self._f.read(*a)
-                      def seek(self, *a): return self._f.seek(*a)
-                  with cap.image.open("rb") as fh:
-                      _store_file_and_preview(invoice, _StoredUpload(fh, cap.image.name))
-              if cap:
-                  cap.status = "converted"
-                  cap.invoice = invoice
-                  cap.save(update_fields=["status", "invoice", "updated_at"])
+            from billing.services.capture_reads import consume_capture
+
+            cap = consume_capture(capture_id, invoice)
+        _store_file_and_preview(invoice, request.FILES.get("file"))
+        if cap and cap.image and not request.FILES.get("file"):
+            import mimetypes
+
+            from django.core.files.uploadedfile import UploadedFile
+
+            with cap.image.open("rb") as fh:
+                _store_file_and_preview(invoice, UploadedFile(fh, name=cap.image.name.rsplit("/", 1)[-1],
+                    content_type=mimetypes.guess_type(cap.image.name)[0] or "image/jpeg"))
         invoice.refresh_from_db()
         return Response(
             InwardBillSerializer(invoice, context={"request": request}).data,
@@ -339,7 +331,7 @@ class InwardBillExtractView(APIView):
         file = request.FILES.get("file") or request.FILES.get("image")
         capture_id = request.data.get("capture_id")
         if file is None and capture_id:
-            cap = InwardCapture.objects.filter(id=capture_id).first()
+            cap = InwardCapture.objects.filter(id=capture_id, discarded_at__isnull=True).first()
             if cap is None or not cap.image:
                 return Response({"error": "Capture not found."}, status=status.HTTP_404_NOT_FOUND)
             from django.core.files.uploadedfile import SimpleUploadedFile
@@ -478,7 +470,7 @@ class InwardCaptureDetailView(APIView):
     permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
 
     def get(self, request, pk):
-        c = InwardCapture.objects.filter(pk=pk).select_related("business").first()
+        c = InwardCapture.objects.filter(pk=pk, discarded_at__isnull=True).select_related("business").first()
         if c is None:
             return Response({"error": "Capture not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response({
@@ -489,11 +481,19 @@ class InwardCaptureDetailView(APIView):
             "invoice": c.invoice_id, "created_at": c.created_at.isoformat(),
         })
 
+    @transaction.atomic
     def delete(self, request, pk):
-        c = InwardCapture.objects.filter(pk=pk).first()
+        from billing.services.capture_reads import capture_used
+        from billing.services.capture_uploads import discard_files
+
+        c = InwardCapture.objects.select_for_update().filter(pk=pk, discarded_at__isnull=True).first()
         if c is None:
             return Response({"error": "Capture not found."}, status=status.HTTP_404_NOT_FOUND)
-        if c.image:
-            c.image.delete(save=False)
+        if c.status == "converted":
+            raise capture_used(c)
+        files = [(c.image.storage, c.image.name)]
+        for page in CapturePage.objects.filter(capture=c).only("file", "preview"):
+            files += [(page.file.storage, page.file.name), (page.preview.storage, page.preview.name)]
         c.delete()
+        transaction.on_commit(lambda: discard_files(files))
         return Response(status=status.HTTP_204_NO_CONTENT)

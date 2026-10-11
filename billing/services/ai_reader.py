@@ -1,5 +1,6 @@
 """One synchronous read at every v3 door, logged after it finishes; no keys in tests."""
 import json
+import logging
 import re
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -15,6 +16,8 @@ from billing.models import AiRead, Business, Customer
 from billing.tax_rules import GST_SLABS, has_gstin, normalize_rate, state_code, to_paise
 from billing.text import inr, money
 from billing.utils import AIInvoiceProcessingError, AIInvoiceProcessor
+
+logger = logging.getLogger(__name__)
 
 GROUPS = ("supplier", "gstin", "bill_no", "date", "amounts")
 FAILED = "This bill couldn't be read just now. Nothing was filled in; try again in a moment."
@@ -50,6 +53,9 @@ def cleaned_read(raw, source):
         raise ReadFailed("This doesn't look like a bill.")
     confidence = {key: "medium" if (raw.get("confidence") or {}).get(key) == "medium" else "high" for key in GROUPS}
     notes = []
+    if len(raw["lines"]) > 200:
+        confidence["amounts"] = "medium"
+        notes.append(f"This bill has {len(raw['lines'])} lines. Only the first 200 are shown; check the bill before saving.")
     seller = raw.get("supplier") if isinstance(raw.get("supplier"), dict) else {}
     buyer = raw.get("buyer") if isinstance(raw.get("buyer"), dict) else {}
     gst = str(seller.get("gst_number") or "").strip().upper()
@@ -141,6 +147,7 @@ def run_read(files, user, kind, business=None, capture=None):
             raw = processor.process_invoice_image(files[0], business_id=business.pk if business else None, pages=files, v3=True)
         result = cleaned_read(raw, "pdf" if any(file.content_type == "application/pdf" for file in files) else "photo")
     except Exception as exc:
+        logger.exception("Bill reader failed (kind=%s, pages=%s)", kind, len(files))
         AiRead.objects.create(user=user, kind=kind, business=business, capture=capture, pages=len(files), ok=False)
         if isinstance(exc, ReadFailed):
             raise

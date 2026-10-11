@@ -41,9 +41,11 @@ def capture_queryset():
 
 
 def capture_summary(capture):
+    read = capture.read_data if isinstance(capture.read_data, dict) else {}
+    irn = read.get("irn", "")
     return {"id": capture.pk, "captured_at": stamp(capture.created_at), "captured_by": person(capture.captured_by),
             "pages": capture.pages, "note": capture.note, "hint": capture.supplier_hint, "pdf": capture.pdf,
-            "irn": (capture.read_data or {}).get("irn", "")}
+            "irn": irn if isinstance(irn, str) else ""}
 
 
 def page_file(page):
@@ -93,3 +95,4 @@ def consume_capture(capture_id, invoice):
         raise capture_used(capture)
     capture.status, capture.invoice = "converted", invoice
     capture.save(update_fields=["status", "invoice"])
+    return capture
