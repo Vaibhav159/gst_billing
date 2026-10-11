@@ -58,7 +58,7 @@ def test_open_sales_write_does_not_run_return_checks():
     assert len(queries) <= 2
 
 
-def test_sales_closed_stages_keep_legacy_refusal_compatible():
+def test_sales_closed_stages_include_legacy_filed_stage():
     from billing.period_lock import assert_sales_open
     from billing.refusals import Refusal
 
@@ -67,7 +67,7 @@ def test_sales_closed_stages_keep_legacy_refusal_compatible():
     FiledPeriod.objects.create(business=firm, year=2026, month=9)
     with pytest.raises(Refusal) as legacy:
         assert_sales_open(firm, day)
-    assert "stage" not in legacy.value.detail
+    assert legacy.value.detail["stage"] == "filed"
     FilingRecord.objects.create(business=firm, year=2026, month=9, kind="gstr1", filed_on=date(2026, 10, 8))
     FilingRecord.objects.create(business=firm, year=2026, month=9, kind="gstr3b", filed_on=date(2026, 10, 9))
     with pytest.raises(Refusal) as filed:

@@ -194,7 +194,7 @@ def _reference(bill, business):
     return {**bill_ref(bill), "total_amount": money(bill.total_amount), "typed": bill.paper or not bool(standard)}
 
 
-def month_checks(business, year, month):
+def month_checks(business, year, month, *, built=None):
     first = date(year, month, 1)
     flags = checked_bills([business.pk], year, month).annotate(**{f"text_{k}": _message(k) for k in KINDS})
     bills = list(flags.select_related("customer").only("invoice_number", "invoice_date", "status", "total_amount",
@@ -234,7 +234,8 @@ def month_checks(business, year, month):
         if bill.status == BILL_ACTIVE and any(_tax_off(li) for li in bill.gst_lines):
             notes.append({"kind": "tax", "blocks": False, "text": f"{bill.invoice_number}: a line's tax doesn't match its GST rate",
                           "detail": "", "bills": [_reference(bill, business)], "more_bills": 0, "customer": None, "suggested": None})
-    built = build_gstr1(business, year, month, amendments=False)
+    if built is None:
+        built = build_gstr1(business, year, month, amendments=False)
     for gap in built["gaps"]:
         notes.append({"kind": "gap", "blocks": False, "text": f"Numbers {gap['list']} aren't on any bill",
                       "detail": "Table 13 files them as cancelled. If they're paper bills not entered yet, enter them before filing.",

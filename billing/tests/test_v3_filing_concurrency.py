@@ -26,7 +26,7 @@ class FilingConcurrencyTest(TransactionTestCase):
         answers = Queue()
         heads = {"igst": "0.00", "cgst": "15.00", "sgst": "15.00", "total": "30.00"}
 
-        def snapshot(_business, _month, _kind):
+        def snapshot(_business, _month, _kind, **kwargs):
             if threading.current_thread().name == "filing-first":
                 captured.set()
                 if not release.wait(5):

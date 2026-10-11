@@ -1,11 +1,14 @@
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal as D
+from unittest.mock import patch
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from rest_framework.exceptions import ValidationError
 
-from billing.models import BinnedInvoice, Invoice, LineItem
+from billing.models import BinnedInvoice, FilingRecord, Invoice, LineItem
 from billing.services.gstr1_file import build_amendments, build_gstr1
 from billing.tests.v3_helpers import buyer, firm, line, sale
 
@@ -215,3 +218,271 @@ def test_gstn_schema_contract_and_capture_synthetic_payloads():
     capture = os.environ.get("GST_SCHEMA_CAPTURE")
     if capture:
         Path(capture).write_text(json.dumps(payloads))
+
+
+@pytest.mark.parametrize("month,tabs", [(4, {"data"}), (5, {"hsn_b2b", "hsn_b2c"})])
+def test_hsn_split_starts_may_2025_and_screen_quantity_is_two_decimals(month, tabs):
+    b = firm()
+    for number, customer in [("1", buyer()), ("2", buyer(name="Registered", gst_number="08AAGPL3375F1ZO"))]:
+        sale(b, customer, number, date(2025, month, 1), line(qty="1.005"))
+    built = build_gstr1(b, 2025, month, amendments=False)
+    assert set(built["file"]["hsn"]) == tabs
+    if month == 4:
+        rows = built["file"]["hsn"]["data"]
+        assert len(rows) == 1
+        assert rows[0]["qty"] == 2.01
+        assert rows[0]["txval"] == 20100
+        assert built["sections"]["hsn"]["b2b"] == built["sections"]["hsn"]["b2c"] == []
+        section = built["sections"]["hsn"]["data"][0]
+        assert section["quantity"] == "2.01"
+        assert section["taxable"] == "20100.00"
+        assert section["bills"] == 2
+        assert section["description"] == "Jewellery, gold or silver"
+    else:
+        for rows in built["sections"]["hsn"].values():
+            assert rows[0]["quantity"] == "1.01"
+
+
+@pytest.mark.parametrize("before_3b", [False, True])
+def test_added_amendment_includes_taxable_and_nil_hsn_and_table8(before_3b):
+    b, c = firm(), buyer(gst_number="08AAGPL3375F1ZO")
+    inv = sale(b, c, "LATE-1", date(2026, 9, 1), line(rate="100"), line(rate="50", gst="0"))
+    after = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    amended = build_amendments(b, 2026, 9 if before_3b else 10,
+        [{"month": "2026-09", "before": None, "after": after}], before_gstr3b=before_3b,
+        today=date(2026, 10, 10))
+    rows = {row["rt"]: row for row in amended["hsn"]["hsn_b2b"]}
+    assert (rows[3]["txval"], rows[3]["qty"], rows[3]["camt"], rows[0]["txval"]) == (100, 1, 1.5, 50)
+    assert amended["nil"]["inv"] == [{"sply_ty": "INTRAB2B", "nil_amt": 50, "expt_amt": 0, "ngsup_amt": 0}]
+    assert amended["b2b"][0]["inv"][0]["itms"][0]["itm_det"]["txval"] == 100
+
+
+@pytest.mark.parametrize("registered,before_3b", [(False, False), (True, False), (True, True)])
+def test_nil_only_correction_has_signed_supplements_without_empty_invoice(registered, before_3b):
+    b = firm()
+    c = buyer(gst_number="08AAGPL3375F1ZO" if registered else "")
+    inv = sale(b, c, "NIL-1", date(2026, 9, 1), line(rate="100", gst="0"))
+    before = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    LineItem.objects.filter(invoice=inv).update(rate=D("75"))
+    after = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    amended = build_amendments(b, 2026, 9 if before_3b else 10,
+        [{"month": "2026-09", "before": before, "after": after}], before_gstr3b=before_3b,
+        today=date(2026, 10, 10))
+    tab = "hsn_b2b" if registered else "hsn_b2c"
+    assert amended["hsn"][tab][0]["txval"] == -25
+    assert amended["hsn"][tab][0]["qty"] == 0
+    assert amended["nil"]["inv"][0]["nil_amt"] == -25
+    assert not any(key in amended for key in ("b2b", "b2cl", "b2cs", "b2ba", "b2cla", "b2csa"))
+
+
+def test_hsn_unit_only_correction_moves_exact_money_and_filed_quantity():
+    b, c = firm(), buyer()
+    inv = sale(b, c, "UNIT-1", date(2026, 9, 1), line(rate="100", unit="ct", hsn="710239"))
+    before = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    LineItem.objects.filter(invoice=inv).update(unit="tola", hsn_code="711311")
+    after = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    amended = build_amendments(b, 2026, 10, [{"month": "2026-09", "before": before, "after": after}],
+                               today=date(2026, 10, 10))
+    rows = {row["hsn_sc"]: row for row in amended["hsn"]["hsn_b2c"]}
+    assert (rows["710239"]["qty"], rows["710239"]["txval"], rows["710239"]["uqc"]) == (-1, -100, "CTM")
+    assert (rows["711311"]["qty"], rows["711311"]["txval"], rows["711311"]["uqc"]) == (11.66, 100, "GMS")
+    assert sum(row["camt"] for row in rows.values()) == 0
+
+
+def test_cancelled_mixed_bill_reverses_hsn_and_nil_without_mutating_snapshot():
+    b, c = firm(), buyer(gst_number="08AAGPL3375F1ZO")
+    inv = sale(b, c, "VOID-1", date(2026, 9, 1), line(rate="100"), line(rate="50", gst="0"))
+    before = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    preserved = deepcopy(before)
+    amended = build_amendments(b, 2026, 10, [{"month": "2026-09", "before": before, "after": None}],
+                               today=date(2026, 10, 10))
+    assert sum(row["txval"] for row in amended["hsn"]["hsn_b2b"]) == -150
+    assert amended["nil"]["inv"][0]["nil_amt"] == -50
+    assert amended["b2ba"][0]["inv"][0]["val"] == 0
+    assert before == preserved
+
+
+def test_attach_amendments_combines_current_hsn_nil_and_reuses_source_build():
+    from billing.services.gstr1_file import attach_amendments
+
+    b, c = firm(), buyer()
+    inv = sale(b, c, "OLD-1", date(2026, 9, 1), line(rate="100"), line(rate="50", gst="0"))
+    before = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    LineItem.objects.filter(invoice=inv, gst_tax_rate=D("0.03")).update(rate=D("150"), cgst=D("2.25"), sgst=D("2.25"))
+    LineItem.objects.filter(invoice=inv, gst_tax_rate=D("0")).update(rate=D("75"))
+    sale(b, c, "NOW-1", date(2026, 10, 1), line(rate="1000"), line(rate="100", gst="0"))
+    cache = {}
+    source = build_gstr1(b, 2026, 9, amendments=False, month_builds=cache)
+    base = build_gstr1(b, 2026, 10, amendments=False, month_builds=cache)
+    changes = [{"month": "2026-09", "before": before, "after": source["bills"][str(inv.pk)]}]
+    preserved = deepcopy(base)
+    with CaptureQueriesContext(connection) as captured:
+        assert build_gstr1(b, 2026, 9, amendments=False, month_builds=cache) is source
+        amended = attach_amendments(base, b, 2026, 10, changes, month_builds=cache, strict=True)
+    assert not captured
+    rows = {row["rt"]: row for row in amended["file"]["hsn"]["hsn_b2c"]}
+    assert (rows[3]["txval"], rows[0]["txval"]) == (1050, 125)
+    assert amended["file"]["nil"]["inv"][0]["nil_amt"] == 125
+    section_rows = {row["rate"]: row for row in amended["sections"]["hsn"]["b2c"]}
+    assert (section_rows["3"]["taxable"], section_rows["0"]["taxable"]) == ("1050.00", "125.00")
+    assert section_rows["3"]["bills"] == section_rows["0"]["bills"] == 2
+    assert amended["sections"]["nil"] == [{"supply": "INTRAB2C", "bills": 2, "value": "125.00"}]
+    assert base == preserved
+
+
+def test_ambiguous_legacy_hsn_money_refuses_strict_but_keeps_month_readable():
+    from billing.services.gstr1_file import attach_amendments
+
+    b, c = firm(), buyer()
+    inv = sale(b, c, "OLD-AMBIGUOUS", date(2026, 9, 1), line(rate="100", hsn="711311"),
+               line(rate="200", hsn="710239"))
+    built = build_gstr1(b, 2026, 9, amendments=False)
+    before = deepcopy(built["bills"][str(inv.pk)])
+    for item in before["hsn"]:
+        for field in ("taxable", "igst", "cgst", "sgst"):
+            item.pop(field, None)
+    after = deepcopy(built["bills"][str(inv.pk)])
+    after["hsn"][0]["unit"] = "ct"
+    changes = [{"month": "2026-09", "before": before, "after": after}]
+    with pytest.raises(ValidationError) as caught:
+        build_amendments(b, 2026, 10, changes, today=date(2026, 10, 10))
+    words = str(caught.value.detail)
+    assert "OLD-AMBIGUOUS" in words and "CA" in words and "HSN" in words
+    assert caught.value.get_codes()["amendments"] == ["unsupported_amendment"]
+    result = attach_amendments(built, b, 2026, 10, changes)
+    assert "OLD-AMBIGUOUS" in result["meta"]["amendment_errors"][0]
+    with patch("billing.services.filing.pending_amendments", return_value=changes), pytest.raises(ValidationError):
+        build_gstr1(b, 2026, 10, strict_amendments=True)
+
+
+def test_legacy_hsn_money_is_inferred_only_when_rate_has_one_hsn_unit_group():
+    b, c = firm(), buyer()
+    inv = sale(b, c, "OLD-SIMPLE", date(2026, 9, 1), line(rate="100"), line(rate="200"))
+    before = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    for item in before["hsn"]:
+        for field in ("taxable", "igst", "cgst", "sgst"):
+            item.pop(field, None)
+    amended = build_amendments(b, 2026, 10, [{"month": "2026-09", "before": before, "after": None}],
+                               today=date(2026, 10, 10))
+    row = amended["hsn"]["hsn_b2c"][0]
+    assert (row["qty"], row["txval"], row["camt"]) == (-2, -300, -4.5)
+
+
+def test_snapshot_comparison_ignores_added_money_only_for_legacy_hsn_rows():
+    from billing.services.gstr1_file import snapshots_equal
+
+    b, c = firm(), buyer()
+    inv = sale(b, c, "COMPARE-1", date(2026, 9, 1))
+    after = build_gstr1(b, 2026, 9, amendments=False)["bills"][str(inv.pk)]
+    before = deepcopy(after)
+    for field in ("taxable", "igst", "cgst", "sgst"):
+        before["hsn"][0].pop(field)
+    assert snapshots_equal(before, after)
+    for field in ("hsn", "unit", "quantity", "description", "rate"):
+        changed = deepcopy(after)
+        changed["hsn"][0][field] = "different"
+        assert not snapshots_equal(before, changed)
+    changed = deepcopy(after)
+    changed["rates"][0]["taxable"] = "999.00"
+    assert not snapshots_equal(before, changed)
+    changed = deepcopy(after)
+    changed["hsn"][0]["taxable"] = "999.00"
+    assert not snapshots_equal(after, changed)
+
+
+@pytest.mark.parametrize("unchanged_quantity,expected_delta", [(None, D("0.01")), ("0.001", D("0.00"))])
+def test_amended_hsn_quantity_is_difference_of_rounded_month_groups(unchanged_quantity, expected_delta):
+    b, c = firm(), buyer(gst_number="08AAGPL3375F1ZO")
+    inv = sale(b, c, "ROUND-1", date(2026, 9, 1), line(rate="100", qty="1.004"))
+    if unchanged_quantity:
+        sale(b, c, "ROUND-2", date(2026, 9, 2), line(rate="100", qty=unchanged_quantity))
+    before_build = build_gstr1(b, 2026, 9, amendments=False)
+    LineItem.objects.filter(invoice=inv).update(quantity=D("1.005"))
+    after_build = build_gstr1(b, 2026, 9, amendments=False)
+    amended = build_amendments(b, 2026, 10, [{"month": "2026-09",
+        "before": before_build["bills"][str(inv.pk)], "after": after_build["bills"][str(inv.pk)]}],
+        today=date(2026, 10, 10), month_builds={(2026, 9): after_build})
+    assert D(str(amended["hsn"]["hsn_b2b"][0]["qty"])) == expected_delta
+    assert (D(str(after_build["file"]["hsn"]["hsn_b2b"][0]["qty"])) -
+            D(str(before_build["file"]["hsn"]["hsn_b2b"][0]["qty"]))) == expected_delta
+
+
+@pytest.mark.parametrize("removed", [False, True])
+def test_supplement_sections_preserve_full_descriptions_and_positive_contributor_counts(removed):
+    from billing.services.gstr1_file import attach_amendments
+
+    b, c = firm(), buyer()
+    description = "High pressure hydraulic pump assembly and fittings"
+    inv = sale(b, c, "SUPPLEMENT-1", date(2026, 9, 1), line(rate="100", hsn="8413", name=description, unit="nos"),
+               line(rate="50", gst="0", hsn="9988", qty="2"))
+    source = build_gstr1(b, 2026, 9, amendments=False)
+    snapshot = source["bills"][str(inv.pk)]
+    base = build_gstr1(b, 2026, 10, amendments=False)
+    preserved = deepcopy(base)
+    changes = [{"month": "2026-09", "before": snapshot if removed else None,
+                "after": None if removed else snapshot}]
+    amended = attach_amendments(base, b, 2026, 10, changes, month_builds={(2026, 9): source}, strict=True)
+    rows = {row["hsn"]: row for row in amended["sections"]["hsn"]["b2c"]}
+    sign = "-" if removed else ""
+    assert rows["8413"] == {"hsn": "8413", "description": description, "uqc": "NOS", "quantity": sign + "1.00",
+                            "rate": "3", "taxable": sign + "100.00", "igst": "0.00", "cgst": sign + "1.50",
+                            "sgst": sign + "1.50", "service": False, "bills": 1}
+    assert (rows["9988"]["service"], rows["9988"]["quantity"], rows["9988"]["bills"]) == (True, "0.00", 1)
+    assert amended["sections"]["nil"] == [{"supply": "INTRAB2C", "bills": 1, "value": sign + "100.00"}]
+    assert base == preserved
+
+
+def test_gstr1a_wrapper_builds_source_month_once():
+    from billing.services.gstr1_file import build_gstr1a
+
+    b, c = firm(), buyer()
+    inv = sale(b, c, "ONCE-1", date(2026, 9, 1), line(rate="100"))
+    filed = build_gstr1(b, 2026, 9, amendments=False)
+    FilingRecord.objects.create(business=b, year=2026, month=9, kind="gstr1", filed_on=date(2026, 10, 1),
+                                bills=filed["bills"], figures=filed["figures"], file=filed["file"])
+    LineItem.objects.filter(invoice=inv).update(rate=D("150"), cgst=D("2.25"), sgst=D("2.25"))
+    with patch("billing.services.gstr1_file.build_gstr1", wraps=build_gstr1) as wrapped:
+        result = build_gstr1a(b, 2026, 9)
+    assert wrapped.call_count == 1
+    assert result["hsn"]["hsn_b2c"][0]["txval"] == 50
+
+
+def test_april_correction_refuses_unallocatable_quantity_rounding_in_may_split():
+    b = firm()
+    registered = buyer(gst_number="08AAGPL3375F1ZO")
+    inv = sale(b, registered, "APRIL-ROUND", date(2025, 4, 1), line(rate="100", qty="1.004"))
+    sale(b, buyer(name="Unregistered"), "APRIL-SMALL", date(2025, 4, 2), line(rate="100", qty="0.001"))
+    before = build_gstr1(b, 2025, 4, amendments=False)
+    LineItem.objects.filter(invoice=inv).update(quantity=D("1.005"))
+    after = build_gstr1(b, 2025, 4, amendments=False)
+    assert before["file"]["hsn"]["data"][0]["qty"] == after["file"]["hsn"]["data"][0]["qty"] == 1.01
+    with pytest.raises(ValidationError) as caught:
+        build_amendments(b, 2025, 5, [{"month": "2025-04", "before": before["bills"][str(inv.pk)],
+                                      "after": after["bills"][str(inv.pk)]}], today=date(2025, 6, 1),
+                         month_builds={(2025, 4): after})
+    assert "APRIL-ROUND" in str(caught.value.detail)
+    assert "rounding" in str(caught.value.detail) and "CA" in str(caught.value.detail)
+
+
+@pytest.mark.parametrize("redistributed", [False, True])
+def test_legacy_ambiguous_amounts_cannot_be_declared_unchanged(redistributed):
+    from billing.services.filing import changes_for_month
+
+    b, c = firm(), buyer()
+    inv = sale(b, c, "AMBIG-BASELINE", date(2026, 9, 1), line(rate="100", hsn="8413"),
+               line(rate="200", hsn="8501"))
+    filed = build_gstr1(b, 2026, 9, amendments=False)
+    for row in filed["bills"][str(inv.pk)]["hsn"]:
+        for field in ("taxable", "igst", "cgst", "sgst"):
+            row.pop(field)
+    FilingRecord.objects.create(business=b, year=2026, month=9, kind="gstr1", filed_on=date(2026, 10, 1),
+                                bills=filed["bills"], figures=filed["figures"], file=filed["file"])
+    if redistributed:
+        LineItem.objects.filter(invoice=inv, hsn_code="8413").update(rate=D("200"), cgst=D("3"), sgst=D("3"))
+        LineItem.objects.filter(invoice=inv, hsn_code="8501").update(rate=D("100"), cgst=D("1.5"), sgst=D("1.5"))
+    changes = changes_for_month(b, 2026, 9)
+    assert len(changes) == 1
+    assert changes[0]["before"]["taxable"] == changes[0]["after"]["taxable"] == "300.00"
+    with pytest.raises(ValidationError) as caught:
+        build_amendments(b, 2026, 10, changes, today=date(2026, 10, 10))
+    assert "AMBIG-BASELINE" in str(caught.value.detail) and "CA" in str(caught.value.detail)

@@ -10,6 +10,8 @@ from django.utils import timezone
 from billing.fy import due_dates
 from billing.tax_rules import HEADS, to_paise
 
+INTEREST_NOTE = "worked out to today; check on the portal"
+
 
 def heads(values=None):
     amounts = {head: to_paise((values or {}).get(head, 0)) for head in HEADS}

@@ -92,32 +92,44 @@ class GstFile(APIView):
             if not business.gst_number:
                 raise ValidationError({"detail": f"{business.name} has no GSTIN. Add it on the firm first."})
             from billing.services.gst_checks import month_checks
-            from billing.services.gstr1_file import build_amendments, build_gstr1, build_gstr1a
+            from billing.services.gstr1_file import build_amendments, build_gstr1
             if kind == "gstr1":
-                checks = month_checks(business, month.year, month.month)["blockers"]
+                from billing.services.filing import pending_amendments
+                from billing.services.gstr1_file import attach_amendments
+                month_builds = {}
+                own = build_gstr1(business, month.year, month.month, amendments=False, month_builds=month_builds)
+                checks = month_checks(business, month.year, month.month, built=own)["blockers"]
                 if checks:
                     n = len(checks)
                     raise Refusal(f"{n} check{'s fail' if n != 1 else ' fails'} for {month:%B %Y}, so the portal file isn't made. Fix {'them' if n != 1 else 'it'} first.", "checks_failing", checks=checks)
-                contents = build_gstr1(business, month.year, month.month)["file"]
+                changes = pending_amendments(business, month.year, month.month, month_builds=month_builds)
+                contents = attach_amendments(own, business, month.year, month.month, changes,
+                                            month_builds=month_builds, strict=True)["file"]
             elif kind == "gstr1a":
                 from billing.period_lock import month_status
                 from billing.services.filing import changes_for_month
                 state = month_status(business.pk, month.year, month.month)
                 if state.gstr3b or state.legacy:
                     raise Refusal(f"{month:%B %Y}'s GSTR-3B is marked filed, so corrections go in the next GSTR-1, not GSTR-1A.", "gstr3b_filed")
-                if not state.gstr1 or not changes_for_month(business, month.year, month.month):
+                month_builds = {}
+                changes = changes_for_month(business, month.year, month.month, month_builds=month_builds) if state.gstr1 else []
+                if not changes:
                     raise Refusal(f"Nothing has changed since {month:%B %Y}'s GSTR-1, so there's no GSTR-1A to record.", "no_corrections")
-                contents = build_gstr1a(business, month.year, month.month)
+                contents = build_amendments(business, month.year, month.month, changes,
+                                             before_gstr3b=True, month_builds=month_builds)
             elif kind == "amendments":
-                from billing.services.filing import amendment_plan, changes_for_month
-                plan = amendment_plan(business, month.year, month.month)
+                from billing.services.filing import amendment_plan, changes_for_month, changes_since_filing
+                month_builds = {}
+                changes = changes_for_month(business, month.year, month.month, month_builds=month_builds)
+                summary = changes_since_filing(business, month.year, month.month, changes=changes)
+                plan = amendment_plan(business, month.year, month.month, changes=summary)
                 if not plan or not plan["rows"]:
                     raise Refusal(f"Nothing has changed since {month:%B %Y}'s GSTR-1, so there's no GSTR-1A to record.", "no_corrections")
-                changes = changes_for_month(business, month.year, month.month)
                 corrected = month
                 month = date.fromisoformat(plan["carried_by"] + "-01")
                 contents = build_amendments(business, month.year, month.month,
-                    [{**row, "month": corrected.strftime("%Y-%m")} for row in changes], before_gstr3b=plan["before_gstr3b"])
+                    [{**row, "month": corrected.strftime("%Y-%m")} for row in changes],
+                    before_gstr3b=plan["before_gstr3b"], month_builds=month_builds)
                 kind = "gstr1a" if plan["before_gstr3b"] else "amend"
             else:
                 from billing.services.ledger import build_gstr3b_json
@@ -125,6 +137,9 @@ class GstFile(APIView):
         record_download(business, month, "gstr1_filed" if as_filed else kind, request.user, via, contents)
         response = HttpResponse(json.dumps(contents, cls=JSONEncoder, ensure_ascii=False), content_type="application/json")
         response["Content-Disposition"] = f'attachment; filename="{file_name(business, month, kind)}"'
+        if kind == "gstr3b":
+            from billing.services.gst_amounts import INTEREST_NOTE
+            response["X-GST-Interest-Note"] = INTEREST_NOTE
         return response
 
 
@@ -206,7 +221,9 @@ def opening_data(business):
         "updated_by__id", "updated_by__username", "updated_by__first_name", "updated_by__last_name").first()
     values = {key: getattr(row, key, 0) for key in ("igst", "cgst", "sgst")}
     values["total"] = sum(values.values())
+    first = uncached(FilingRecord).filter(business_id=business.pk, kind="gstr3b").order_by("year", "month").values("year", "month").first()
     return {"business": business.pk, "as_of": "2025-04-01", **{key: money(value) for key, value in values.items()},
+            "first_filed_3b": f"{first['year']:04d}-{first['month']:02d}" if first else None,
             "typed": row is not None, "updated_by": person(row.updated_by) if row else None,
             "updated_at": stamp(row.updated_at) if row else None,
             "carried_out_of_first_month": {"month": "2025-04", "heads": wire(month_position(business, 2025, 4)["carry_on"])}}

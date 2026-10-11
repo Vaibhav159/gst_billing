@@ -6,7 +6,22 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from django.core.exceptions import ImproperlyConfigured
-from django.db.models import BooleanField, Case, Count, DateField, Exists, F, IntegerField, Min, OuterRef, Q, Sum, When
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    DateField,
+    Exists,
+    F,
+    IntegerField,
+    Min,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
 from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, TruncMonth
 from django.utils import timezone
 
@@ -15,6 +30,7 @@ from billing.constants import GST_CODE
 from billing.fy import fy_of, fy_range
 from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, LineItem, OpeningCredit
 from billing.services.gst_amounts import (
+    INTEREST_NOTE,
     add_heads,
     heads,
     late_cost,
@@ -104,9 +120,10 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
                "carry_in": carry, "carry_source": {"heads": carry, "from": previous, "as_filed": earlier_filed,
                             "opening": previous is None},
                "available": available, **set_off(output, available),
-               "filed": False, "as_filed_at": None, "cash_paid": None,
+               "filed": False, "recorded": bool(record and record.get("recorded", True)),
+               "as_filed_at": None, "cash_paid": None,
                "amendments": amendments, "amendments_in": [entry["month"] for entry in amendments],
-               "opening_missing": not opening_typed and not any(r["filed"] for r in result.values())}
+               "opening_missing": not opening_typed and not any(r["recorded"] for r in result.values())}
         if locked:
             figures = deepcopy(record["figures"])
             for kind in ("output", "credit", "base_output", "base_credit", "used", "cash", "carry_on", "available"):
@@ -119,8 +136,10 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
             if "steps" in figures:
                 figures["steps"] = [{**step, "amount": to_paise(step["amount"])} for step in figures["steps"]]
             row.update(figures)
-            row.update(filed=True, as_filed_at=record.get("marked_at"), cash_paid=record.get("cash_paid"),
-                       opening_missing=False)
+            row.update(filed=True, recorded=record.get("recorded", True), as_filed_at=record.get("marked_at"),
+                       cash_paid=record.get("cash_paid"))
+            if row["recorded"]:
+                row["opening_missing"] = False
             if record.get("credit_left") is not None:
                 row["carry_on"] = heads(record["credit_left"])
             delta = {"month": key, "taxable": base_taxable - Decimal(str(figures.get("base_taxable", figures.get("taxable", 0))))
@@ -143,20 +162,39 @@ def calculate_ledger(books, frozen, opening, upto, *, opening_typed=True):
     return result
 
 
-def _purchase_lines(business):
+def _credit_lapse(lines, *, filing_month=None, filing_date=None):
+    """Annotate Sec 16(4) from the recorded filing day, else the month rule.
+
+    The caller supplies credit_month and credit_eligible. A filing in progress
+    supplies its day before its immutable FilingRecord snapshot is created.
+    Correlated scalar lookup keeps this within the caller's aggregate query.
+    """
+    lines = (lines.annotate(bill_year=ExtractYear("invoice__invoice_date"), bill_month=ExtractMonth("invoice__invoice_date"))
+             .annotate(bill_fy=F("bill_year") - Case(When(bill_month__lt=4, then=1), default=0, output_field=IntegerField()),
+                       credit_year=ExtractYear("credit_month"), credit_month_number=ExtractMonth("credit_month")))
+    recorded = uncached(FilingRecord).filter(business_id=OuterRef("invoice__business_id"), kind="gstr3b",
+                                             year=OuterRef("credit_year"), month=OuterRef("credit_month_number"))
+    claimed_on = Subquery(recorded.values("filed_on")[:1], output_field=DateField())
+    if filing_date is not None:
+        claimed_on = Case(When(credit_month=filing_month, then=Value(filing_date)), default=claimed_on, output_field=DateField())
+    lines = lines.annotate(claimed_on=claimed_on).annotate(
+        claim_year=ExtractYear("claimed_on"), claim_month_number=ExtractMonth("claimed_on"))
+    after_month = Q(credit_year__gt=F("bill_fy") + 1) | Q(credit_year=F("bill_fy") + 1, credit_month_number__gt=10)
+    after_date = Q(claim_year__gt=F("bill_fy") + 1) | Q(claim_year=F("bill_fy") + 1, claim_month_number__gt=11)
+    return lines.annotate(lapsed=Case(When(Q(credit_eligible=True) & (
+        Q(claimed_on__isnull=True) & after_month | Q(claimed_on__isnull=False) & after_date), then=True),
+        default=False, output_field=BooleanField()))
+
+
+def _purchase_lines(business, *, filing_month=None, filing_date=None):
     required = {"itc_month", "itc_eligible", "needs_review"}
     if not required <= {field.name for field in Invoice._meta.fields}:
         raise ImproperlyConfigured("3A ledger requires part 2A's itc_month, itc_eligible and needs_review fields.")
-    return (uncached(LineItem).filter(invoice__business_id=business.pk, invoice__type_of_invoice="inward",
+    lines = (uncached(LineItem).filter(invoice__business_id=business.pk, invoice__type_of_invoice="inward",
                                       invoice__invoice_date__gte=START)
             .annotate(credit_month=Coalesce("invoice__itc_month", TruncMonth("invoice__invoice_date"), output_field=DateField()),
-                      bill_year=ExtractYear("invoice__invoice_date"), bill_month=ExtractMonth("invoice__invoice_date"))
-            .annotate(bill_fy=F("bill_year") - Case(When(bill_month__lt=4, then=1), default=0, output_field=IntegerField()),
-                      credit_year=ExtractYear("credit_month"), credit_month_number=ExtractMonth("credit_month"))
-            .annotate(lapsed=Case(When(Q(invoice__itc_eligible=True) & (
-                Q(credit_year__gt=F("bill_fy") + 1) |
-                Q(credit_year=F("bill_fy") + 1, credit_month_number__gt=10)), then=True),
-                default=False, output_field=BooleanField())))
+                      credit_eligible=F("invoice__itc_eligible")))
+    return _credit_lapse(lines, filing_month=filing_month, filing_date=filing_date)
 
 
 def _sums():
@@ -167,7 +205,7 @@ def _sales_lines(business):
     return uncached(LineItem).counted().filter(invoice__business_id=business.pk, invoice__type_of_invoice="outward")
 
 
-def _book_groups(business, upto):
+def _book_groups(business, upto, *, filing_date=None):
     end, books = next_month(upto), {}
     sales = (_sales_lines(business).filter(invoice__invoice_date__gte=START, invoice__invoice_date__lt=end)
              .annotate(month=TruncMonth("invoice__invoice_date")).values("month")
@@ -175,7 +213,7 @@ def _book_groups(business, upto):
     for row in sales:
         books.setdefault(month_key(row["month"]), {})["output"] = heads(row)
         books[month_key(row["month"])]["taxable"] = to_paise(row["taxable"] or 0)
-    purchases = (_purchase_lines(business).filter(credit_month__gte=START, credit_month__lt=end,
+    purchases = (_purchase_lines(business, filing_month=upto, filing_date=filing_date).filter(credit_month__gte=START, credit_month__lt=end,
                                                   invoice__itc_eligible=True, lapsed=False)
                  .values("credit_month").annotate(**_sums()).order_by())
     for row in purchases:
@@ -199,28 +237,30 @@ def _records(business, upto):
         paid = ({head: row["cash_" + head] for head in HEADS} if row["cash_igst"] is not None
                 else {head: None for head in HEADS})
         paid["total"] = row["cash_total"]
-        frozen[key] = {"figures": row["figures"], "marked_at": row["marked_at"], "cash_paid": paid,
+        frozen[key] = {"figures": row["figures"], "recorded": True, "marked_at": row["marked_at"], "cash_paid": paid,
                        "locked": (row["year"], row["month"]) not in opened,
                        "credit_left": (heads({head: row["credit_left_" + head] for head in HEADS})
                                        if row["credit_left_igst"] is not None else None)}
     for row in month_rows:
         key = f'{row["year"]:04d}-{row["month"]:02d}'
         if key not in frozen and row["legacy_figures"]:
-            frozen[key] = {"figures": row["legacy_figures"], "marked_at": row["legacy_frozen_at"],
+            frozen[key] = {"figures": row["legacy_figures"], "recorded": False, "marked_at": row["legacy_frozen_at"],
                            "cash_paid": None, "credit_left": None,
                            "locked": (row["year"], row["month"]) not in opened}
     return frozen
 
 
-def ledger(business, upto, *, today=None, opening=None, freeze=True):
+def ledger(business, upto, *, today=None, opening=None, freeze=True, filing_date=None):
     today = today or timezone.localdate()
     upto = date.fromisoformat(upto + "-01") if isinstance(upto, str) else upto.replace(day=1)
     if upto < START or upto > today.replace(day=1):
         return {}
     saved = uncached(OpeningCredit).filter(business_id=business.pk).values(*HEADS).first()
-    books, frozen = _book_groups(business, upto), _records(business, upto)
-    # Legacy locks have no portal carry recorded. Their frozen baseline is the
-    # locked books; the unlock service persists it before permitting any edit.
+    books = _book_groups(business, upto, filing_date=filing_date) if filing_date is not None else _book_groups(business, upto)
+    frozen = _records(business, upto)
+    effective_opening = heads(opening if opening is not None else saved)
+    # Legacy locks without figures are recomputed from the opening being read
+    # or previewed. The unlock service persists a baseline before books change.
     legacy = list(uncached(FiledPeriod).filter(business_id=business.pk)
                   .filter(Q(year__lt=upto.year) | Q(year=upto.year, month__lte=upto.month))
                   .values("year", "month"))
@@ -228,14 +268,15 @@ def ledger(business, upto, *, today=None, opening=None, freeze=True):
         for old in sorted(legacy, key=lambda row: (row["year"], row["month"])):
             key = f'{old["year"]:04d}-{old["month"]:02d}'
             if key >= month_key(START) and key not in frozen:
-                position = calculate_ledger(books, frozen, heads(saved), key, opening_typed=saved is not None)[key]
-                frozen[key] = {"figures": position, "locked": True, "credit_left": None}
-    return calculate_ledger(books, frozen if freeze else {}, heads(opening if opening is not None else saved),
+                position = calculate_ledger(books, frozen, effective_opening, key,
+                                            opening_typed=opening is not None or saved is not None)[key]
+                frozen[key] = {"figures": position, "recorded": False, "locked": True, "credit_left": None}
+    return calculate_ledger(books, frozen if freeze else {}, effective_opening,
                             month_key(upto), opening_typed=opening is not None or saved is not None)
 
 
-def month_position(business, year, month, *, today=None):
-    return ledger(business, date(year, month, 1), today=today).get(f"{year:04d}-{month:02d}")
+def month_position(business, year, month, *, today=None, filing_date=None):
+    return ledger(business, date(year, month, 1), today=today, filing_date=filing_date).get(f"{year:04d}-{month:02d}")
 
 
 def opening_effect(business, opening, *, today=None):
@@ -243,7 +284,7 @@ def opening_effect(business, opening, *, today=None):
     before = ledger(business, today, today=today)
     after = ledger(business, today, today=today, opening=opening)
     hypothetical = ledger(business, today, today=today, opening=opening, freeze=False)
-    frozen = [key for key, row in before.items() if row["filed"]]
+    frozen = [key for key, row in before.items() if row["recorded"]]
     keys = list(before)
     reaches = keys[keys.index(frozen[0]) - 1] if frozen and keys.index(frozen[0]) else (None if frozen else keys[-1])
     changed = [key for key in frozen if any(before[key][field] != hypothetical[key][field]
@@ -268,17 +309,17 @@ def _turnover(business, day):
                     .aggregate(total=Sum(taxable_expression()))["total"] or 0)
 
 
-def gstr3b_tables(business, year, month, *, today=None, position=None):
+def gstr3b_tables(business, year, month, *, today=None, position=None, filing_date=None):
     today = today or timezone.localdate()
     day, key = date(year, month, 1), f"{year:04d}-{month:02d}"
     if position is None:
-        position = month_position(business, year, month, today=today)
+        position = month_position(business, year, month, today=today, filing_date=filing_date)
     if position is None:
         return None
     if position["filed"] and position.get("tables"):
         tables = deepcopy(position["tables"])
         tables.update(filed=True, as_filed_at=position["as_filed_at"], cash_paid=position["cash_paid"],
-                      carry_on=position["carry_on"])
+                      carry_on=position["carry_on"], interest_note=INTEREST_NOTE)
         return tables
     sales = (_sales_lines(business).filter(invoice__invoice_date__gte=day, invoice__invoice_date__lt=next_month(day))
              .annotate(nil=Case(When(gst_tax_rate=0, then=True), default=False, output_field=BooleanField()))
@@ -306,7 +347,7 @@ def gstr3b_tables(business, year, month, *, today=None, position=None):
                                      "bills": 0, "taxable": Decimal(0), "igst": Decimal(0)})
         for field in ("bills", "taxable", "igst"):
             group[field] += row[field]
-    purchase = (_purchase_lines(business).filter(credit_month=day)
+    purchase = (_purchase_lines(business, filing_month=day, filing_date=filing_date).filter(credit_month=day)
                 .values("invoice_id", "invoice__invoice_number", "invoice__invoice_date", "invoice__created_at",
                         "invoice__customer__name", "invoice__customer__gst_number", "invoice__customer__state_name",
                         "invoice__itc_eligible", "invoice__needs_review", "lapsed")
@@ -352,7 +393,7 @@ def gstr3b_tables(business, year, month, *, today=None, position=None):
             "t31a": t31a, "t31c": t31c, "t32": list(t32.values()), "amendments": amendment,
             "carry_in": position["carry_source"], "t4a5": t4a5, "t4b1": t4b1, "t4c": t4c, "t4d2": t4d2, "t5": t5,
             **{field: position[field] for field in ("available", "steps", "used", "cash", "cash_paid", "carry_on", "opening_missing")},
-            "to_confirm": confirm, "cross_head": position.get("cross_head"), "late": late}
+            "to_confirm": confirm, "cross_head": position.get("cross_head"), "late": late, "interest_note": INTEREST_NOTE}
 
 
 def interest_heads(cash, late):

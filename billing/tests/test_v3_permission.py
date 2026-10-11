@@ -381,6 +381,7 @@ class SalesOpenTest(TestCase):
             "detail": "September 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. "
                       "Have the owner unlock September 2026 in GST returns first.",
             "code": "month_closed",
+            "stage": "filed",
             "locked_period": {"id": period.id, "business": self.biz.id, "year": 2026, "month": 9},
         })
 

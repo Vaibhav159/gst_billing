@@ -188,16 +188,23 @@ def _paid(record, data):
             setattr(record, f"credit_left_{head}", value)
 
 
-def _snapshot(business, month, kind):
-    from billing.services.gstr1_file import build_amendments, build_gstr1
+def _snapshot(business, month, kind, *, filing_date=None):
     if kind == "gstr3b":
         from billing.services.ledger import gstr3b_tables, month_position
-        figures = month_position(business, month.year, month.month)
-        figures["tables"] = gstr3b_tables(business, month.year, month.month, position=figures)
+        figures = month_position(business, month.year, month.month, filing_date=filing_date)
+        figures["tables"] = gstr3b_tables(business, month.year, month.month, position=figures, filing_date=filing_date)
         return json_money(figures), {}, {}
-    built = build_gstr1(business, month.year, month.month, amendments=kind == "gstr1")
-    changes = pending_amendments(business, month.year, month.month) if kind == "gstr1" else []
-    file = built["file"] if kind == "gstr1" else build_amendments(business, month.year, month.month, changes_for_month(business, month.year, month.month), before_gstr3b=True)
+    from billing.services.gstr1_file import attach_amendments, build_amendments, build_gstr1
+
+    month_builds = {}
+    built = build_gstr1(business, month.year, month.month, amendments=False, month_builds=month_builds)
+    changes = pending_amendments(business, month.year, month.month, month_builds=month_builds) if kind == "gstr1" else []
+    if kind == "gstr1":
+        built = attach_amendments(built, business, month.year, month.month, changes, month_builds=month_builds, strict=True)
+        file = built["file"]
+    else:
+        file = build_amendments(business, month.year, month.month,
+            changes_for_month(business, month.year, month.month, built=built), before_gstr3b=True, month_builds=month_builds)
     figures = {**built["figures"], "sections": built["sections"], "amendments": changes}
     figures["digest"] = digest({"file": file, "bills": built["bills"]})
     return json_money(figures), built["bills"], file
@@ -214,7 +221,7 @@ def _sync_lock(business, month):
 
 
 def _create(business, month, user, kind, data, legacy=False):
-    figures, bills, file = _snapshot(business, month, kind)
+    figures, bills, file = _snapshot(business, month, kind, **({"filing_date": data["filed_on"]} if kind == "gstr3b" else {}))
     record = FilingRecord(business=business, year=month.year, month=month.month, kind=kind,
                          filed_on=data["filed_on"], arn=_arn(data.get("arn")), figures={**figures, "legacy": legacy},
                          bills=bills, file=file, marked_by=user)
@@ -406,18 +413,18 @@ def filed_before(business, up_to, user):
     return {"months": made, "count": len(made)}
 
 
-def changes_for_month(business, year, month):
+def changes_for_month(business, year, month, *, built=None, month_builds=None):
     """Raw bill deltas from the latest immutable snapshot, including consumed amendments."""
-    from billing.services.gstr1_file import build_gstr1
+    from billing.services.gstr1_file import build_gstr1, snapshots_equal
     original = list(uncached(FilingRecord).filter(business=business, year=year, month=month, kind__in=("gstr1", "gstr1a"))
                     .only("kind", "bills").order_by("kind"))
     if original:
         baseline = deepcopy(original[-1].bills)
     else:
-        frozen = uncached(FilingMonth).filter(business=business, year=year, month=month).values_list("legacy_snapshot", flat=True).first()
-        if not frozen:
+        frozen = uncached(FilingMonth).filter(business=business, year=year, month=month).values_list("legacy_snapshot__gstr1__bills", flat=True).first()
+        if frozen is None:
             return []
-        baseline = deepcopy(frozen["gstr1"]["bills"])
+        baseline = deepcopy(frozen)
     later = uncached(FilingRecord).filter(business=business, kind="gstr1").filter(
         Q(year__gt=year) | Q(year=year, month__gt=month)).order_by("year", "month").values_list("figures__amendments", flat=True)
     label = f"{year}-{month:02}"
@@ -430,9 +437,13 @@ def changes_for_month(business, year, month):
                 baseline[str(row["id"])] = carried["after"]
             else:
                 baseline.pop(str(row["id"]), None)
-    current = build_gstr1(business, year, month, amendments=False)["bills"]
+    if built is None:
+        built = (month_builds or {}).get((year, month))
+    if built is None:
+        built = build_gstr1(business, year, month, amendments=False, month_builds=month_builds)
+    current = built["bills"]
     return [{"month": label, "before": baseline.get(key), "after": current.get(key)}
-            for key in sorted(set(baseline) | set(current)) if baseline.get(key) != current.get(key)]
+            for key in sorted(set(baseline) | set(current)) if not snapshots_equal(baseline.get(key), current.get(key))]
 
 
 def _has_3b(business_id, day):
@@ -450,7 +461,7 @@ def _carrying_month(business_id, source):
     return day
 
 
-def pending_amendments(business, year, month):
+def pending_amendments(business, year, month, *, month_builds=None):
     """Only corrections routed here and not previously frozen by a carrying GSTR-1."""
     target = date(year, month, 1)
     unlocked = uncached(FilingMonth).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
@@ -465,13 +476,14 @@ def pending_amendments(business, year, month):
         if timezone.localdate() > date(fy_of(source) + 1, 11, 30):
             continue
         if _carrying_month(business.pk, source) == target:
-            changes.extend(changes_for_month(business, source_year, source_month))
+            changes.extend(changes_for_month(business, source_year, source_month, month_builds=month_builds))
     return changes
 
 
-def changes_since_filing(business, year, month):
+def changes_since_filing(business, year, month, *, changes=None):
     from billing.models import Invoice
-    changes = changes_for_month(business, year, month)
+    if changes is None:
+        changes = changes_for_month(business, year, month)
     if not changes:
         return None
     day = date(year, month, 1)
@@ -510,8 +522,12 @@ def changes_since_filing(business, year, month):
             "tax_diff": money(tax_diff), "rows": rows, "gstr3b": None}
 
 
-def amendment_plan(business, year, month):
-    changes = changes_since_filing(business, year, month)
+_NOT_PROVIDED = object()
+
+
+def amendment_plan(business, year, month, *, changes=_NOT_PROVIDED):
+    if changes is _NOT_PROVIDED:
+        changes = changes_since_filing(business, year, month)
     if not changes:
         return None
     day = date(year, month, 1)
@@ -549,8 +565,13 @@ def month_stages(business_ids, months, today=None):
     for business_id, year, number, kind in records.union(locks, unlocked):
         state.setdefault((business_id, f"{year}-{number:02}"), set()).add(kind)
     latest = {business_id: None for business_id in business_ids}
-    for row in uncached(FilingRecord).filter(business_id__in=business_ids, kind="gstr1").values("business_id").annotate(last=Max(100 * F("year") + F("month"))):
-        latest[row["business_id"]] = f"{row['last'] // 100}-{row['last'] % 100:02}"
+    filed_latest = uncached(FilingRecord).filter(business_id__in=business_ids, kind="gstr1").values("business_id").annotate(
+        last=Max(100 * F("year") + F("month"))).values_list("business_id", "last")
+    legacy_latest = uncached(FiledPeriod).filter(business_id__in=business_ids).values("business_id").annotate(
+        last=Max(100 * F("year") + F("month"))).values_list("business_id", "last")
+    for business_id, last in filed_latest.union(legacy_latest):
+        key = f"{last // 100}-{last % 100:02}"
+        latest[business_id] = max(latest[business_id] or key, key)
     stages, open_months = {}, set()
     for business_id in business_ids:
         for day in dates:

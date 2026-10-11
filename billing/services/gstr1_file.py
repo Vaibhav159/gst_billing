@@ -4,6 +4,7 @@ Arithmetic stays Decimal until the portal's numeric JSON boundary. The same rate
 buckets feed the file, its table view, and immutable per-bill filing snapshots.
 """
 
+import re
 from collections import Counter, defaultdict
 from copy import deepcopy
 from datetime import date
@@ -13,6 +14,7 @@ from itertools import pairwise
 from django.db.models import Count, Prefetch
 from django.db.models.functions import Trim
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
 from billing.constants import BILL_CANCELLED, GST_CODE
@@ -131,8 +133,18 @@ def gap_rows(docs, used):
     return result
 
 
-def build_gstr1(business, year, month, *, amendments=True):
-    """Return file/meta (v2), sections (§3.2), figures and per-id bill snapshots."""
+def build_gstr1(business, year, month, *, amendments=True, month_builds=None, strict_amendments=False):
+    """Return the shared books; month_builds is one business's request-local cache."""
+    month_builds = {} if month_builds is None else month_builds
+    if (year, month) in month_builds:
+        built = month_builds[(year, month)]
+        if not amendments:
+            return built
+        from billing.services.filing import pending_amendments
+
+        return attach_amendments(built, business, year, month,
+                                 pending_amendments(business, year, month, month_builds=month_builds),
+                                 month_builds=month_builds, strict=strict_amendments)
     first = date(year, month, 1)
     stop = date(year + month // 12, month % 12 + 1, 1)
     start_fy, end_fy = fy_range(fy_of(first))
@@ -212,7 +224,9 @@ def build_gstr1(business, year, month, *, amendments=True):
                     "total": money(inv.total_amount), **wire_figures(sums),
                     "rates": [{"rate": percent(rt), **wire_figures(row)} for rt, row in sorted(all_agg.items())]}
         snapshot["hsn"] = [{"hsn": li.hsn_code or "", "unit": li.unit or "", "quantity": str(li.quantity),
-                             "description": li.product_name or "", "rate": percent(rate_as_percent(li.gst_tax_rate))}
+                             "description": li.product_name or "", "rate": percent(rate_as_percent(li.gst_tax_rate)),
+                             "taxable": money(line_taxable(li)),
+                             **{head: money(to_paise(getattr(li, head) or ZERO)) for head in HEADS}}
                             for li in inv.gst_lines]
         snapshots[str(inv.pk)] = snapshot
         if not agg:
@@ -273,22 +287,14 @@ def build_gstr1(business, year, month, *, amendments=True):
                                     "expt_amt": 0, "ngsup_amt": 0} for supply, row in sorted(nil.items())]}
         sections["nil"] = [{"supply": supply, "value": money(row["taxable"]), "bills": len(row["ids"])}
                            for supply, row in sorted(nil.items())]
-    hsn_tabs = {}
+    hsn_groups = {}
     for tab, rows in hsn_agg.items():
-        if not rows:
-            continue
-        hsn_tabs[tab] = []
-        for i, ((hsn, uqc, rt), row) in enumerate(rows.items(), 1):
-            qty = portal_number(row["quantity"])
+        for (hsn, uqc, rt), row in rows.items():
             description = hsn_description(hsn, descriptions=descriptions[hsn])
-            hsn_tabs[tab].append({"num": i, "hsn_sc": hsn, "desc": description[:30], "uqc": uqc,
-                                  "qty": qty, "rt": float(rt), **portal_figures(row)})
-            sections["hsn"][tab.removeprefix("hsn_")].append({
-                "hsn": hsn, "description": description,
-                "uqc": uqc, "quantity": f"{Decimal(str(qty)):.3f}", "rate": percent(rt),
-                **wire_figures(row), "service": _is_service(hsn), "bills": len(row["ids"])})
-    if hsn_tabs:
-        file_obj["hsn"] = hsn_tabs
+            hsn_groups[(tab, hsn, uqc, rt)] = {**row, "description": description}
+    if hsn_groups:
+        file_obj["hsn"] = _hsn_payload(hsn_groups, year, month)
+        sections["hsn"] = _hsn_sections(file_obj["hsn"], hsn_groups, year, month)
     docs = document_series([n for n in live_numbers if n], elsewhere, [n for n in void_numbers if n])
     if docs:
         file_obj["doc_issue"] = {"doc_det": [{"doc_num": 1, "docs": docs}]}
@@ -305,30 +311,280 @@ def build_gstr1(business, year, month, *, amendments=True):
     sections["by_rate"] = [{"rate": percent(rt), **wire_figures(row), "tax": money(sum((row[h] for h in HEADS), ZERO)),
                             "value": money(sum((row[h] for h in HEADS), row["taxable"])), "bills": len(row["ids"])}
                            for rt, row in sorted(by_rate.items())]
-    if amendments:
-        from billing.services.filing import pending_amendments
-
-        changes = pending_amendments(business, year, month)
-        extra = build_amendments(business, year, month, changes)
-        for section, rows in extra.items():
-            if section in ("gstin", "fp", "version", "hash"):
-                continue
-            if section in ("b2b", "b2cl"):
-                key = "ctin" if section == "b2b" else "pos"
-                groups = {r[key]: r for r in file_obj.get(section, [])}
-                for row in rows:
-                    groups.setdefault(row[key], {key: row[key], "inv": []})["inv"].extend(row["inv"])
-                file_obj[section] = list(groups.values())
-            else:
-                file_obj.setdefault(section, []).extend(rows)
-            if section in sections["amendments"]:
-                sections["amendments"][section] = sum(len(row.get("inv", [row])) for row in rows)
-    return {"file": file_obj, "meta": {"business": business.name, "gstin": clean_gstin(business.gst_number),
+    built = {"file": file_obj, "meta": {"business": business.name, "gstin": clean_gstin(business.gst_number),
                                       "fp": f"{month:02d}{year}", "invoice_counts": counts,
                                       "taxable_total": portal_number(totals["taxable"]),
                                       "skipped": skipped, "warnings": warnings},
             "sections": sections, "figures": {**wire_figures(totals), "bills": len(snapshots)},
             "bills": snapshots, "gaps": gaps}
+    month_builds[(year, month)] = built
+    if not amendments:
+        return built
+    from billing.services.filing import pending_amendments
+
+    return attach_amendments(built, business, year, month,
+                             pending_amendments(business, year, month, month_builds=month_builds),
+                             month_builds=month_builds, strict=strict_amendments)
+
+
+def snapshots_equal(before, after):
+    """Ignore newly captured money only when the older allocation is provable."""
+    if not before or not after:
+        return before == after
+    if any(any(field not in item for field in bucket()) for item in before.get("hsn", [])):
+        try:
+            _snapshot_hsn(before)
+        except ValidationError:
+            # Equal bill/rate totals cannot prove equal HSN amounts: offsetting
+            # line edits are invisible in a legacy snapshot with several groups.
+            return False
+    old, new = deepcopy(before), deepcopy(after)
+    if len(old.get("hsn", [])) == len(new.get("hsn", [])):
+        for previous, current in zip(old.get("hsn", []), new.get("hsn", []), strict=True):
+            for key in bucket():
+                if key not in previous:
+                    current.pop(key, None)
+    return old == new
+
+
+def _amendment_refusal(snapshot, problem):
+    number = snapshot.get("invoice_number") or "Bill without a number"
+    raise ValidationError({"amendments": [(f"{number}: {problem}. Ask your CA to review this bill's "
+                                          "correction on the GST portal before filing.")]},
+                          code="unsupported_amendment")
+
+
+def _hsn_payload(groups, year, month):
+    """One combined HSN table until April 2025; GSTN's two tabs from May."""
+    combined = {}
+    for (tab, hsn, unit, rate), row in groups.items():
+        key = (tab if (year, month) >= (2025, 5) else "data", hsn, unit, rate)
+        target = combined.setdefault(key, {**bucket(), "quantity": ZERO, "description": row["description"]})
+        for field in (*bucket(), "quantity"):
+            target[field] += row[field]
+    payload = {}
+    for (tab, hsn, unit, rate), row in sorted(combined.items()):
+        rows = payload.setdefault(tab, [])
+        rows.append({"num": len(rows) + 1, "hsn_sc": hsn, "desc": row["description"][:30],
+                     "uqc": unit, "qty": portal_number(row["quantity"]), "rt": float(rate), **portal_figures(row)})
+    return payload
+
+
+def _hsn_sections(payload, metadata, year, month):
+    """Use the portal's actual grouped rows, retaining full descriptions and IDs."""
+    combined = {}
+    for (tab, code, unit, rate), row in metadata.items():
+        key = (tab if (year, month) >= (2025, 5) else "data", code, unit, rate)
+        target = combined.setdefault(key, {"description": row["description"], "ids": set()})
+        target["ids"].update(row["ids"])
+    result = {"b2b": [], "b2c": []}
+    for tab, rows in payload.items():
+        target = result.setdefault(tab.removeprefix("hsn_"), [])
+        for row in rows:
+            code, unit, rate = row["hsn_sc"], row["uqc"], Decimal(str(row["rt"]))
+            info = combined[(tab, code, unit, rate)]
+            target.append({"hsn": code, "description": info["description"], "uqc": unit,
+                           "quantity": money(Decimal(str(row["qty"]))), "rate": percent(rate),
+                           **{field: money(Decimal(str(row[portal]))) for field, portal in
+                              (("taxable", "txval"), ("igst", "iamt"), ("cgst", "camt"), ("sgst", "samt"))},
+                           "service": _is_service(code), "bills": len(info["ids"])})
+    return result
+
+
+def _snapshot_hsn(snapshot):
+    """Frozen line amounts, or the only provable grouping for an older snapshot."""
+    groups, incomplete = {}, set()
+    rates = {Decimal(row["rate"]): row for row in snapshot["rates"]}
+    if not snapshot.get("hsn"):
+        _amendment_refusal(snapshot, "the filed snapshot has no HSN line details")
+    for item in snapshot["hsn"]:
+        code = (item.get("hsn") or "").strip()
+        if not re.fullmatch(r"[0-9]{2,8}", code):
+            _amendment_refusal(snapshot, "the correction has an HSN code the portal cannot accept")
+        rate = Decimal(item["rate"])
+        key = (code, uqc_for(item["unit"], code), rate)
+        row = groups.setdefault(key, {**bucket(), "quantity": ZERO,
+                                     "description": hsn_description(code, descriptions={item.get("description", ""): 1})})
+        row["quantity"] += filed_quantity(item["unit"], Decimal(item["quantity"]), code)
+        if all(field in item for field in bucket()):
+            for field in bucket():
+                row[field] += Decimal(item[field])
+        else:
+            incomplete.add(rate)
+    for rate in incomplete:
+        matches = [row for key, row in groups.items() if key[2] == rate]
+        if len(matches) != 1 or rate not in rates:
+            _amendment_refusal(snapshot, "the filed snapshot cannot separate the amounts between its HSN and unit groups")
+        matches[0].update({field: Decimal(rates[rate][field]) for field in bucket()})
+    return groups
+
+
+def _supplement_changes(business, year, month, changes, month_builds):
+    groups, nil = {}, defaultdict(lambda: ZERO)
+    quantity_changes = defaultdict(lambda: [defaultdict(lambda: ZERO), defaultdict(lambda: ZERO)])
+    changed_ids = defaultdict(set)
+
+    def group_key(tab, code, unit, rate):
+        return (tab if (year, month) >= (2025, 5) else "data", code, unit, rate)
+
+    for change in changes:
+        original = tuple(map(int, change["month"].split("-")))
+        for sign, snapshot in ((-1, change["before"]), (1, change["after"])):
+            if snapshot is None:
+                continue
+            changed_ids[original].add(str(snapshot["id"]))
+            tab = "hsn_b2b" if snapshot["gstin"] else "hsn_b2c"
+            for (code, unit, rate), row in _snapshot_hsn(snapshot).items():
+                key = group_key(tab, code, unit, rate)
+                target = groups.setdefault(key, {**bucket(), "quantity": ZERO, "description": row["description"]})
+                for field in bucket():
+                    target[field] += sign * row[field]
+                target["description"] = row["description"]
+                quantity_changes[original][0 if sign < 0 else 1][key] += row["quantity"]
+            supply = ("INTR" if snapshot["interstate"] else "INTRA") + ("B2B" if snapshot["gstin"] else "B2C")
+            nil[supply] += sign * sum((Decimal(row["taxable"]) for row in snapshot["rates"]
+                                       if not Decimal(row["rate"])), ZERO)
+    for original, (before, after) in quantity_changes.items():
+        built = month_builds.get(original)
+        if built is None:
+            built = build_gstr1(business, *original, amendments=False, month_builds=month_builds)
+        touched = set(before) | set(after)
+        split_transition = original < (2025, 5) <= (year, month)
+        families = {key[1:] for key in touched}
+        # The portal rounds a whole HSN/rate/unit group. Unchanged bills determine
+        # which side of a half-cent the group's quantity was on before correction.
+        for invoice_id, snapshot in built["bills"].items():
+            if invoice_id in changed_ids[original]:
+                continue
+            tab = "hsn_b2b" if snapshot["gstin"] else "hsn_b2c"
+            for item in snapshot["hsn"]:
+                code = (item["hsn"] or "").strip()
+                key = group_key(tab, code, uqc_for(item["unit"], code), Decimal(item["rate"]))
+                if key in touched or (split_transition and key[1:] in families):
+                    quantity = filed_quantity(item["unit"], Decimal(item["quantity"]), code)
+                    before[key] += quantity
+                    after[key] += quantity
+        if split_transition:
+            for family in families:
+                keys = {key for key in set(before) | set(after) if key[1:] == family}
+                split_delta = sum((to_paise(after[key]) - to_paise(before[key]) for key in keys), ZERO)
+                combined_delta = (to_paise(sum((after[key] for key in keys), ZERO)) -
+                                  to_paise(sum((before[key] for key in keys), ZERO)))
+                if split_delta != combined_delta:
+                    source = next(snapshot for change in changes
+                                  if tuple(map(int, change["month"].split("-"))) == original
+                                  for snapshot in (change["before"], change["after"])
+                                  if snapshot and family in _snapshot_hsn(snapshot))
+                    _amendment_refusal(source, "the original combined HSN quantity rounding cannot be allocated "
+                                       "to the portal's separate B2B and B2C tables")
+        for key in touched:
+            groups[key]["quantity"] += to_paise(after[key]) - to_paise(before[key])
+    return ({key: row for key, row in groups.items() if any(row[field] for field in (*bucket(), "quantity"))},
+            {key: amount for key, amount in nil.items() if amount})
+
+
+def attach_amendments(built, business, year, month, changes, *, month_builds=None, strict=False):
+    """Attach carried tables to a copy; a page may show an error that blocks export."""
+    result = deepcopy(built)
+    changes = _exportable_changes(changes, timezone.localdate())
+    try:
+        extra = build_amendments(business, year, month, changes, month_builds=month_builds)
+    except ValidationError as exc:
+        if strict:
+            raise
+        result["meta"]["amendment_errors"] = [str(item) for item in exc.detail["amendments"]]
+        return result
+    file_obj = result["file"]
+    for section, rows in extra.items():
+        if section in ("gstin", "fp", "version", "hash"):
+            continue
+        if section in ("b2b", "b2cl"):
+            key = "ctin" if section == "b2b" else "pos"
+            groups = {row[key]: row for row in file_obj.get(section, [])}
+            for row in rows:
+                groups.setdefault(row[key], {key: row[key], "inv": []})["inv"].extend(row["inv"])
+            file_obj[section] = list(groups.values())
+        elif section == "nil":
+            groups = {row["sply_ty"]: row for row in file_obj.get("nil", {}).get("inv", [])}
+            for row in rows["inv"]:
+                target = groups.setdefault(row["sply_ty"], {"sply_ty": row["sply_ty"], "nil_amt": 0,
+                                                            "expt_amt": 0, "ngsup_amt": 0})
+                for field in ("nil_amt", "expt_amt", "ngsup_amt"):
+                    target[field] = portal_number(Decimal(str(target[field])) + Decimal(str(row[field])))
+            file_obj["nil"] = {"inv": list(groups.values())}
+        elif section == "hsn":
+            target = file_obj.setdefault("hsn", {})
+            for tab, items in rows.items():
+                groups = {(row["hsn_sc"], row["uqc"], row["rt"]): row for row in target.get(tab, [])}
+                for row in items:
+                    key = (row["hsn_sc"], row["uqc"], row["rt"])
+                    if key not in groups:
+                        groups[key] = row
+                    else:
+                        for field in ("qty", "txval", "iamt", "camt", "samt", "csamt"):
+                            groups[key][field] = portal_number(Decimal(str(groups[key][field])) + Decimal(str(row[field])))
+                target[tab] = [{**row, "num": i} for i, row in enumerate(groups.values(), 1)]
+        else:
+            file_obj.setdefault(section, []).extend(rows)
+        if section in result["sections"]["amendments"]:
+            result["sections"]["amendments"][section] = sum(len(row.get("inv", [row])) for row in rows)
+    if "hsn" in extra or "nil" in extra:
+        _sync_supplement_sections(result, changes, year, month)
+    return result
+
+
+def _sync_supplement_sections(built, changes, year, month):
+    """Count distinct contributors, including negative corrections, without reads."""
+    metadata, nil_ids = {}, defaultdict(set)
+
+    def key_for(snapshot, code, unit, rate):
+        tab = "hsn_b2b" if snapshot["gstin"] else "hsn_b2c"
+        return (tab if (year, month) >= (2025, 5) else "data", code, unit, rate)
+
+    def supply_for(snapshot):
+        return ("INTR" if snapshot["interstate"] else "INTRA") + ("B2B" if snapshot["gstin"] else "B2C")
+
+    # Keep the period's established full description when a correction joins it.
+    descriptions = {row["hsn"]: row["description"] for rows in built["sections"]["hsn"].values() for row in rows}
+    for snapshot in built["bills"].values():
+        for item in snapshot["hsn"]:
+            code = (item["hsn"] or "").strip()
+            key = key_for(snapshot, code, uqc_for(item["unit"], code), Decimal(item["rate"]))
+            metadata.setdefault(key, {"description": descriptions[code], "ids": set()})["ids"].add(str(snapshot["id"]))
+        if any(not Decimal(row["rate"]) for row in snapshot["rates"]):
+            nil_ids[supply_for(snapshot)].add(str(snapshot["id"]))
+    for change in changes:
+        delta, nil_delta = {}, defaultdict(lambda: ZERO)
+        for sign, snapshot in ((-1, change["before"]), (1, change["after"])):
+            if snapshot is None:
+                continue
+            for (code, unit, rate), row in _snapshot_hsn(snapshot).items():
+                key = key_for(snapshot, code, unit, rate)
+                info = metadata.setdefault(key, {"description": row["description"], "ids": set()})
+                target = delta.setdefault(key, {**bucket(), "quantity": ZERO, "ids": set()})
+                target["ids"].add(str(snapshot["id"]))
+                for field in (*bucket(), "quantity"):
+                    target[field] += sign * row[field]
+                if code not in descriptions:
+                    info["description"] = row["description"]
+            nil_delta[supply_for(snapshot)] += sign * sum((Decimal(row["taxable"]) for row in snapshot["rates"]
+                                                            if not Decimal(row["rate"])), ZERO)
+        for key, row in delta.items():
+            if any(row[field] for field in (*bucket(), "quantity")):
+                metadata[key]["ids"].update(row["ids"])
+        for supply, amount in nil_delta.items():
+            if amount:
+                nil_ids[supply].update(str(snapshot["id"]) for snapshot in (change["before"], change["after"])
+                                       if snapshot and supply_for(snapshot) == supply)
+    built["sections"]["hsn"] = _hsn_sections(built["file"].get("hsn", {}), metadata, year, month)
+    built["sections"]["nil"] = [{"supply": row["sply_ty"], "value": money(Decimal(str(row["nil_amt"]))),
+                                  "bills": len(nil_ids[row["sply_ty"]])}
+                                 for row in built["file"].get("nil", {}).get("inv", [])]
+
+
+def _exportable_changes(changes, today):
+    return [change for change in changes if not snapshots_equal(change["before"], change["after"]) and
+            today <= date(fy_of(date.fromisoformat(change["month"] + "-01")) + 1, 11, 30)]
 
 
 def _snapshot_invoice(snapshot, zero=False):
@@ -347,7 +603,7 @@ def _snapshot_invoice(snapshot, zero=False):
     return result
 
 
-def build_amendments(business, year, month, changes, before_gstr3b=False, today=None):
+def build_amendments(business, year, month, changes, before_gstr3b=False, today=None, *, month_builds=None):
     """Emit amended invoice records and restated original-month B2CS groups.
 
     Each change is {month, before, after}; snapshots are build_gstr1()['bills']
@@ -355,7 +611,15 @@ def build_amendments(business, year, month, changes, before_gstr3b=False, today=
     is read for touched places/rates, because amendment values are replacements.
     """
     today = today or timezone.localdate()
+    month_builds = {} if month_builds is None else month_builds
     result = period_header(business, year, month)
+    changes = _exportable_changes(changes, today)
+    hsn, nil = _supplement_changes(business, year, month, changes, month_builds)
+    if hsn:
+        result["hsn"] = _hsn_payload(hsn, year, month)
+    if nil:
+        result["nil"] = {"inv": [{"sply_ty": supply, "nil_amt": portal_number(value), "expt_amt": 0,
+                                    "ngsup_amt": 0} for supply, value in sorted(nil.items())]}
     grouped = defaultdict(dict)
     touched = defaultdict(set)
     for change in changes:
@@ -371,6 +635,15 @@ def build_amendments(business, year, month, changes, before_gstr3b=False, today=
                     if Decimal(rate["rate"]):
                         touched[change["month"]].add((snap["interstate"], snap["pos"], rate["rate"]))
         source = before or after
+        # A nil-only bill belongs in Table 8, never an invoice with empty itms.
+        before_taxable = before and any(Decimal(row["rate"]) for row in before["rates"])
+        after_taxable = after and any(Decimal(row["rate"]) for row in after["rates"])
+        if not before_taxable and not after_taxable:
+            continue
+        if not before_taxable:
+            before, source = None, after
+        elif not after_taxable:
+            after = None
         if source["table"] == "b2cs":
             if after and after["table"] != "b2cs":
                 section = after["table"]
@@ -396,7 +669,10 @@ def build_amendments(business, year, month, changes, before_gstr3b=False, today=
     b2csa_groups = {}
     for original, keys in sorted(touched.items()):
         y, m = map(int, original.split("-"))
-        current = build_gstr1(business, y, m, amendments=False)["file"].get("b2cs", [])
+        built = (month_builds or {}).get((y, m))
+        if built is None:
+            built = build_gstr1(business, y, m, amendments=False, month_builds=month_builds)
+        current = built["file"].get("b2cs", [])
         rows = {(r["sply_ty"] == "INTER", r["pos"], percent(Decimal(str(r["rt"])))): r for r in current}
         for inter, pos, rate in sorted(keys):
             row = deepcopy(rows.get((inter, pos, rate), {
@@ -418,4 +694,6 @@ def build_gstr1a(business, year, month):
     """The same-month corrections file, sourced from the latest filed baseline."""
     from billing.services.filing import changes_for_month
 
-    return build_amendments(business, year, month, changes_for_month(business, year, month), before_gstr3b=True)
+    month_builds = {}
+    changes = changes_for_month(business, year, month, month_builds=month_builds)
+    return build_amendments(business, year, month, changes, before_gstr3b=True, month_builds=month_builds)

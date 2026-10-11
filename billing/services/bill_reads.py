@@ -2,8 +2,8 @@
 API contract, sections 0.2 and 2.1-2.2). Reads only: nothing here writes (Ruling 1A-16).
 
 Every money figure is worked out the server's one way: a line's taxable value is
-paise(quantity x rate), its heads and tax are as stored, and each sum is rounded to the paisa
-once, so a list row, its bill and the list's summary agree. A bill's total is exact: no rupee
+paise(quantity x rate), each stored head is rounded half-up to paise before adding,
+so a list row, its bill and the list's summary agree. A bill's total is exact: no rupee
 rounding (Ruling 1B-12).
 """
 
@@ -81,17 +81,17 @@ def line_taxable(li):
 
 
 def line_tax(li):
-    """A line's tax as stored: CGST + SGST + IGST."""
-    return sum((getattr(li, head) or ZERO for head in HEADS), ZERO)
+    """A line's tax is the sum of its stored heads, each rounded to paise."""
+    return sum((to_paise(getattr(li, head) or ZERO) for head in HEADS), ZERO)
 
 
 def sums(lines):
-    """Lines added up: the taxable value (each line's to the paisa), the stored heads, the tax and the quantity."""
+    """Add each line's rounded taxable value and heads, its tax and its quantity."""
     out = dict.fromkeys(("taxable", *HEADS, "tax", "quantity"), ZERO)
     for li in lines:
         out["taxable"] += line_taxable(li)
         for head in HEADS:
-            out[head] += getattr(li, head) or ZERO
+            out[head] += to_paise(getattr(li, head) or ZERO)
         out["tax"] += line_tax(li)
         out["quantity"] += li.quantity or ZERO
     return out
@@ -106,7 +106,7 @@ def grouped(lines, key):
 
 
 def figures(totals):
-    """sums() as the API sends money: the taxable value, each head and the tax, each rounded to the paisa once."""
+    """Format sums() money; rounding already happened per line, before addition."""
     return {k: money(totals[k]) for k in ("taxable", *HEADS, "tax")}
 
 

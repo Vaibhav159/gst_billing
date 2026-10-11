@@ -28,6 +28,27 @@ def test_bulk_stages_and_latest_use_two_reads_without_snapshots():
     blockers.assert_not_called()
 
 
+def test_latest_gstr1_includes_a_later_v2_lock_even_when_its_books_fail_checks():
+    from billing.services.gst_checks import gstr1_blockers
+    from billing.tests.v3_helpers import buyer, firm
+
+    business = firm()
+    from billing.models import Invoice
+    Invoice.objects.create(business=business, customer=buyer(), invoice_number="EMPTY",
+                           invoice_date=date(2026, 9, 1), type_of_invoice="outward")
+    assert gstr1_blockers([business.pk], ["2026-09"])[business.pk, "2026-09"]["count"] > 0
+    FilingRecord.objects.create(business=business, year=2026, month=8, kind="gstr1", filed_on=date(2026, 9, 1))
+    FiledPeriod.objects.create(business=business, year=2026, month=9)
+    with CaptureQueriesContext(connection) as queries:
+        result = month_stages([business.pk], ["2026-08", "2026-09"], date(2026, 10, 11))
+    assert len(queries) == 2
+    assert result["stages"][business.pk, "2026-09"] == "filed"
+    assert result["latest_gstr1"][business.pk] == "2026-09"
+    # Latest means all available history, not only the requested month window.
+    FilingRecord.objects.create(business=business, year=2026, month=10, kind="gstr1", filed_on=date(2026, 11, 1))
+    assert month_stages([business.pk], ["2026-09"])["latest_gstr1"][business.pk] == "2026-10"
+
+
 def test_year_filings_counts_legacy_once_and_only_in_fy():
     firm = Business.objects.create(name="Kiran")
     FilingRecord.objects.create(business=firm, year=2026, month=8, kind="gstr3b", filed_on=date(2026, 9, 19), cash_total="30.00")
@@ -48,6 +69,29 @@ def test_backup_rows_reads_all_three_new_tables_once():
     assert len(queries) == 3
     assert rows["opening_credits"][0]["cgst"] == "9500.00"
     assert rows["opening_credits"][0]["as_of"] == "2025-04-01"
+
+
+def test_actual_filing_day_reaches_3b_capture_before_the_record_exists():
+    from django.contrib.auth.models import User
+
+    from billing.services.filing import mark_filed
+
+    business = Business.objects.create(name="Kiran")
+    owner = User.objects.create_user("actual-filing-day")
+    FilingRecord.objects.create(business=business, year=2025, month=10, kind="gstr1", filed_on=date(2025, 11, 8))
+    zero = {"igst": "0.00", "cgst": "0.00", "sgst": "0.00", "total": "0.00"}
+
+    def position(*args, **kwargs):
+        assert not FilingRecord.objects.filter(kind="gstr3b").exists()
+        assert kwargs["filing_date"] == date(2026, 12, 2)
+        return {"cash": zero, "carry_on": zero}
+
+    with patch("django.utils.timezone.localdate", return_value=date(2026, 12, 3)), \
+            patch("billing.services.ledger.month_position", side_effect=position), \
+            patch("billing.services.ledger.gstr3b_tables", return_value={}) as tables:
+        made = mark_filed(business, date(2025, 10, 1), owner, {"kind": "gstr3b", "filed_on": "2026-12-02"})
+    assert made[0].filed_on == date(2026, 12, 2)
+    assert tables.call_args.kwargs["filing_date"] == date(2026, 12, 2)
 
 
 def test_consumed_bill_amendment_does_not_repeat():

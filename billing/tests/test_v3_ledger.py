@@ -181,6 +181,7 @@ def test_purchase_query_excludes_bills_before_opening_credit(monkeypatch):
     query.filter.return_value = query
     query.annotate.return_value = query
     monkeypatch.setattr("billing.services.ledger.uncached", lambda model: query)
+    monkeypatch.setattr("billing.services.ledger._credit_lapse", lambda lines, **kwargs: lines)
     monkeypatch.setattr("billing.services.ledger.Invoice", SimpleNamespace(_meta=SimpleNamespace(
         fields=[SimpleNamespace(name=name) for name in ("itc_month", "itc_eligible", "needs_review")])))
     _purchase_lines(SimpleNamespace(pk=17))

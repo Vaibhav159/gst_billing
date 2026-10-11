@@ -111,15 +111,27 @@ def month_read(business, month, today=None):
             "amended_in": None, "download": None, "prev_gstr3b_missing": None}
     if month > today.replace(day=1):
         return base
-    from billing.services.filing import amendment_plan, changes_since_filing, month_record
+    from billing.services.filing import (
+        amendment_plan,
+        changes_for_month,
+        changes_since_filing,
+        month_record,
+        pending_amendments,
+    )
     from billing.services.gst_checks import month_checks
     from billing.services.gst_downloads import download_state, file_name
-    from billing.services.gstr1_file import build_gstr1
+    from billing.services.gstr1_file import attach_amendments, build_gstr1
     from billing.services.ledger import gstr3b_tables, month_position
 
-    status = month_status(business.pk, month.year, month.month)
-    checks = month_checks(business, month.year, month.month)
-    built = build_gstr1(business, month.year, month.month)
+    status = month_status(business.pk, month.year, month.month, include_checks=False)
+    month_builds = {}
+    own = build_gstr1(business, month.year, month.month, amendments=False, month_builds=month_builds)
+    checks = month_checks(business, month.year, month.month, built=own)
+    changes = changes_for_month(business, month.year, month.month, built=own, month_builds=month_builds)
+    since = changes_since_filing(business, month.year, month.month, changes=changes)
+    amend = amendment_plan(business, month.year, month.month, changes=since)
+    carried = pending_amendments(business, month.year, month.month, month_builds=month_builds)
+    built = attach_amendments(own, business, month.year, month.month, carried, month_builds=month_builds)
     position = month_position(business, month.year, month.month, today=today)
     tables = gstr3b_tables(business, month.year, month.month, today=today, position=position)
     record = month_record(business.pk, month.year, month.month)
@@ -129,7 +141,7 @@ def month_read(business, month, today=None):
     figures, sections, meta = built["figures"], built["sections"], built["meta"]
     tax = sum(Decimal(figures[key]) for key in ("igst", "cgst", "sgst"))
     cancelled = sections["cancelled"]
-    why = file_block(month, checks, today)
+    why = file_block(month, checks, today) or next(iter(meta.get("amendment_errors", [])), "")
     original = uncached(FilingRecord).filter(business_id=business.pk, year=month.year, month=month.month,
         kind__in=("gstr1", "gstr1a")).annotate(**{"_" + key: F("figures__" + key)
             for key in ("bills", "taxable", "igst", "cgst", "sgst")}).values(
@@ -140,9 +152,11 @@ def month_read(business, month, today=None):
                     "tax": money(sum(Decimal(original["_" + key] or "0.00") for key in ("igst", "cgst", "sgst"))),
                     "at": stamp(original["marked_at"])}
     before = (month - timedelta(days=1)).replace(day=1)
-    previous_status = month_status(business.pk, before.year, before.month)
-    since = changes_since_filing(business, month.year, month.month)
-    amend = amendment_plan(business, month.year, month.month)
+    previous_missing = None
+    if not status.gstr1 and before >= date(2025, 4, 1):
+        previous_status = month_status(business.pk, before.year, before.month, include_checks=False)
+        if not (previous_status.gstr3b or previous_status.legacy):
+            previous_missing = before.strftime("%Y-%m")
     base.update({"stage": stage, "running": {"from": month.isoformat(), "to": min(today, month.replace(day=monthrange(month.year, month.month)[1])).isoformat()},
         "record": record, "checks": checks, "late": tables.get("late"),
         "gstr1": {**figures, "tax": money(tax), "total": money(sum(Decimal(row["total"]) for row in built["bills"].values())),
@@ -155,8 +169,7 @@ def month_read(business, month, today=None):
         "since_filing": since, "amendments": amend,
         "amended_in": amend["carried_by"] if amend and amend["rows"] else None,
         "download": download_state(business, month, built["file"]),
-        "prev_gstr3b_missing": before.strftime("%Y-%m") if not status.gstr1 and before >= date(2025, 4, 1)
-            and not (previous_status.gstr3b or previous_status.legacy) else None})
+        "prev_gstr3b_missing": previous_missing})
     base["gstr3b"].update({"late_bills": len(tables["t4a5"]["late"]), "to_confirm": len(tables["to_confirm"]),
                          "opening_missing": tables["opening_missing"]})
     return wire(base)

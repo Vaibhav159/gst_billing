@@ -97,7 +97,7 @@ def assert_sales_open(business, day, action="edit"):
     else:
         words = (f"{label} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
                  f"Have the owner unlock {label} in GST returns first.")
-    raise Refusal(words, "month_closed", **({"stage": status.stage} if not status.legacy else {}),
+    raise Refusal(words, "month_closed", stage=status.stage,
                   locked_period={"id": status.locked_period_id, "business": business_id, "year": day.year, "month": day.month})
 
 
@@ -177,7 +177,7 @@ class MonthStatus:
     locked_period_id: int | None = None
 
 
-def month_status(business_id, year, month):
+def month_status(business_id, year, month, *, include_checks=True):
     """Two narrow state reads, plus one aggregate for an unfiled past month."""
     from django.db.models import OuterRef, Subquery
     from django.utils import timezone
@@ -207,7 +207,7 @@ def month_status(business_id, year, month):
         stage = "gstr1"
     else:
         stage = "future" if key > today else "open" if key == today else "ready"
-        if stage == "ready":
+        if stage == "ready" and include_checks:
             from billing.services.gst_checks import gstr1_blockers
             blockers = gstr1_blockers([business_id], [f"{year}-{month:02}"])
             if blockers.get((business_id, f"{year}-{month:02}"), {}).get("count", 0):

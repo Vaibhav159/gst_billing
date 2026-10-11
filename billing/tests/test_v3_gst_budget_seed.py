@@ -32,7 +32,7 @@ class GstSeedTest(TestCase):
         buyer("Walk-in", customer_type="walkin")
         owner = person("owner", "admin")
         zero = {"igst": "0.00", "cgst": "0.00", "sgst": "0.00", "total": "0.00"}
-        def snapshot(business, month, kind):
+        def snapshot(business, month, kind, **kwargs):
             if kind == "gstr3b":
                 return {"cash": zero, "carry_on": zero, "output": zero, "credit": zero}, {}, {}
             return _snapshot(business, month, kind)
