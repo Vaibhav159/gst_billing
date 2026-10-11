@@ -2,6 +2,7 @@ import { handClock, pass } from "@/test/clock";
 import { StrictMode } from "react";
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { api } from "@/core/api/client";
 import { onlineManager } from "@tanstack/react-query";
 import { __setNetState } from "@/core/api/network";
 import Customers from "./Customers";
@@ -145,7 +146,7 @@ test("a search that can't get through keeps the search box and what was typed, s
   // asks the server itself)
   expect(screen.getByRole("link", { name: "Add customer" })).toHaveAttribute("href", "/customers/new?from=list");
   expect(screen.getByRole("link", { name: "Import" })).toHaveAttribute("href", "/import?type=customers");
-  expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "All customers as CSV" })).toBeEnabled();
   // the toolbar is the same one, so the box keeps what was typed and its focus, and the filters stay too
   expect(screen.getByRole("searchbox", { name: "Search customers (press /)" })).toBe(box);
   expect(box).toHaveValue("Kul");
@@ -218,7 +219,7 @@ test("a Show more that fails says so where it was pressed, and Try again asks fo
   expect(screen.queryByText("Couldn't refresh customers")).not.toBeInTheDocument();
   expect(screen.getByText("Anil Gupta")).toBeInTheDocument();
   expect(screen.getByText(/^21 customers · sales figures for FY 2026-27/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Export 21 customers" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "All customers as CSV" })).toBeEnabled();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.getAllByText("Anil Gupta")).toHaveLength(2));
   expect(calls.filter((c) => c.params.figures === 1).map((c) => c.params.page)).toEqual([1, 2, 2]);
@@ -262,53 +263,53 @@ test("a customer who comes again on the next page shows once, and Show more goes
   expect(screen.queryByRole("button", { name: /^Show \d+ more$/ })).not.toBeInTheDocument();
 });
 
-test("when the list of firms can't load, the figures never say “All firms” for one firm's money, and Export waits", async () => {
+test("when the list of firms can't load, the figures never say “All firms” for one firm's money, and all-customer CSV remains available", async () => {
   localStorage.setItem("gst3.scope.1", "3");
   serve({ "GET firms/": () => ({ status: 503 }), "GET customers/": list() });
   mount(routes, ["/customers"]);
   expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), the firm picked")).toBeInTheDocument();
   expect(screen.getByText(/Their sales · FY 2026-27 · the firm picked:/)).toBeInTheDocument();
   expect(screen.queryByText(/All firms/)).not.toBeInTheDocument();
-  const exp = screen.getByRole("button", { name: "Export 3 customers" });
-  expect(exp).toBeDisabled();
-  expect(exp).toHaveAttribute("title", "The firms didn't load. Reload the page to export.");
+  const exp = screen.getByRole("button", { name: "All customers as CSV" });
+  expect(exp).toBeEnabled();
+  expect(exp).toHaveAttribute("title", "Not split by year or firm");
 });
 
-test("with all firms picked, Export still waits when the list of firms can't load: the file would leave out each customer's usual firms", async () => {
+test("all-customer CSV remains available when the firms cannot load", async () => {
   localStorage.setItem("gst3.scope.1", "all");
   serve({ "GET firms/": () => ({ status: 503 }), "GET customers/": list() });
   mount(routes, ["/customers"]);
   expect(await screen.findByText("3 customers · sales figures for FY 2026-27 (1 Apr to 8 Oct 2026), All firms")).toBeInTheDocument();
-  const exp = screen.getByRole("button", { name: "Export 3 customers" });
-  expect(exp).toBeDisabled();
-  expect(exp).toHaveAttribute("title", "The firms didn't load. Reload the page to export.");
+  const exp = screen.getByRole("button", { name: "All customers as CSV" });
+  expect(exp).toBeEnabled();
+  expect(exp).toHaveAttribute("title", "Not split by year or firm");
 });
 
-test("with all firms picked, Export also waits while the list of firms loads, and comes on once it has", async () => {
+test("all-customer CSV does not depend on the firm list loading", async () => {
   localStorage.setItem("gst3.scope.1", "all");
   let firmsCome = () => {};
   const held = new Promise<void>((resolve) => { firmsCome = resolve; });
   serve({ "GET firms/": async () => { await held; return { status: 200, data: { results: FIRMS } }; }, "GET customers/": list() });
   mount(routes, ["/customers"]);
   // the rows come first: all firms needs no firm's name
-  const exp = await screen.findByRole("button", { name: "Export 3 customers" });
-  expect(exp).toBeDisabled();
-  expect(exp).toHaveAttribute("title", "Waits for the list of firms to load");
+  const exp = await screen.findByRole("button", { name: "All customers as CSV" });
+  expect(exp).toBeEnabled();
+  expect(exp).toHaveAttribute("title", "Not split by year or firm");
   await act(async () => { firmsCome(); });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Export 3 customers" })).toBeEnabled());
-  expect(screen.getByRole("button", { name: "Export 3 customers" })).toHaveAttribute("title", "A spreadsheet of the customers shown below");
+  await waitFor(() => expect(screen.getByRole("button", { name: "All customers as CSV" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "All customers as CSV" })).toHaveAttribute("title", "Not split by year or firm");
 });
 
-test("on a phone, Export in the ⋯ menu waits for the list of firms too, and says so", async () => {
+test("on a phone, all-customer CSV names its global scope while firms load", async () => {
   (window as unknown as { __phone?: boolean }).__phone = true;
   localStorage.setItem("gst3.scope.1", "all");
   serve({ "GET firms/": () => new Promise(() => {}), "GET customers/": list() });
   mount(routes, ["/customers"]);
   await screen.findByText("3 customers");
   await userEvent.click(screen.getByRole("button", { name: "Import or export customers" }));
-  const exp = await screen.findByRole("menuitem", { name: /Export 3 customers/ });
-  expect(exp).toBeDisabled();
-  expect(exp).toHaveTextContent("Waits for the list of firms to load");
+  const exp = await screen.findByRole("menuitem", { name: /All customers as CSV/ });
+  expect(exp).toBeEnabled();
+  expect(exp).toHaveTextContent("Not split by year or firm");
 });
 
 test("a row that has focus opens with Enter; Enter on a control inside it is that control's", async () => {
@@ -458,7 +459,7 @@ test("offline before the list came, it says so, with no count and nothing to exp
     expect(await screen.findByText("You're offline")).toBeInTheDocument();
     expect(screen.getByText("Waiting for the internet")).toBeInTheDocument();
     expect(screen.queryByText(/29 customers/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "All customers as CSV" })).toBeDisabled();
   } finally {
     onlineManager.setOnline(true);
     act(() => __setNetState("online"));
@@ -494,34 +495,48 @@ test("a view-only person can look and export; adding is off, with who can", asyn
   mount(routes, ["/customers"], { me: VIEWER });
   expect(await screen.findByText("Only the owner, the accountant and counter staff can add or change customers. Ask the owner if you need it.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Add customer" })).toBeDisabled();
-  expect(await screen.findByRole("button", { name: "Export 3 customers" })).toBeEnabled();
+  expect(await screen.findByRole("button", { name: "All customers as CSV" })).toBeEnabled();
   expect(screen.queryByRole("link", { name: "Import" })).not.toBeInTheDocument();
 });
 
-test("Export downloads every customer the filters match, as CSV, and says what's in it", async () => {
+test.each([false, true])("all-customer CSV is a server Blob despite active filters (phone %s)", async (phone) => {
+  (window as unknown as { __phone?: boolean }).__phone = phone;
   const { files, click } = catchDownloads();
+  const get = vi.spyOn(api, "get");
+  const csv = new Blob(["Name,Type,Phone,Email,GSTIN,PAN,State,City,Address,Firms\r\nServer customer,Business,,,,,,,,Kiran\r\n"], { type: "text/csv" });
   try {
-    const calls = serve({ "GET customers/": list() });
+    const calls = serve({ "GET customers/": list(), "GET exports/customers/": csv });
     mount(routes, ["/customers"]);
-    await userEvent.click(await screen.findByRole("button", { name: "Export 3 customers" }));
+    await screen.findByText("Anil Gupta");
+    await userEvent.type(screen.getByRole("searchbox"), "Anil");
+    await waitFor(() => expect(calls.some(c => c.params.search === "Anil")).toBe(true));
+    if (phone) {
+      await userEvent.click(screen.getByRole("button", { name: "Import or export customers" }));
+      const option = await screen.findByRole("menuitem", { name: /All customers as CSV/ });
+      expect(option).toHaveTextContent("Not split by year or firm");
+      vi.setSystemTime(Date.now() + 400); fireEvent.click(option);
+    } else {
+      const button = screen.getByRole("button", { name: "All customers as CSV" });
+      expect(button).toHaveAttribute("title", "Not split by year or firm");
+      await userEvent.click(button);
+    }
     expect(await screen.findByText("Downloaded Customers_2026-10-08.csv")).toBeInTheDocument();
-    expect(screen.getByText("3 customers · name, phone, GSTIN, state, address, firms, and sales for FY 2026-27, KIRAN GOLD HOUSE.")).toBeInTheDocument();
-    expect(calls.find((c) => c.params.page_size === 1000)!.params).toMatchObject({ figures: 1, figures_business_id: 3, page: 1 });
+    expect(screen.getAllByText("Not split by year or firm").length).toBeGreaterThan(0);
+    expect(calls.find(c => c.url === "exports/customers/")?.params).toEqual({ format: "csv" });
+    expect(calls.some(c => c.params.page_size === 1000)).toBe(false);
+    expect(get).toHaveBeenCalledWith("exports/customers/", expect.objectContaining({ responseType: "blob", timeout: 600_000 }));
     expect(click).toHaveBeenCalledTimes(1);
-    expect(files[0].type).toBe("text/csv;charset=utf-8");
-    // the file names the firm its figures are for, as the list does
-    expect((await textOf(files[0])).split("\r\n")[0]).toContain(",Sales FY 2026-27 · KIRAN GOLD HOUSE (₹),");
-  } finally {
-    click.mockRestore();
-  }
+    expect(files[0]).toBe(csv);
+    expect(await textOf(files[0])).toContain("Server customer");
+  } finally { click.mockRestore(); get.mockRestore(); }
 });
 
 test("an export that can't get through says so, and downloads nothing", async () => {
   const { click } = catchDownloads();
   try {
-    serve({ "GET customers/": (c: Call) => (c.params.page_size === 1000 ? { status: 0 } : list()(c)) });
+    serve({ "GET customers/": list(), "GET exports/customers/": () => ({ status: 0 }) });
     mount(routes, ["/customers"]);
-    await userEvent.click(await screen.findByRole("button", { name: "Export 3 customers" }));
+    await userEvent.click(await screen.findByRole("button", { name: "All customers as CSV" }));
     expect(await screen.findByText("Not exported: the app couldn't get through")).toBeInTheDocument();
     expect(screen.getByText("The file didn't download. Try again in a minute.")).toBeInTheDocument();
     expect(click).not.toHaveBeenCalled();
@@ -637,4 +652,19 @@ test("a stored GSTIN typo stays visible in the list, and absent GSTIN adds nothi
   expect(typo).not.toHaveTextContent("No GSTIN");
   const nameCell = screen.getByText("Meena Jain").closest("td")!;
   expect(nameCell).not.toHaveTextContent("No GSTIN");
+});
+
+
+test("a server CSV refusal arrives as a Blob and keeps its exact words", async () => {
+  const { click } = catchDownloads();
+  const words = "Your role can't export reports. Ask the owner if you need it.";
+  const refusal = new Blob([JSON.stringify({ detail: words })], { type: "application/json" });
+  Object.defineProperty(refusal, "text", { value: async () => JSON.stringify({ detail: words }) });
+  try {
+    serve({ "GET customers/": list(), "GET exports/customers/": () => ({ status: 403, data: refusal }) });
+    mount(routes, ["/customers"]);
+    await userEvent.click(await screen.findByRole("button", { name: "All customers as CSV" }));
+    expect(await screen.findByText(words)).toBeInTheDocument();
+    expect(click).not.toHaveBeenCalled();
+  } finally { click.mockRestore(); }
 });

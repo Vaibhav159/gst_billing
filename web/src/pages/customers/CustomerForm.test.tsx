@@ -534,13 +534,15 @@ test("an unchanged placeholder mobile saves, but a changed bad mobile is still r
   expect(calls.find((c) => c.method === "PATCH")?.data).toMatchObject({ mobile_number: "0000000000", city: "Jaipur" });
 });
 
-test("opening an edit asks only for its record; name, mobile and GSTIN searches each wait for a change", async () => {
+test("opening an edit reads its record and duplicates, never the registry (X-67); name, mobile and GSTIN searches each wait for a change", async () => {
   handClock();
   const customer = { ...ANIL, gst_number: "27XTZPS7585P1ZB", state_name: "MAHARASHTRA" };
-  const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS });
+  const calls = serve({ "GET customers/7/": customer, "GET customers/": NONE, "GET customers/7/statement/": NO_BILLS,
+    "GET registry/27XTZPS7585P1ZB/": { gstin: "27XTZPS7585P1ZB", status: "unknown", reason: "", state_code: "27", state_name: "MAHARASHTRA", pan: "XTZPS7585P", registry: null, lookup: "cache", on_file: { customers: [], firms: [] } },
+  });
   mount(routes, ["/customers/7/edit"]);
   await pass(1000, 1);
-  expect(calls.map((c) => c.url).sort()).toEqual(["customers/7/", "firms/", "preferences/"]);
+  expect(calls.map((c) => c.url).sort()).toEqual(["customers/7/", "customers/duplicates/", "firms/", "preferences/"]);
   expect(screen.queryByText(/^Has billed /)).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Anil Kumar" } });
   await pass(249, 1);

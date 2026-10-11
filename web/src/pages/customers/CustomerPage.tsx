@@ -6,7 +6,7 @@
 // The income-tax notes are the server's flags (sales/?itax=1), never worked out again here.
 // Merge waits for part 4; sending a bill again happens on the bill (part 1B).
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   AlertTriangle, Ban, Banknote, ChevronDown, FileText, GitMerge, IdCard, Info, MapPin, MessageCircle, MoreHorizontal, MoreVertical, NotebookPen, Pencil, Plus, ReceiptText, RotateCw, Store,
   Trash2, UserPlus, UserRound, WifiOff,
@@ -26,6 +26,9 @@ import { useView } from "@/core/view";
 import { billsWithCancelled, firmShort, firstName, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, tableState, useJustSaved, useMoreFocus, useRouteCustomer } from "./lib";
 import { MoreButton, useContact } from "./listParts";
 import { Bump, CopyButton, InfoCell, PeriodSwitch, QuickActions, type PeriodOption } from "./pageParts";
+import { MergeDialog } from "./MergeDialog";
+import { useAuditAction } from "@/core/api/audit";
+import { problemOf } from "@/core/api/errors";
 import { MissingRecord, WhyNote } from "./parts";
 
 const PAGE = 15;
@@ -142,9 +145,14 @@ function Detail({ c }: { c: Customer }) {
   const { isPhone } = useView();
   const d = useDetail(c);
   const [del, setDel] = useState(false);
+  const [query, setQuery] = useSearchParams();
+  const merge = query.get("merge");
+  const initialTarget = merge && /^[1-9][0-9]*$/.test(merge) ? Number(merge) : undefined;
+  const closeMerge = () => { const next = new URLSearchParams(query); next.delete("merge"); setQuery(next, { replace: true }); };
   return (
     <>
       {isPhone ? <PhoneDetail c={c} d={d} openDelete={() => setDel(true)} /> : <DesktopDetail c={c} d={d} openDelete={() => setDel(true)} />}
+      {merge !== null ? <MergeDialog source={c} initialTarget={initialTarget} onClose={closeMerge} /> : null}
       <DeleteCustomer c={c} bills={`None${d.inScope}`} open={del} onClose={() => setDel(false)} />
     </>
   );
@@ -290,7 +298,7 @@ function useMoreItems(c: Customer, d: D, openDelete: () => void): MenuItem[] {
       : has ? `Has ${billsWithCancelled(d.allFig.count, d.allFig.cancelled)}${d.inScope}. Merge it into the right customer instead.` : `It has no bills${d.inScope}`;
   return [
     { label: "All bills in Sales", icon: ReceiptText, hint: "With every filter and export there", to: `/sales?customer=${c.id}` },
-    { label: "Merge into another customer…", icon: GitMerge, disabled: true, hint: owner ? "Comes in part 4, with Records and admin" : whyNot("customer.merge", "merge customers") },
+    { label: "Merge into another customer…", icon: GitMerge, disabled: !owner, to: `/customers/${c.id}?merge=choose`, hint: owner ? "Shows what moves before anything changes" : whyNot("customer.merge", "merge customers") },
     { divider: true },
     { label: "Delete customer…", icon: Trash2, tone: "danger", disabled: !owner || !d.ready || has, onSelect: openDelete, hint },
   ];
@@ -299,13 +307,21 @@ function useMoreItems(c: Customer, d: D, openDelete: () => void): MenuItem[] {
 /** bills: the Bills row ("None", or "None in KIRAN GOLD HOUSE" when one firm's bills were looked at). */
 function DeleteCustomer({ c, bills, open, onClose }: { c: Customer; bills: string; open: boolean; onClose: () => void }) {
   const del = useDeleteCustomer();
+  const restore = useAuditAction();
   const navigate = useNavigate();
   const { show } = useToast();
   const [error, setError] = useState<string | null>(null);
   const go = () => {
     setError(null);
     del.mutate(c.id, {
-      onSuccess: () => { show({ title: `${c.name} deleted`, body: "It's also in the Audit log, to restore later." }); onClose(); navigate("/customers", { replace: true }); },
+      onSuccess: (auditId) => {
+        show({ title: `${c.name} deleted`, body: "It's also in the Audit log, to restore later.", ...(auditId ? { action: { label: "Undo", onClick: () => {
+          void restore.mutateAsync({ id: auditId, kind: "restore" }).then(
+            () => { show({ title: `${c.name} restored` }); navigate(`/customers/${c.id}`); },
+            e => show({ tone: "neg", title: "Not restored", body: problemOf(e).message }),
+          );
+        } } } : {}) }); onClose(); navigate("/customers", { replace: true });
+      },
       onError: (e) => setError(deleteRefusal(e)),
     });
   };

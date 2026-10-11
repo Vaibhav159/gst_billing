@@ -2,7 +2,7 @@
 // with a name like it show up; the GSTIN is checked as it's typed and fills the state, type and PAN; a GSTIN or phone
 // another customer has is named; every problem is said in plain words next to its field. A GSTIN that fails only its
 // check character saves with a warning and stays B2B (part 1 design, decision 3). The GST registry lookup and Merge
-// come in part 4.
+// use the shared registry and merge preview in Records.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { flushSync } from "react-dom";
@@ -21,6 +21,8 @@ import { Banner, Button, ButtonLink, Card, ConfirmDialog, Field, Input, ListSkel
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
 import { firstName, historyIndex, homeState, keepFocus, markSaved, safeReturn, tableState, useBack, useCtrlS, useOnFile, useRouteCustomer } from "./lib";
+import { useCustomerDuplicates } from "@/core/api/customerMerge";
+import { CustomerRegistry } from "./CustomerRegistry";
 import { ErrorSummary, FirmToggles, MissingRecord, NoAccess, SaveError, useEcho } from "./parts";
 
 type Values = { name: string; phone: string; email: string; type: "person" | "business"; gstin: string; pan: string; address: string; city: string; state: string; firms: number[] };
@@ -141,6 +143,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const save$ = useSaveCustomer();
+  const { can } = useAuth();
   const initial = useMemo(() => initialValues(existing, firms, home, query), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [v, setV] = useState(initial);
   const [touched, setTouched] = useState<Partial<Record<CustomerField, boolean>>>({});
@@ -202,7 +205,13 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
     ? `“${v.gstin}” doesn't look like a GSTIN. It was on file and saves unchanged. Check it against their GST certificate.` : "";
   const storedStateWarning = gValid && g.state !== v.state && gstinStored && v.state === initial.state
     ? `The GSTIN is registered in ${stateLabel(g.state)}, but ${stateLabel(v.state)} is on file. It saves unchanged; check the state before making a bill.` : "";
-  const { samePhone: dupPhone, sameGstin: dupGstin } = useOnFile(phoneChanged ? v.phone : "", gstinChanged ? v.gstin : "", existing?.id);
+  const onFile = useOnFile(phoneChanged ? v.phone : "", gstinChanged ? v.gstin : "", existing?.id);
+  const duplicateGroups = useCustomerDuplicates(existing !== null);
+  const knownDuplicate = (what: "phone" | "gstin", value: string) => duplicateGroups.data?.find(group =>
+    group.what === what && group.value === value && group.customers.some(customer => customer.id === existing?.id)
+  )?.customers.find(customer => customer.id !== existing?.id);
+  const dupPhone = onFile.samePhone ?? knownDuplicate("phone", digits);
+  const dupGstin = onFile.sameGstin ?? knownDuplicate("gstin", v.gstin);
   // A page visited before may have left statements in the cache. Their bills prove a firm has billed them; a partial
   // period or one firm's statement cannot prove another firm has no bills. Opening the form never fetches a statement.
   const statements = existing ? qc.getQueriesData<Statement>({ queryKey: customerKeys.statement(existing.id, null).slice(0, 3) }) : [];
@@ -356,7 +365,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
                 onChange={(e) => set("phone")(formatMobile(e.target.value))} onBlur={touch("phone")} aria-describedby={desc("phone", dupPhone ? "cu-phone-dup" : null)} />
               {dupPhone && !show("phone") ? (
                 <p id="cu-phone-dup" className="text-sm text-fg2 anim-rise"><AlertTriangle size={14} className="inline -mt-0.5 mr-1 text-neg" aria-hidden="true" />
-                  <Link to={`/customers/${dupPhone.id}`} className="underline underline-offset-2">{dupPhone.name}</Link> has this number too. Fine for family members; if it's the same person, use {dupPhone.name} instead.
+                  <Link to={`/customers/${dupPhone.id}`} className="underline underline-offset-2">{dupPhone.name}</Link> has this number too. Fine for family members; if it's the same person, use {dupPhone.name} instead. {existing && can("customer.merge") ? <Link to={`/customers/${existing.id}?merge=${dupPhone.id}`} className="link">Merge into {dupPhone.name}</Link> : null}
                 </p>
               ) : null}
             </Field>
@@ -387,9 +396,10 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
                 onChange={(e) => set("pan")(cleanPan(e.target.value))} onBlur={touch("pan")} inputClassName="tnum tracking-wide uppercase" aria-describedby={desc("pan")} />
             </Field>
           </div>
+          <CustomerRegistry gstin={v.gstin} values={v} onFill={(patch) => setV(old => ({ ...old, ...Object.fromEntries(Object.entries(patch).filter(([key]) => !String(old[key as keyof Values] ?? "").trim())) }))} onName={set("name")} />
           {dupGstin ? (
             <div className="mt-4 anim-rise">
-              <Banner tone="brand" icon={AlertTriangle} title={`${dupGstin.name} already has this GSTIN`} actions={<ButtonLink size="sm" to={`/customers/${dupGstin.id}`}>Open {dupGstin.name}</ButtonLink>}>
+              <Banner tone="brand" icon={AlertTriangle} title={`${dupGstin.name} already has this GSTIN`} actions={<ButtonLink size="sm" to={existing && can("customer.merge") ? `/customers/${existing.id}?merge=${dupGstin.id}` : `/customers/${dupGstin.id}`}>{existing && can("customer.merge") ? "Merge into" : "Open"} {dupGstin.name}</ButtonLink>}>
                 One GSTIN on two customers splits one buyer's bills in two. If it's the same business, bill {dupGstin.name} instead.
               </Banner>
             </div>

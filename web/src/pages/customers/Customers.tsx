@@ -2,10 +2,11 @@
 // Every figure names its period and firms, and the summary line follows the filters. No balances: the app doesn't
 // record payments received. The duplicate-customers banner ("Review and merge") comes with Merge in part 4.
 import { useRef, useState, type ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import { ArrowUpDown, Download, MoreVertical, Search, SlidersHorizontal, Upload, UserPlus, Users, X } from "lucide-react";
 import {
-  customerListParams, fetchAllCustomers, LIST_PAGE, useCustomer, useCustomerCount, useCustomerList, type CustomerListFilters, type CustomerRow, type CustomerSort,
+  LIST_PAGE, useCustomer, useCustomerCount, useCustomerList, type CustomerListFilters, type CustomerRow, type CustomerSort,
 } from "@/core/api/customers";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
@@ -22,7 +23,8 @@ import {
 } from "@/core/ui";
 import { useDebounced } from "@/core/useDebounced";
 import { useView } from "@/core/view";
-import { customersCsv } from "./exportCsv";
+import { CustomerDuplicates } from "./CustomerDuplicates";
+import { downloadBackupFile } from "@/core/api/backup";
 import { downloadFile, fyPeriod, homeState, notCounted, openOnEnter, scopeName, scopeWords, startFrom, tableState, useJustSaved, useMoreFocus } from "./lib";
 import { CustomerRowMenu, MoreButton } from "./listParts";
 import { WhyNote } from "./parts";
@@ -30,10 +32,6 @@ import { WhyNote } from "./parts";
 const SORTS: { value: CustomerSort; label: string }[] = [{ value: "recent", label: "Recent bill" }, { value: "name", label: "Name" }, { value: "sales", label: "Most sales" }];
 const GST_OPTS = [{ value: "any" as const, label: "All" }, { value: "yes" as const, label: "Has GSTIN" }, { value: "no" as const, label: "No GSTIN" }];
 const OFFLINE: ApiProblem = { kind: "offline", message: "You're offline" };
-/** Why Export is off when the list of firms didn't load: the file would have no firm to name its figures by. */
-const NO_FIRMS = "The firms didn't load. Reload the page to export.";
-/** Why Export is off while that list is still coming. */
-const FIRMS_LOADING = "Waits for the list of firms to load";
 /** A figure not known on this visit, as the prototype shows one. */
 const UNKNOWN = <span className="text-muted">—</span>;
 /**
@@ -53,7 +51,7 @@ function once(rows: CustomerRow[]): CustomerRow[] {
 }
 function useCustomersPage() {
   const { firmId, setFirmId, fy } = useScope();
-  const { firms, loading: firmsLoading, error: firmsFailed } = useFirms();
+  const { firms, error: firmsFailed } = useFirms();
   const net = useNetwork();
   const period = fyPeriod(fy);
   const [q, setQ] = useState("");
@@ -64,7 +62,7 @@ function useCustomersPage() {
   const term = useDebounced(q.trim());
   // the figures wait for the firm's name as well as its id (or for the list of firms to fail), and never show under
   // another name: a firm picked on this device is known before that list comes
-  const { named, worded, scope } = scopeWords(firms, firmId, firmsFailed);
+  const { worded, scope } = scopeWords(firms, firmId, firmsFailed);
   const filters: CustomerListFilters = { firmId: worded ? firmId : null, from: period.from, to: period.to, q: term, gst, state, usualFirm: usual, sort };
   const list = useCustomerList(filters);
   const filtered = Boolean(term || gst !== "any" || state || usual !== null);
@@ -86,9 +84,9 @@ function useCustomersPage() {
   const ready = list.data !== undefined;
   // nothing to show: the list, or the search or filter asked last, didn't load
   const failed = list.isError && !list.data;
-  // once the list has come on this visit, a search or filter that fails leaves the header's actions on: Add customer and
-  // Import don't depend on it, and Export asks the server itself. Before it has come, a failure means the customers
-  // can't be reached at all, so they wait
+  // once the list has come on this visit, a search or filter that fails leaves Add customer and Import on.
+  // Before it has come, a failure means the customers cannot be reached, so those actions wait.
+  // The server CSV export has its own request and does not depend on this list.
   const [came, setCame] = useState(false);
   if (ready && !came) setCame(true);
   const actionsOn = ready || (failed && came);
@@ -103,12 +101,7 @@ function useCustomersPage() {
     firms, firmId, setFirmId, period, q, setQ, term, gst, setGst, state, setState, usual, setUsual, sort, setSort, list, shown, count, total, summary,
     more: () => { noteMore(); void list.fetchNextPage(); },
     chips, clearAll, searchRef, describe, justSaved, ready, failed, actionsOn, offline: net === "offline",
-    // Export asks for the list's own filters, once it can ask, and names the firm its figures are for; without the
-    // list of firms (still coming, or failed) it waits even for all firms, as the file names each customer's usual firms
-    exportable: actionsOn && named && !firmsLoading && !firmsFailed,
-    // why Export is off once the header's actions are on
-    exportWait: firmsFailed ? NO_FIRMS : FIRMS_LOADING,
-    params: filters.firmId === null ? null : customerListParams(filters), scope, home: homeState(firms, firmId),
+    scope, home: homeState(firms, firmId),
   };
 }
 type D = ReturnType<typeof useCustomersPage>;
@@ -119,28 +112,27 @@ export default function Customers() {
   return isPhone ? <PhoneCustomers d={d} /> : <DesktopCustomers d={d} />;
 }
 
-/** Every customer the filters match, as a CSV file, and a message saying what it holds. */
+/** Part 4 exports every customer on the server, independently of this list's filters and sales figures. */
 function useExport(d: D) {
   const { show } = useToast();
-  const [busy, setBusy] = useState(false);
-  const run = async () => {
-    if (!d.params || !d.exportable) return;
-    setBusy(true);
-    try {
-      const all = await fetchAllCustomers(d.params);
-      const name = `Customers_${todayIST()}.csv`;
-      downloadFile(new Blob([customersCsv(all, d.firms, `${d.period.label} · ${d.scope}`)], { type: "text/csv;charset=utf-8" }), name);
-      show({ title: `Downloaded ${name}`, body: `${plural(all.length, "customer")}${d.describe ? ` (${d.describe})` : ""} · name, phone, GSTIN, state, address, firms, and sales for ${d.period.label}, ${d.scope}.` });
-    } catch (e) {
+  const { can, whyNot } = useAuth();
+  const cache = useQueryClient();
+  const allowed = can("reports.export") && !d.offline;
+  const hint = !can("reports.export") ? whyNot("reports.export", "export reports") : d.offline ? "Waits for the internet" : "Not split by year or firm";
+  const request = useMutation({
+    mutationFn: () => downloadBackupFile("exports/customers/", { format: "csv" }, `Customers_${todayIST()}.csv`),
+    onSuccess: ({ blob, name }) => {
+      downloadFile(blob, name);
+      show({ title: `Downloaded ${name}`, body: "Not split by year or firm" });
+      void cache.invalidateQueries({ queryKey: ["audit"] });
+    },
+    onError: (e) => {
       const p = problemOf(e);
       const network = p.kind === "offline" || p.kind === "unreachable" || p.kind === "server";
-      // failText's titles ("Not exported: you're offline"); an export changes nothing, so the body says what didn't happen
       show({ tone: "neg", title: failText(p, "exported").title, body: network ? `The file didn't download. ${p.kind === "offline" ? "Try again when the internet is back." : "Try again in a minute."}` : p.message });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { busy, run };
+    },
+  });
+  return { busy: request.isPending, allowed, hint, run: () => { if (allowed && !request.isPending) request.mutate(); } };
 }
 
 /**
@@ -217,11 +209,12 @@ function DesktopCustomers({ d }: { d: D }) {
       context={d.ready ? `${plural(d.total, "customer")} · sales figures for ${d.period.label} (${d.period.range}), ${d.scope}` : d.offline ? "Waiting for the internet" : d.failed ? "The list didn't load" : "Loading the list…"}
       actions={<>
         {can("customer.edit") ? (d.actionsOn ? <ButtonLink to="/import?type=customers" icon={Upload}>Import</ButtonLink> : <Button icon={Upload} disabled title={away}>Import</Button>) : null}
-        <Button icon={Download} onClick={() => void exp.run()} loading={exp.busy} disabled={!d.exportable} title={d.exportable ? "A spreadsheet of the customers shown below" : d.actionsOn ? d.exportWait : away}>{d.ready ? `Export ${plural(d.count, "customer")}` : "Export"}</Button>
+        <Button icon={Download} onClick={exp.run} loading={exp.busy} disabled={!exp.allowed} title={exp.hint}>All customers as CSV</Button>
         {can("customer.edit") && (!d.failed || d.actionsOn)
           ? <ButtonLink to="/customers/new?from=list" variant="primary" icon={UserPlus}>Add customer</ButtonLink>
           : <Button variant="primary" icon={UserPlus} disabled title={can("customer.edit") ? away : whyNot("customer.edit", "add customers")}>Add customer</Button>}
       </>}>
+      <CustomerDuplicates />
       {!can("customer.edit") ? <WhyNote className="-mt-3">{whyNot("customer.edit", "add or change customers")}</WhyNote> : null}
       <Card pad={false}>
         <div className="flex flex-wrap items-center gap-3 px-5 pt-4 pb-3">
@@ -311,9 +304,10 @@ function PhoneCustomers({ d }: { d: D }) {
     <Page title="Customers" phoneSubtitle={d.ready ? `${plural(d.total, "customer")} · ${d.period.label} sales · ${scopeName(d.firms, d.firmId, true)}` : d.offline ? "Waiting for the internet" : d.failed ? "The list didn't load" : "Loading…"}
       phoneActions={<Menu title="Customers" items={[
         { label: "Import customers", icon: Upload, disabled: !can("customer.edit"), hint: can("customer.edit") ? "From a spreadsheet, with a check before anything is added" : whyNot("customer.edit", "import customers"), onSelect: () => navigate("/import?type=customers") },
-        { label: d.ready ? `Export ${plural(d.count, "customer")}` : "Export", icon: Download, disabled: !d.exportable || exp.busy, hint: d.exportable ? d.describe || "Everyone in the list" : d.actionsOn ? d.exportWait : waitingReason(d.offline, d.failed, "list"), onSelect: () => void exp.run() },
+        { label: "All customers as CSV", icon: Download, disabled: !exp.allowed || exp.busy, hint: exp.hint, onSelect: exp.run },
       ]} trigger={(p) => <IconButton {...p} label="Import or export customers" icon={MoreVertical} />} />}
       actionBar={can("customer.edit") ? (d.failed && !d.actionsOn ? <Button variant="primary" size="lg" icon={UserPlus} disabled title={waitingReason(d.offline, d.failed, "list")}>Add customer</Button> : <ButtonLink to="/customers/new?from=list" variant="primary" size="lg" icon={UserPlus}>Add customer</ButtonLink>) : null}>
+      <CustomerDuplicates />
       <SearchInput inputRef={d.searchRef} value={d.q} onChange={d.setQ} placeholder="Name, phone or GSTIN" label="Search customers" data-page-search="" />
       <FirmChips firms={d.firms} value={d.firmId} onChange={d.setFirmId} />
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar">

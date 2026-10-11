@@ -342,12 +342,12 @@ test("on a phone too, a GSTIN that fails its check character says so, with Check
   expect(screen.getByRole("link", { name: "Check the GSTIN" })).toHaveAttribute("href", "/customers/7/edit?focus=gstin");
 });
 
-test("More: Merge waits for part 4; Delete is the owner's, only with no bills, and goes back to the list", async () => {
+test("More: Merge opens its preview; Delete is the owner's, only with no bills, and goes back to the list", async () => {
   const calls = serve({ "GET customers/30/": { ...ANIL, id: 30, name: "Rekha Soni" }, "GET customers/30/statement/": statement([]), "GET sales/": flags([]), "DELETE customers/30/": () => ({ status: 204 }) });
   const { router } = mount(routes, ["/customers", "/customers/30"]);
   await screen.findByText("No sales bills to Rekha Soni in FY 2026-27");
   await userEvent.click(screen.getByRole("button", { name: "More" }));
-  expect(await screen.findByRole("menuitem", { name: /Merge into another customer/ })).toBeDisabled();
+  expect(await screen.findByRole("menuitem", { name: /Merge into another customer/ })).toBeEnabled();
   // the statement is the firm picked's: it can't speak for the other firms, so it says whose bills it looked at
   expect(screen.getByRole("menuitem", { name: /Delete customer/ })).toHaveTextContent("It has no bills in KIRAN GOLD HOUSE");
   await userEvent.click(screen.getByRole("menuitem", { name: /Delete customer/ }));

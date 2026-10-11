@@ -27,7 +27,7 @@ export const NO_BILLS = { customer: {}, start_date: null, end_date: null, busine
 
 /** The fake server (@/test/server), with the firms and the person's preferences answered unless a test answers them itself. */
 export function serve(answers: Record<string, Answer>): Call[] {
-  return serveAll({ "GET firms/": { results: FIRMS }, "GET preferences/": { data: { defaultBusinessId: "3" } }, ...answers });
+  return serveAll({ "GET customers/duplicates/": { groups: [] }, "GET firms/": { results: FIRMS }, "GET preferences/": { data: { defaultBusinessId: "3" } }, ...answers });
 }
 
 /**
