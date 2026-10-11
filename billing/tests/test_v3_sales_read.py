@@ -32,20 +32,20 @@ class ItaxFlagsTest(TestCase):
     def kinds(self, customer, rate, mode="", status="active"):
         bill = sale(self.biz, customer, str(Invoice.objects.count() + 1), "2026-09-10", line(rate=rate),
                     payment_mode=mode, status=status)
-        return [f["kind"] for f in itax_flags(bill)]
+        return [f["kind"] for f in itax_flags(bill, list(bill.lineitem_set.all()))]
 
     def test_cash_at_the_limit_and_over(self):
         anil = buyer(pan_number="ABCDE1234F")
-        self.assertEqual(self.kinds(anil, "194174.76", "cash"), ["cash_limit"])  # ₹2,00,000.00 exactly: at the limit
-        self.assertEqual(self.kinds(anil, "194174.76", "mixed"), [])  # part cash isn't flagged
+        self.assertEqual(self.kinds(anil, "194174.76", "cash"), ["cash_limit", "b2c_address"])  # ₹2,00,000.00 exactly
+        self.assertEqual(self.kinds(anil, "194174.76", "mixed"), ["b2c_address"])  # part cash isn't flagged
         bill = sale(self.biz, anil, "X1", "2026-09-10", line(rate="258000"), payment_mode="cash")
-        self.assertEqual(itax_flags(bill)[0]["text"], "₹2,65,740.00 taken in cash is at or over the ₹2,00,000 "
+        self.assertEqual(itax_flags(bill, list(bill.lineitem_set.all()))[0]["text"], "₹2,65,740.00 taken in cash is at or over the ₹2,00,000 "
                                                       "limit for one bill (Income Tax Sec 269ST).")
 
     def test_pan_over_the_limit(self):
-        self.assertEqual(self.kinds(buyer(), "194174.76"), [])  # not over
-        self.assertEqual(self.kinds(buyer("Lalit"), "200000"), ["pan"])
-        self.assertEqual(self.kinds(buyer("Mehta", pan_number="ABCDE1234F"), "200000"), [])
+        self.assertEqual(self.kinds(buyer(), "194174.76"), ["b2c_address"])  # not over the PAN limit
+        self.assertEqual(self.kinds(buyer("Lalit"), "200000"), ["pan", "b2c_address"])
+        self.assertEqual(self.kinds(buyer("Mehta", pan_number="ABCDE1234F"), "200000"), ["b2c_address"])
         good = Customer.objects.create(name="Rathore Gems", gst_number=GOOD_GSTIN, address="Jaipur")
         bad = Customer.objects.create(name="Kulkarni", gst_number=BAD_GSTIN, address="Pune")
         self.assertEqual(self.kinds(good, "200000"), [])  # the PAN comes from a valid GSTIN
@@ -53,7 +53,7 @@ class ItaxFlagsTest(TestCase):
 
     def test_walk_in_and_address(self):
         walkin = buyer("Walk-in Customer", customer_type="walkin")
-        self.assertEqual(self.kinds(walkin, "200000"), ["walkin_limit"])
+        self.assertEqual(self.kinds(walkin, "200000"), ["walkin_limit", "b2c_address"])
         noaddr = Customer.objects.create(name="Desai Gems", gst_number=GOOD_GSTIN)
         self.assertEqual(self.kinds(noaddr, "1000"), ["b2b_address"])
 
@@ -64,8 +64,8 @@ class ItaxFlagsTest(TestCase):
 
     def test_a_typed_pan_that_isnt_one_is_no_pan(self):
         # Ruling 1A-20: v2's imports store placeholders like "N/A" unchecked; they don't silence Rule 114B.
-        self.assertEqual(self.kinds(buyer("Joshi", pan_number="N/A"), "200000"), ["pan"])
-        self.assertEqual(self.kinds(buyer("Bhatt", pan_number="abcde1234f"), "200000"), [])  # a PAN, in small letters
+        self.assertEqual(self.kinds(buyer("Joshi", pan_number="N/A"), "200000"), ["pan", "b2c_address"])
+        self.assertEqual(self.kinds(buyer("Bhatt", pan_number="abcde1234f"), "200000"), ["b2c_address"])  # a PAN, in small letters
 
 
 class ChecksTest(TestCase):

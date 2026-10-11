@@ -147,7 +147,7 @@ def statement(customer, start=None, end=None, firm=None):
                      "invoice_number": inv.invoice_number, "invoice_date": inv.invoice_date.isoformat(),
                      "payment_mode": inv.payment_mode, "taxable": money(added["taxable"]), "tax": money(added["tax"]),
                      "total_amount": money(inv.total_amount), "status": inv.status, "cancel_reason": inv.cancel_reason,
-                     "paid": way, "itax": itax_flags(inv)})
+                     "paid": way, "itax": itax_flags(inv, lines[inv.pk])})
         if cancelled:
             totals["cancelled"] += 1
             continue
