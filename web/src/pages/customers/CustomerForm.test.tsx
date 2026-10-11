@@ -376,71 +376,76 @@ test("a link to this page that would start the form afresh (Ctrl K's Add a custo
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-// (a test on the browser's own history waits on jsdom's asynchronous Back several times: up to 4.6 s alone on a loaded
-// machine, so it gets 15 s rather than the 5 s default)
-const HISTORY_TEST_MS = 15_000;
-
 test("Stay after Back goes forward to the form's own address, and the address Back went to stays in the history", async () => {
-  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  handClock();
   serve({ "GET customers/": NONE });
   // the browser's history, which numbers its entries as the app's does (an in-memory one doesn't)
   const { router } = mount(routes, ["/customers/new?name=Rekha%20Soni"], { browser: true });
   try {
-    expect(await screen.findByLabelText(/^Name/)).toHaveValue("Rekha Soni");
+    await pass(400, 1);
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("Rekha Soni");
     // Ctrl K's Add a customer with nothing typed yet: the form starts afresh at once
     await act(async () => { await router.navigate("/customers/new"); });
-    await waitFor(() => expect(screen.getByLabelText(/^Name/)).toHaveValue(""));
-    await userEvent.type(screen.getByLabelText("City"), "Udaipur");
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "Udaipur" } });
     // Back to Rekha's address would start the form afresh: it asks, and Stay goes forward to the form's own again
     act(() => { void router.navigate(-1); });
-    let dialog = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // jsdom queues each history traversal in two timer turns; move those explicitly, including a blocked Back's return.
+    await pass(4, 1);
+    const dialog = screen.getByRole("dialog", { name: "Leave without saving?" });
     expect(router.state.location.search).toBe("?name=Rekha%20Soni");
-    act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against a double tap's second tap
+    await pass(400, 1); // past the dialog's guard against a double tap's second tap
     fireEvent.click(within(dialog).getByRole("button", { name: "Stay" }));
-    await waitFor(() => expect(router.state.location.search).toBe(""));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await pass(4, 1);
+    expect(router.state.location.search).toBe("");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByLabelText("City")).toHaveValue("Udaipur");
     // Rekha's address is still the entry before it: Back reaches it, and asks again
     act(() => { void router.navigate(-1); });
-    await waitFor(() => expect(router.state.location.search).toBe("?name=Rekha%20Soni"));
-    dialog = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await pass(4, 1);
+    expect(router.state.location.search).toBe("?name=Rekha%20Soni");
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(screen.getByLabelText("City")).toHaveValue("Udaipur");
   } finally {
     router.dispose();
   }
-}, HISTORY_TEST_MS);
+});
 
 test("a Back to another page that the guard stops, left unanswered, then a jump to an address that would start the form afresh: Stay goes to the form's own entry", async () => {
-  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  handClock();
   serve({ "GET customers/": NONE });
   const { router } = mount(routes, ["/customers/new?name=Rekha%20Soni"], { browser: true });
   const idx = () => (window.history.state as { idx?: number } | null)?.idx;
   try {
-    expect(await screen.findByLabelText(/^Name/)).toHaveValue("Rekha Soni");
+    await pass(400, 1);
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("Rekha Soni");
     // entries: Rekha's form (0), the list (1), a new customer's form (2)
     await act(async () => { await router.navigate("/customers"); });
     await act(async () => { await router.navigate("/customers/new"); });
-    await waitFor(() => expect(screen.getByLabelText(/^Name/)).toHaveValue(""));
-    await userEvent.type(screen.getByLabelText("City"), "Udaipur");
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "Udaipur" } });
     // Back to the list: the page's guard stops it, and the browser is put back on the form's entry
     act(() => { void router.navigate(-1); });
-    await screen.findByRole("dialog", { name: "Leave without saving?" });
-    await waitFor(() => expect(idx()).toBe(2));
+    await pass(4, 1);
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(idx()).toBe(2);
     // its question left unanswered, a jump to Rekha's address on this same page, which asks too
     act(() => { void router.navigate(-2); });
-    await waitFor(() => expect(router.state.location.search).toBe("?name=Rekha%20Soni"));
-    const dialog = await screen.findByRole("dialog", { name: "Leave without saving?" });
-    act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against a double tap's second tap
+    await pass(4, 1);
+    expect(router.state.location.search).toBe("?name=Rekha%20Soni");
+    const dialog = screen.getByRole("dialog", { name: "Leave without saving?" });
+    await pass(400, 1); // past the dialog's guard against a double tap's second tap
     fireEvent.click(within(dialog).getByRole("button", { name: "Stay" }));
     // the form's own entry, two on: never the list's, one on, which the guard would stop again
-    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe("/customers/new"));
+    await pass(4, 1);
+    expect(router.state.location.pathname + router.state.location.search).toBe("/customers/new");
     expect(idx()).toBe(2);
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByLabelText("City")).toHaveValue("Udaipur");
   } finally {
     router.dispose();
   }
-}, HISTORY_TEST_MS);
+});
 
 test("a viewer is told who may add customers, and gets no form", async () => {
   serve({});
