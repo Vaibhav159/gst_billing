@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fieldOf, readSheet, sheetFirm, sheetKindHint } from "./columns";
-import { addPatch, checkBill, groupBills, withEdits, importUnit } from "./model";
+import { addPatch, checkBill, groupBills, withEdits, importUnit, quantityRateRequired } from "./model";
 import type { Sheet } from "./parse";
 
 const sheet: Sheet = { name: "KGH", rows: [
@@ -77,6 +77,20 @@ describe("register layouts and editable bill checks", () => {
     expect(checked.state).toBe("fix"); expect(checked.problems.find(p => p.field === "lines.0.tax")?.fix?.label).toBe("Use 3% of the taxable value");
     const fixed = withEdits(wrong, addPatch({}, checked.problems.find(p => p.fix)?.fix?.patch ?? {}));
     expect(checkBill(fixed, context).state).toBe("ready");
+  });
+  it.each(["sale", "pair"] as const)("requires printed quantity and rate for %s lines while purchases retain amount-only entry", kind => {
+    const purchase = withEdits(parsed()[1], { lines: { 0: { qty: "", price: "" } } });
+    expect(checkBill(purchase, context).state).toBe("ready");
+    const bill = { ...purchase, kind: kind === "sale" ? "sale" as const : "purchase" as const };
+    const options = { ...context, requireQuantityRate: kind === "pair" };
+    const blocked = checkBill(bill, options);
+    expect(blocked.state).toBe("fix");
+    expect(blocked.selected).toBe(false);
+    expect(blocked.problems).toContainEqual({ field: "lines.0.quantity", detail: quantityRateRequired });
+    const corrected = checkBill(withEdits(bill, { lines: { 0: { qty: "2.000", price: "50.000" } } }), options);
+    expect(corrected.state).toBe("ready");
+    expect(corrected.lines[0]).toMatchObject({ quantity: "2.000", rate: "50.000" });
+    expect(corrected.lines[0]).not.toHaveProperty("amount_only");
   });
   it("flags a ten-times usual rate as To check, leaving it unticked", () => {
     const bill = parsed()[1]; const result = checkBill(bill, { ...context, usualRates: { "Gold|gms": 1000 } });

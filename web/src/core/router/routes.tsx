@@ -9,6 +9,7 @@ import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 import { capturePages, captureRoutes } from "@/pages/purchases/capture/routes";
 import { customerPages, customerRoutes } from "@/pages/customers/routes";
+import { part2dRoutes } from "@/pages/imports/routes";
 import { idlePages, lazyPage } from "./lazyPage";
 
 // Selling's pages load on demand (Ruling 1B-4): code comes as each page opens, or while idle after a real page shows.
@@ -107,6 +108,8 @@ export const appRoutes: RouteObject[] = [{
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,
         ...captureRoutes,
+        // Part 2D pages stay lazy and ahead of their placeholders.
+        ...part2dRoutes,
         { path: '/purchases', element: <PurchaseList /> },
         { path: '/purchases/new', element: <PurchaseFormPage />, handle: { hideNav: true } },
         { path: '/purchases/:id/edit', element: <PurchaseFormPage />, handle: { hideNav: true } },

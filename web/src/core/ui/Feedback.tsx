@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { CloudOff, Loader2, RotateCw, WifiOff } from "lucide-react";
 import { cn } from "@/core/cn";
 import type { ApiProblem } from "@/core/api/errors";
@@ -42,11 +41,6 @@ export function ListSkeleton({ rows = 6, className, what = "the list" }: { rows?
 
 export function Skeleton({ w = "100%", h = 14, className }: { w?: number | string; h?: number; className?: string }) {
   return <span aria-hidden="true" className={cn("block rounded-md bg-raised anim-pulse", className)} style={{ width: w, height: h }} />;
-}
-
-/** Words that say the app is working, next to a spinner. They stay solid (only skeleton blocks pulse). */
-export function BusyText({ children, className }: { children: ReactNode; className?: string }) {
-  return <span role="status" className={cn("inline-flex items-center gap-2", className)}><Loader2 size={16} className="anim-spin shrink-0" aria-hidden="true" />{children}</span>;
 }
 
 export function Spinner({ size = 18, className }: { size?: number; className?: string }) {

@@ -35,8 +35,8 @@ function PhotoImportDesk({ firms, Editor }: PhotoImportProps) {
   const busy = session.busy || prechecking;
   const [rows, setRows] = useState<PhotoRow[]>([]), [editing, setEditing] = useState<string | null>(null);
   const [over, setOver] = useState(false), [runError, setRunError] = useState<string | null>(null);
-  // File objects and metadata change on reselect: share exact-byte results and pending reads.
-  const reads = useRef<{ bytes: Uint8Array; result: Promise<Read> }[]>([]);
+  // File metadata changes on reselect. Keep only content fingerprints, results and pending reads.
+  const reads = useRef(new Map<string, Promise<Read>>());
   const input = useRef<HTMLInputElement>(null), more = useRef<HTMLInputElement>(null);
   const active = useRef(new Set<string>()), urls = useRef(new Set<string>()), serial = useRef(0);
   const may = { sales: auth.can("bill.create"), purchases: auth.can("purchase.import") };
@@ -63,16 +63,19 @@ function PhotoImportDesk({ firms, Editor }: PhotoImportProps) {
     for (const row of next) {
 
       active.current.add(row.id); patch(row.id, { phase: "reading", fail: "" });
-      void bytesOf(row.file).then((bytes) => {
-        const known = reads.current.find((entry) => entry.bytes.length === bytes.length && entry.bytes.every((byte, i) => byte === bytes[i]));
-        if (known) return known.result;
-        const entry = { bytes, result: prepareFiles([row.file], true).then(([pages]) => {
+      void bytesOf(row.file).then(async (bytes) => {
+        if (!globalThis.crypto?.subtle) throw new Error("This browser can't check this file safely. Open the app over HTTPS and try again.");
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return `${bytes.byteLength}:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+      }).then((key) => {
+        const known = reads.current.get(key);
+        if (known) return known;
+        const result = prepareFiles([row.file], true).then(([pages]) => {
           const body = new FormData(); for (const page of pages) body.append("files", page); body.append("kind", "photos");
           return readBill(body);
-        }) };
-        reads.current.push(entry);
-        entry.result = entry.result.catch((error: unknown) => { reads.current = reads.current.filter((stored) => stored !== entry); throw error; });
-        return entry.result;
+        }).catch((error: unknown) => { reads.current.delete(key); throw error; });
+        reads.current.set(key, result);
+        return result;
       }).then((read) => { const detected = detect(read); patch(row.id, { read, ...detected, phase: "read", include: true, partyId: detected.kind === "purchase" ? read.supplier.id : null }); }).catch((error: unknown) => {
         const p = problemOf(error); const detail = (p.body as { detail?: unknown } | undefined)?.detail;
         patch(row.id, { phase: "failed", fail: error instanceof Error && !("isAxiosError" in error) ? error.message : typeof detail === "string" ? detail : p.kind === "offline" ? `You're offline, so the ${/\.pdf$/i.test(row.file.name) ? "PDF" : "photo"} wasn't sent to be read. It stays here; try again when the internet is back.` : p.message });

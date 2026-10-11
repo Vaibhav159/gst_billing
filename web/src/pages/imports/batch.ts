@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/core/api/client';
 import type { LineInput, PaymentMode } from '@/core/sales/types';
-import type { PurchaseRead, AiReads } from '@/core/captures/types';
+import type { PurchaseRead } from '@/core/captures/types';
 import { assertMultipartSize } from '@/core/captures/multipart';
 export type ImportKind = 'purchases' | 'sales';
 export type ImportLine = LineInput | { product_name: string; hsn_code: string; gst_percent: string; unit: string; taxable: string; note: string; amount_only: true; quantity?: string };
@@ -11,7 +11,6 @@ export type ImportBody = { file_name: string; dry_run: boolean; suppliers?: Impo
 export type Credit = { month: string | null; chosen: string | null; late: boolean; eligible: boolean; lapsed: boolean; claimed: string; state: 'outside' | 'open' | 'filed'; filed_on: string | null; deadline: string };
 export type ImportResult = { dry_run: boolean; ok: boolean; bills: { ref: string; ok: boolean; id: number | null; problems: { field: string; detail: string }[]; duplicate: { id: number; invoice_number: string } | null; credit: Credit | null }[]; suppliers?: { ref: string; id: number | null }[]; customers?: { ref: string; id: number | null }[]; totals: { bills: number; total_amount: string; credit: string } };
 export type Read = PurchaseRead;
-export type ReadMeter = AiReads;
 export async function batchRequest(kind: ImportKind, body: ImportBody): Promise<ImportResult> {
   if (!body.bills.length) throw new Error('There are no bills to import.');
   if (body.bills.length > 300) throw new Error('An import can hold at most 300 bills. Split the file.');

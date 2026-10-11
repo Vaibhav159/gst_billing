@@ -12,7 +12,8 @@ export type BillEdit = Partial<Omit<ParsedBill, "lines">> & { lines?: Record<num
 export type Patch = Partial<ParsedLine> & Partial<Omit<ParsedBill, "lines">> & { line?: number };
 export type ImportProblem = { field: string; detail: string; fix?: { label: string; patch: Patch } };
 export type ProductHint = { name: string; hsn_code?: string; gst_percent?: string; unit?: string };
-export type CheckContext = { firmId: number | null; today: string; partyId?: number; partyGstin?: string; interstate?: boolean; canSale?: boolean; canPurchase?: boolean; products?: ProductHint[]; usualRates?: Record<string, number> };
+export type CheckContext = { firmId: number | null; today: string; partyId?: number; partyGstin?: string; interstate?: boolean; canSale?: boolean; canPurchase?: boolean; requireQuantityRate?: boolean; products?: ProductHint[]; usualRates?: Record<string, number> };
+export const quantityRateRequired = "Enter the quantity and rate printed on the bill to import a sale or a bill between your firms.";
 
 export function readDate(raw: string): string | null {
   let y: number, m: number, d: number;
@@ -98,6 +99,7 @@ export function checkBill(bill: ParsedBill, context: CheckContext) {
     const fileTax = line.dropHeads ? 0 : line.cgst + line.sgst + line.igst;
     let taxable = line.taxable, quantity = line.qty, rate = line.price;
     const amountOnly = bill.zero || !quantity || !rate;
+    if (amountOnly && (bill.kind === "sale" || context.requireQuantityRate)) problem(`${prefix}.quantity`, quantityRateRequired);
     if (bill.zero) taxable = (taxable || lineFigures({ quantity, rate, gst_percent: "0" }, false)?.taxable || Math.max(0, line.total - fileTax)) + fileTax;
     if (amountOnly && !taxable && bill.lines.length === 1 && line.total && gst) {
       const bp = scaled(gst, 2)!;

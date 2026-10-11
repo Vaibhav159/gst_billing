@@ -10,6 +10,7 @@ import { capturePages } from "@/pages/purchases/capture/routes";
 import { ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { appRoutes } from "./routes";
+import { part2dRoutes } from "@/pages/imports/routes";
 
 type Code = { load: () => Promise<unknown> };
 const { queues, rendererLoaded } = vi.hoisted(() => ({ queues: [] as Code[][], rendererLoaded: vi.fn() }));
@@ -21,7 +22,7 @@ vi.mock("@react-pdf/renderer", () => { rendererLoaded(); return {}; });
 
 const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((route) => [route, ...all(route.children ?? [])]);
 
-test("the real routes warm every lazy screen and Search records once, with no PDF renderer or API fetch", async () => {
+test("the real routes warm every other lazy screen and Search records once, leaving the four import/supplier pages on demand, with no PDF renderer or API fetch", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
   let idle!: IdleRequestCallback;
@@ -34,12 +35,18 @@ test("the real routes warm every lazy screen and Search records once, with no PD
     const pages = [...new Set(all(appRoutes).flatMap(({ element }) =>
       isValidElement(element) && typeof element.type !== "string" && "load" in element.type
         ? [element.type as unknown as Code] : []))];
+    const owned = part2dRoutes.flatMap(({ element }) => isValidElement(element) ? [element.type as unknown as Code] : []);
+    expect(owned).toHaveLength(4);
+    for (const route of part2dRoutes) expect(all(appRoutes).find(r => r.path === route.path)?.element).toBe(route.element);
     expect(pages).toEqual(expect.arrayContaining(capturePages));
-    const expected: Code[] = [...pages, paletteCode];
+    for (const page of owned) expect(pages).toContain(page);
+    const expected: Code[] = [...pages.filter(page => !owned.includes(page)), paletteCode];
+    for (const page of owned) expect(queues[0]).not.toContain(page);
     expect(queues).toHaveLength(1);
     expect(queues[0]).toHaveLength(expected.length);
     for (const page of expected) expect(queues[0]).toContain(page);
     const loads = expected.map((page) => vi.spyOn(page, "load").mockResolvedValue({}));
+    const onDemandLoads = owned.map((page) => vi.spyOn(page, "load").mockResolvedValue({}));
     const { calls } = salesServer();
     expect(rendererLoaded).not.toHaveBeenCalled();
     expect(requestIdle).not.toHaveBeenCalled();
@@ -55,6 +62,7 @@ test("the real routes warm every lazy screen and Search records once, with no PD
     for (const load of loads) expect(load).toHaveBeenCalledTimes(1);
     expect(rendererLoaded).not.toHaveBeenCalled();
     expect(calls).toHaveLength(before);
+    for (const load of onDemandLoads) expect(load).not.toHaveBeenCalled();
     view.unmount();
     view = render(tree());
     expect(requestIdle).toHaveBeenCalledTimes(1);

@@ -34,5 +34,14 @@ export default defineConfig({
     proxy: { "/api": { target: api }, "/media": { target: api, changeOrigin: true } },
   },
   // react-pdf's own chunk (about 1.25 MB) loads only when a PDF is made; firstDownload() watches the entry
-  build: { chunkSizeWarningLimit: 1300 },
+  build: {
+    chunkSizeWarningLimit: 1300,
+    modulePreload: {
+      // These routes open only on demand. Their ESM imports load JavaScript dependencies;
+      // keep CSS preloads, without embedding each new route's dependency list in the entry (X-47).
+      resolveDependencies: (filename, dependencies) => /(?:^|\/)(?:Suppliers|ImportPage|PhotoPage)-[^/]+\.js$/.test(filename)
+        ? dependencies.filter(file => file.endsWith('.css'))
+        : dependencies,
+    },
+  },
 });

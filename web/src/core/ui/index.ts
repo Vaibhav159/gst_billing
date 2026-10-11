@@ -4,6 +4,7 @@ export * from "./Money";
 export * from "./Badge";
 export * from "./Banner";
 export * from "./Feedback";
+export * from "./BusyText";
 export * from "./FailNote";
 export * from "./Avatar";
 export { cn } from "@/core/cn";
@@ -12,6 +13,7 @@ export { Field, type FieldProps } from "./Field";
 export * from "./Input";
 export * from "./MoneyInput";
 export * from "./Choice";
+export { Tabs } from "./Tabs";
 export * from "./Combobox";
 // Kit 3: dialogs, sheets, menus and toasts
 export { Portal, usePresence } from "./Overlay";
@@ -22,6 +24,7 @@ export * from "./toast";
 export * from "./Page";
 export * from "./Card";
 export * from "./List";
+export * from "./useNewIds";
 export * from "./Table";
 // A query's loading, slow, offline and error states
 export * from "./QueryView";

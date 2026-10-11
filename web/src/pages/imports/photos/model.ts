@@ -3,6 +3,7 @@ import { lineFigures, taxFor } from "@/core/sales/maths";
 import { toPaise } from "@/core/format";
 import type { Firm } from "@/core/scope";
 import type { Credit, ImportBody, ImportKind, ImportParty, Read } from "../batch";
+import { quantityRateRequired } from "../model";
 export type PhotoKind = "purchase" | "sale" | "interfirm";
 export type PhotoRow = {
   id: string; file: File; url: string; phase: "queued" | "reading" | "read" | "failed" | "imported";
@@ -26,6 +27,7 @@ export function localProblems(row: PhotoRow, may: MayImport, firms: Firm[]): str
   if (!row.read || row.phase !== "read") return [];
   const r = row.read, out = row.problems.map((p) => p.detail);
   if (!r.invoice_date) out.push("Type the date printed on the bill, like 08 Oct 2026.");
+  if (row.kind !== "purchase" && r.lines.some(l => l.amount_only || !l.quantity || !l.rate)) out.push(quantityRateRequired);
   if (row.kind !== "sale" && r.invoice_date && r.invoice_date >= "2025-04-01" && row.itcMonth && row.itcMonth < "2025-04") out.push("The credit ledger starts in April 2025. Pick April 2025 or later.");
   if ((row.kind !== "purchase" && !may.sales) || (row.kind !== "sale" && !may.purchases)) out.push("Not for your role");
   const firm = firms.find((f) => f.id === row.firmId);
@@ -69,6 +71,7 @@ export function bodyFor(rows: PhotoRow[], kind: ImportKind, firms: Firm[]): Impo
   const bills = rows.filter((row) => kind === "purchases" ? row.kind !== "sale" : row.kind === "sale").map((row) => {
     const r = row.read!;
     if (!r.invoice_date) throw new Error("Type the date printed on the bill, like 08 Oct 2026.");
+    if (row.kind !== "purchase" && r.lines.some(l => l.amount_only || !l.quantity || !l.rate)) throw new Error(quantityRateRequired);
     let party: string | number | null = row.partyId;
     if (row.kind === "interfirm") party = null;
     if (!party) {

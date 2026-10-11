@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { webcrypto } from "node:crypto";
 import { mount as mountRoutes } from "@/pages/customers/testing";
 import type { Me } from "@/core/auth/AuthProvider";
 import { serve as serveAll, type Call, type Answer } from "@/test/server";
@@ -13,7 +14,7 @@ const serve = (answers: Record<string, Answer>) => serveAll({ "POST purchases/im
 function Editor({ row, onApply }: PhotoEditorProps) { return <button onClick={() => onApply({ ...row, read: { ...row.read!, invoice_number: "EDITED-7" } })}>Use these details</button>; }
 const mount = (me?: Partial<Me>) => mountRoutes([{ path: "/purchases/ai-import", element: <PhotoImport firms={firms} Editor={Editor} /> }, { path: "/purchases", element: <p>Purchase list</p> }], ["/purchases/ai-import"], { me });
 function upload(names = ["synthetic.jpg"]) { fireEvent.change(screen.getByLabelText("Choose files"), { target: { files: names.map((n) => new File([`synthetic bill: ${n}`], n, { type: "image/jpeg" })) } }); }
-beforeEach(() => { vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 100, height: 100, close: vi.fn() }))); URL.createObjectURL = vi.fn(() => "blob:synthetic"); URL.revokeObjectURL = vi.fn(); });
+beforeEach(() => { vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 100, height: 100, close: vi.fn() }))); URL.createObjectURL = vi.fn(() => "blob:synthetic"); URL.revokeObjectURL = vi.fn(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); (window as unknown as { __phone?: boolean }).__phone = false; });
 it("denies the phone before any AI read and gives the capture route", () => {
   (window as unknown as { __phone?: boolean }).__phone = true;

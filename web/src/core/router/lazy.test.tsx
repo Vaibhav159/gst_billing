@@ -14,6 +14,7 @@ import Placeholder from "@/pages/core/Placeholder";
 import CustomerPage from "@/pages/customers/CustomerPage";
 import BillPage from "@/pages/sales/BillPage";
 import PurchaseList from "@/pages/purchases/PurchaseList";
+import { SupplierList } from "@/pages/suppliers/Suppliers";
 import { fakeToday } from "@/pages/sales/form/testing";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { lazyPage, loadedPage, type LazyPage } from "./lazyPage";
@@ -65,7 +66,8 @@ test("every built sales and purchase page loads on demand, including customers a
 test("a route still says which screen it opens: a lazy page's loaded component, a placeholder's own", async () => {
   expect(await loadedPage(route("/sales/:id")?.element)).toBe(BillPage);
   expect(await loadedPage(route("/purchases")?.element)).toBe(PurchaseList);
-  expect(await loadedPage(route("/suppliers")?.element)).toBe(Placeholder);
+  expect(await loadedPage(route("/suppliers")?.element)).toBe(SupplierList);
+  expect(await loadedPage(route("/products")?.element)).toBe(Placeholder);
   expect(await loadedPage(undefined)).toBeUndefined();
 });
 

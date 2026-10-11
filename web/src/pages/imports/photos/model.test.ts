@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bodyFor, detect, fileProblem, localProblems, statusOf, totalOf } from "./model";
 import { read, row, firms } from "./fixtures";
+import { quantityRateRequired } from "../model";
 const may = { purchases: true, sales: true };
 describe("bill-photo model", () => {
   it("detects a purchase, a sale, a linked pair and an unknown firm from contract fields", () => {
@@ -20,6 +21,20 @@ describe("bill-photo model", () => {
     expect(body.file_name).toBe(""); expect(body.dry_run).toBe(true);
     expect(body.bills[0]).toMatchObject({ business: 3, pair: { seller: 2, invoice_number: read.invoice_number } });
     expect(bodyFor([r], "sales", firms).bills).toEqual([]);
+  });
+  it.each(["sale", "interfirm"] as const)("blocks %s amount-only lines until their printed quantity and rate are supplied", kind => {
+    const original = row({ kind, firmId: kind === "interfirm" ? 2 : 3, buyerFirmId: kind === "interfirm" ? 3 : null,
+      read: { ...read, lines: [{ ...read.lines[0], amount_only: true, quantity: null, rate: null, taxable: "100.00" }] } });
+    const endpoint = kind === "sale" ? "sales" : "purchases";
+    expect(statusOf(original, may, firms)).toBe("Fix before import");
+    expect(localProblems(original, may, firms)).toContain(quantityRateRequired);
+    expect(() => bodyFor([original], endpoint, firms)).toThrow(quantityRateRequired);
+    const corrected = { ...original, read: { ...original.read!, lines: [{ ...original.read!.lines[0], amount_only: false, quantity: "2.000", rate: "50.000" }] } };
+    expect(statusOf(corrected, may, firms)).toBe("Ready");
+    const line = bodyFor([corrected], endpoint, firms).bills[0].lines[0];
+    expect(line).toMatchObject({ quantity: "2.000", rate: "50.000" });
+    expect(line).not.toHaveProperty("amount_only");
+    expect(original.read!.lines[0].rate).toBeNull();
   });
   it("blocks sales and pairs for the accountant, missing firm, missing slab and an unknown unregistered party", () => {
     expect(statusOf(row({ kind: "sale" }), { purchases: true, sales: false }, firms)).toBe("Not for your role");
