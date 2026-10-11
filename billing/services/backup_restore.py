@@ -4,28 +4,41 @@ import hashlib
 import hmac
 import json
 import re
+from datetime import date
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError as ModelValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_date
+from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
+from simple_history.utils import bulk_create_with_history
 
 from billing.api.inward_bills_service import find_duplicate, inward_number_key, supplier_key
 from billing.api.mixins import snapshot_of
 from billing.cache import invalidate, uncached
 from billing.constants import GST_CODE
-from billing.fy import fy_of
+from billing.fy import fy_label, fy_of, parse_fy
 from billing.gstin import validate as valid_gstin
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, LineItem, Product
 from billing.numbering import counter_of, lock_firms
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
-from billing.services.bin import restore_from_bin, v2_snapshot
+from billing.services.bin import restore_many_from_bin, v2_snapshot
 from billing.services.line_items import build_line_items
 from billing.services.sales import FIRM_FIELDS, LINE_MOST, MOST, _too_big
-from billing.tax_rules import normalize_rate, normalize_state_name
+from billing.tax_rules import (
+    clean_gstin,
+    gstin_problem,
+    itc_refusal,
+    normalize_rate,
+    normalize_state_name,
+    rate_as_percent,
+)
+from billing.text import day_text
 
 KINDS = ("firms", "customers", "products", "bills", "purchases")
 MODELS = {"firms": Business, "customers": Customer, "products": Product}
@@ -189,7 +202,9 @@ def _bill(raw, old):
             "customer_name": text(raw.get("customerName" if old else "customer_name")),
             "customer_gstin": text(raw.get("customerGST")).upper(), "lines": lines,
             "purchase": key(raw.get("type" if old else "type_of_invoice")) == "inward",
-            "fields": _clean_fields(Invoice, raw, BILL_FIELDS)}
+            "fields": _clean_fields(Invoice, raw, BILL_FIELDS),
+            "purchase_fields": {name: raw[name] for name in ("payment_mode", "itc_month", "itc_eligible",
+                "buyer_gstin", "buyer_ack", "needs_review", "source") if name in raw}}
 
 
 def _rows(model, fields):
@@ -198,10 +213,10 @@ def _rows(model, fields):
 
 def _state():
     """Only matching, money-placement and version columns cross the wire."""
-    state = {kind: _rows(model, ("id", "name", "updated_at") +
+    state = {kind: _rows(model, ("id", "name") +
                          (("gst_number", "state_name") if kind != "products" else ()))
              for kind, model in MODELS.items()}
-    state["bills"] = _rows(Invoice, ("id", "business_id", "customer_id", "invoice_date", "invoice_number", "type_of_invoice", "updated_at"))
+    state["bills"] = _rows(Invoice, ("id", "business_id", "customer_id", "invoice_date", "invoice_number", "type_of_invoice"))
     state["bin"] = list(BinnedInvoice.objects.live().order_by("pk").values(
         "id", "original_id", "business_id", "customer_id", "invoice_date", "invoice_number", "deleted_at", "audit_log_id", "type_of_invoice"))
     return state
@@ -231,12 +246,100 @@ def _purchase_match(firm, supplier, number, day):
     return None, binned
 
 
+
+def _purchase_services():
+    """2A's published interfaces; only the absent predecessor gets the staged fallback."""
+    try:
+        from billing.services.purchases import save_purchase
+    except ModuleNotFoundError as error:
+        if error.name == "billing.services.purchases":
+            return None
+        raise
+    from billing.api.purchases import PurchaseSerializer
+    from billing.credit import choose_credit_month, credit_month_of
+    from billing.period_lock import assert_purchase_open
+    from billing.services.purchase_bin import restore_purchase
+
+    return SimpleNamespace(save_purchase=save_purchase, restore_purchase=restore_purchase,
+        PurchaseSerializer=PurchaseSerializer, choose_credit_month=choose_credit_month,
+        credit_month_of=credit_month_of, assert_purchase_open=assert_purchase_open)
+
+
+def _credit_input(value, day):
+    if value is None:
+        return None if day < date(2025, 4, 1) else day.strftime("%Y-%m")
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-01", value):
+        value = value[:7]
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}", value):
+        raise ValidationError({"itc_month": ["Give the month like 2026-09."]})
+    return value
+
+
+def _purchase_input(row, day, business, supplier, services):
+    """Backup fractions/dates become 2A's validated purchase input, with local parties."""
+    if not 2000 <= day.year <= 2099:
+        raise ValidationError({"invoice_date": ["Pick a date from 2000 to 2099."]})
+    today = timezone.localdate()
+    if day > today:
+        raise ValidationError({"invoice_date": [f"That's after today ({day_text(today)}). Check the date on the bill."]})
+    payload = {**row["purchase_fields"], "invoice_number": row["number"], "invoice_date": day,
+               "itc_month": _credit_input(row["purchase_fields"].get("itc_month"), day),
+               "duplicate_ok": False, "capture": None,
+               "lines": [{**{name: value for name, value in item.items() if name != "gst_tax_rate"},
+                          "gst_percent": rate_as_percent(item["gst_tax_rate"])} for item in row["lines"]]}
+    source = serializers.CharField(max_length=10, allow_blank=True).run_validation(payload.get("source", "typed"))
+    # The public serializer accepts typed/capture; a backup also retains 2A import sources.
+    payload["source"] = "typed"
+    validator = services.PurchaseSerializer(data=payload)
+    validator.fields.pop("business", None)
+    validator.fields.pop("supplier", None)
+    validator.is_valid(raise_exception=True)
+    data = {**validator.validated_data, "business": business, "supplier": supplier, "source": source}
+    problem = gstin_problem(supplier.gst_number) or itc_refusal(supplier.gst_number, row["lines"])
+    if problem:
+        raise ValidationError({"supplier": [problem]})
+    if data.get("buyer_gstin") and data["buyer_gstin"] != clean_gstin(business.gst_number) and not data.get("buyer_ack"):
+        raise ValidationError({"buyer_gstin": [f"This bill isn't addressed to {business.name}'s GSTIN."]})
+    draft = Invoice(business=business, customer=supplier, type_of_invoice="inward")
+    lines, total = build_line_items(draft, row["lines"], source="api")
+    if _too_big(lines) or total > MOST:
+        raise ValueError("money")
+    return data
+
+
+def _purchase_credit(services, cache, business, day, value, *, binned=False):
+    marker = ("purchase", business.pk, day.replace(day=1), value, binned)
+    if marker not in cache:
+        try:
+            if binned:
+                chosen = parse_date(value) if value else None
+            else:
+                chosen = services.choose_credit_month(business, day, value=value)
+            month = services.credit_month_of(SimpleNamespace(invoice_date=day, itc_month=chosen))
+            services.assert_purchase_open(business, month, "restore" if binned else "create")
+            cache[marker] = (month, None)
+        except (Refusal, ValidationError) as error:
+            cache[marker] = (None, error)
+    month, error = cache[marker]
+    if error is not None:
+        raise error
+    return month
+
+
+def _purchase_problem(detail):
+    if isinstance(detail, dict):
+        return _purchase_problem(detail.get("detail", next(iter(detail.values()))))
+    if isinstance(detail, list):
+        return _purchase_problem(detail[0])
+    return str(detail)
+
+
 def _plan(data, info, raw_hash):
     state = _state()
     plan = {kind: {"add": [], "skip": [], "fail": [], "add_count": 0, "skip_count": 0, "fail_count": 0} for kind in KINDS}
     ops, maps = {kind: [] for kind in KINDS}, {"firms": {}, "customers": {}}
     candidates = {kind: list(state[kind]) for kind in MODELS}
-    locked = []
+    locked, months = [], {}
 
     def record(kind, action, name, why="", detail=""):
         bucket = plan[kind]
@@ -276,6 +379,7 @@ def _plan(data, info, raw_hash):
                 maps[kind][("name", key(name))] = hit
 
     seen, seen_purchases = set(), set()
+    purchase_services = _purchase_services() if any(key(row.get("type_of_invoice")) == "inward" for row in data["invoices"]) else None
     for raw in data["invoices"]:
         row = _bill(raw, info["kind"] == "old_v3")
         name = row["number"] or "A bill with no number"
@@ -319,12 +423,37 @@ def _plan(data, info, raw_hash):
             existing, binned_purchase = _purchase_match(firm, supplier, row["number"], day)
             if existing is not None:
                 record("purchases", "skip", name, f"already on file as {existing.invoice_number}")
-            else:
-                # ponytail: part 2's unpublished create/bin APIs are a hard integration prerequisite (X-40).
-                # Matching a bin row must never route it through sales' restore_from_bin.
+                continue
+            if purchase_services is None:
+                # X-40: this replay base lacks 2A; the real adapter activates when it lands.
                 record("purchases", "fail", name, "can't add yet")
                 if binned_purchase is not None:
                     locked.append({"purchase_bin": binned_purchase.pk})
+                continue
+            business = Business(**{field: firm[field] for field in ("name", "gst_number", "state_name") if field in firm})
+            business.pk = firm["id"] if isinstance(firm["id"], int) else None
+            party = Customer(**{field: supplier[field] for field in ("name", "gst_number", "state_name") if field in supplier})
+            party.pk = supplier["id"] if isinstance(supplier["id"], int) else None
+            try:
+                if binned_purchase is not None:
+                    saved = uncached(BinnedInvoice).filter(pk=binned_purchase.pk).values("invoice_date", "data__invoice__itc_month").get()
+                    day = saved["invoice_date"]
+                    month = _purchase_credit(purchase_services, months, business, day, saved["data__invoice__itc_month"], binned=True)
+                else:
+                    inputs = _purchase_input(row, day, business, party, purchase_services)
+                    month = _purchase_credit(purchase_services, months, business, day, inputs["itc_month"])
+            except (ValidationError, Refusal) as error:
+                locked.append(error.detail)
+                record("purchases", "fail", name, _purchase_problem(error.detail))
+                continue
+            if supplier not in candidates["customers"]:
+                supplier["state_name"] = supplier.get("state_name", firm.get("state_name", ""))
+                candidates["customers"].append(supplier)
+                ops["customers"].append(supplier)
+                record("customers", "add", supplier["name"])
+            record("purchases", "add", name, detail=f"deleted {binned_purchase.deleted_at:%d %b %Y}; comes back from the bin" if binned_purchase else "")
+            ops["purchases"].append({**row, "day": day, "business": firm["id"], "buyer": supplier["id"],
+                "bin": binned_purchase.pk if binned_purchase else None, "credit_month": month})
             continue
         marker = (firm["id"], fy_of(day), key(row["number"]))
         if marker in seen:
@@ -349,7 +478,7 @@ def _plan(data, info, raw_hash):
         day = binned["invoice_date"] if binned else day
         if isinstance(firm["id"], int):
             try:
-                assert_sales_open(firm["id"], day, "restore")
+                _open_month(months, firm["id"], day, "restore")
             except Refusal as error:
                 if error.detail["code"] != "month_closed":
                     raise
@@ -393,19 +522,70 @@ def _plan(data, info, raw_hash):
     return {"file": info, "plan": plan, "fingerprint": digest}, ops
 
 
-def preview(file):
-    data, info, raw_hash = _read(file)
+def _open_month(cache, business, day, action):
+    marker = (business, day.year, day.month)
+    if marker not in cache:
+        try:
+            assert_sales_open(business, day, action)
+        except Refusal as error:
+            if error.detail["code"] != "month_closed":
+                raise
+            cache[marker] = error
+        else:
+            cache[marker] = None
+    if cache[marker] is not None:
+        raise cache[marker]
+
+
+def _year_data(data, fy):
+    counts = {}
+    for row in data["invoices"]:
+        try:
+            day = parse_date(text(row.get("invoice_date")))
+        except ValueError:
+            day = None
+        if day:
+            label = fy_label(fy_of(day))
+            counts[label] = counts.get(label, 0) + 1
+    years = [{"fy": label, "bills": count, "words": f"Adding {label}: {count:,} bills…"}
+             for label, count in sorted(counts.items())]
+    if fy is not None:
+        if not isinstance(fy, str) or parse_fy(fy) is None or fy not in counts:
+            raise ValidationError({"fy": ["Choose a financial year in this backup."]})
+        selected = []
+        for row in data["invoices"]:
+            try:
+                day = parse_date(text(row.get("invoice_date")))
+            except ValueError:
+                day = None
+            # Undated invalid rows remain visible as failures; they can never be inserted.
+            if day is None or fy_label(fy_of(day)) == fy:
+                selected.append(row)
+        data = {**data, "invoices": selected}
+    return data, years
+
+
+def _preview(data, info, raw_hash, fy):
+    selected, years = _year_data(data, fy)
     try:
-        return _plan(data, info, raw_hash)[0]
+        answer, ops = _plan(selected, info, raw_hash + (fy or ""))
     except (ValueError, TypeError, InvalidOperation, ModelValidationError, OverflowError):
         _bad(info["name"])
+    if len(data["invoices"]) > 3000:
+        answer.update(years=years, fy=fy)
+    return answer, ops
 
 
-def _imported(instance, kind, user, filename):
-    AuditLog.objects.create(user=user, action="imported", entity={"firms": "business", "customers": "customer", "products": "product", "bills": "invoice"}[kind],
-                            entity_id=instance.pk, entity_name=instance.invoice_number if kind == "bills" else instance.name,
-                            details=f"From the backup {filename}",
-                            snapshot=v2_snapshot(instance) if kind == "bills" else snapshot_of(instance))
+def preview(file, fy=None):
+    data, info, raw_hash = _read(file)
+    return _preview(data, info, raw_hash, fy)[0]
+
+
+def _imported(instance, kind, user, filename, lines=None):
+    return AuditLog(user=user, action="imported", entity={"firms": "business", "customers": "customer", "products": "product", "bills": "invoice", "purchases": "invoice"}[kind],
+                    entity_id=instance.pk, entity_name=instance.invoice_number if kind in ("bills", "purchases") else instance.name,
+                    details=f"From the backup {filename}",
+                    snapshot=v2_snapshot(instance, lines) if kind in ("bills", "purchases") else snapshot_of(instance))
 
 
 def _restore_locks():
@@ -422,17 +602,18 @@ def _restore_locks():
         list(uncached(model).select_for_update().order_by("pk").values_list("pk", flat=True))
 
 
-def apply_restore(file, fingerprint, user):
+def apply_restore(file, fingerprint, user, fy=None):
     data, info, raw_hash = _read(file)
+    if len(data["invoices"]) > 3000 and fy is None:
+        raise Refusal("Restore this backup one financial year at a time.", "restore_year_required",
+                      years=_year_data(data, None)[1])
     with transaction.atomic():
         _restore_locks()
-        try:
-            answer, ops = _plan(data, info, raw_hash)
-        except (ValueError, TypeError, InvalidOperation, ModelValidationError, OverflowError):
-            _bad(info["name"])
+        answer, ops = _preview(data, info, raw_hash, fy)
         if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint) or not hmac.compare_digest(answer["fingerprint"], fingerprint):
             raise Refusal(CHANGED, "plan_changed", plan=answer["plan"])
         added, mapped = {kind: [] for kind in KINDS}, {"firms": {}, "customers": {}}
+        audits, months = [], {}
         for kind, model in MODELS.items():
             for row in ops[kind]:
                 instance = model.objects.create(**{k: v for k, v in row.items() if k != "id" and not k.startswith("_")})
@@ -442,27 +623,50 @@ def apply_restore(file, fingerprint, user):
                     instance.businesses.set([mapped["firms"][ref].pk if ref in mapped["firms"] else ref
                                              for ref in row.get("_businesses", [])])
                 added[kind].append(instance.pk)
-                _imported(instance, kind, user, info["name"])
+                audits.append(_imported(instance, kind, user, info["name"]))
+        for kind, model, ref in (("firms", Business, "business"), ("customers", Customer, "buyer")):
+            ids = {row[ref] for row in ops["bills"] + ops["purchases"] if isinstance(row[ref], int)}
+            fields = ["id", "name", "gst_number", "state_name"]
+            if model is Customer and any(field.name == "is_supplier" for field in model._meta.concrete_fields):
+                fields.append("is_supplier")
+            mapped[kind].update(uncached(model).only(*fields).in_bulk(ids))
         for row in ops["bills"]:
-            business = mapped["firms"].get(row["business"])
-            if business is None:
-                business = uncached(Business).only("id", "name", "gst_number", "state_name").get(pk=row["business"])
-            assert_sales_open(business.pk, row["day"], "backup_restore")
+            _open_month(months, mapped["firms"][row["business"]].pk, row["day"], "backup_restore")
+        bin_ids = [row["bin"] for row in ops["bills"] if row["bin"]]
+        from_bin = dict(zip(bin_ids, restore_many_from_bin(bin_ids, user, check_month=False), strict=True)) if bin_ids else {}
+        pending, restored = [], []
+        for row in ops["bills"]:
+            business, customer = mapped["firms"][row["business"]], mapped["customers"][row["buyer"]]
             if row["bin"]:
-                invoice = restore_from_bin(BinnedInvoice.objects.get(pk=row["bin"]), user, check_month=False)
+                invoice = from_bin[row["bin"]]
+                restored.append((invoice, invoice._restored_lines))
             else:
-                customer = mapped["customers"].get(row["buyer"])
-                if customer is None:
-                    customer = uncached(Customer).only("id", "name", "gst_number", "state_name").get(pk=row["buyer"])
                 invoice = Invoice(business=business, customer=customer, invoice_number=row["number"], invoice_date=row["day"],
                                   type_of_invoice="outward", **row["fields"])
                 lines, invoice.total_amount = build_line_items(invoice, row["lines"], source="api")
-                invoice.save(force_insert=True)
-                for item in lines:
-                    item.invoice_id = invoice.pk
-                LineItem.objects.bulk_create(lines)
-            _imported(invoice, "bills", user, info["name"])
+                pending.append((invoice, lines))
+                restored.append((invoice, lines))
+        bulk_create_with_history([invoice for invoice, _ in pending], Invoice, batch_size=250, default_user=user)
+        all_lines = []
+        for invoice, lines in pending:
+            for item in lines:
+                item.invoice_id = invoice.pk
+            all_lines.extend(lines)
+        LineItem.objects.bulk_create(all_lines, batch_size=250)
+        for invoice, lines in restored:
+            audits.append(_imported(invoice, "bills", user, info["name"], lines))
             added["bills"].append(invoice.pk)
+        services = _purchase_services() if ops["purchases"] else None
+        for row in ops["purchases"]:
+            if row["bin"]:
+                binned = uncached(BinnedInvoice).get(pk=row["bin"])
+                invoice = services.restore_purchase(binned, user, check_month=True)
+            else:
+                inputs = _purchase_input(row, row["day"], mapped["firms"][row["business"]], mapped["customers"][row["buyer"]], services)
+                invoice = services.save_purchase(inputs, user)
+            audits.append(_imported(invoice, "purchases", user, info["name"]))
+            added["purchases"].append(invoice.pk)
+        AuditLog.objects.bulk_create(audits, batch_size=250)
         invalidate(Invoice, LineItem)
         plan = answer["plan"]
         AuditLog.objects.create(user=user, action="restored", entity="backup", entity_id=0, entity_name=info["name"],

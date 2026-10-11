@@ -14,9 +14,9 @@ class BackupRestorePreview(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        return Response(preview(request.FILES.get("file")))
+        return Response(preview(request.FILES.get("file"), request.data.get("fy")))
 
 
 class BackupRestoreApply(BackupRestorePreview):
     def post(self, request):
-        return Response(apply_restore(request.FILES.get("file"), request.data.get("fingerprint"), request.user))
+        return Response(apply_restore(request.FILES.get("file"), request.data.get("fingerprint"), request.user, request.data.get("fy")))

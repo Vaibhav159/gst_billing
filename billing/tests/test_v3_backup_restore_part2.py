@@ -123,3 +123,105 @@ def test_real_purchase_bin_restore_uses_supplier_identity_and_original_contents(
     assert part2_credit.credit_month_of(restored) is None
     assert BinnedInvoice.objects.live().filter(original_id=originals[0]).exists()
     assert not BinnedInvoice.objects.live().filter(original_id=originals[1]).exists()
+
+
+def test_real_purchase_restore_preserves_own_credit_month_and_later_choice(part2_credit):
+    from billing.models import FiledPeriod
+
+    client = client_for(person("closed-credit-restore-owner", "admin"))
+    business = firm(gstin="08VRHFA2322D1ZI")
+    buyer("Supplier", gst_number="08WWUFP9975S1ZN")
+    FiledPeriod.objects.create(business=business, year=2026, month=3)
+    data = registered_payload()
+    data["invoices"][0].update(itc_month=None, itc_eligible=False, needs_review=True, source="excel")
+    answer = client.post("/api/backup/restore/preview/", {"file": upload(data)}, format="multipart")
+    assert answer.status_code == 200, answer.data
+    assert answer.data["plan"]["purchases"]["add_count"] == 0
+    assert "March 2026" in answer.data["plan"]["purchases"]["fail"][0]["why"]
+    data["invoices"][0]["itc_month"] = "2026-04-01"
+    result = restore(client, data)
+    restored = Invoice.objects.get(pk=result["added"]["purchases"][0])
+    assert restored.itc_month == date(2026, 4, 1)
+    assert part2_credit.credit_month_of(restored) == date(2026, 4, 1)
+    assert restored.itc_eligible is False and restored.needs_review is True
+    assert restored.source == "excel" and restored.customer.is_supplier
+    assert restored.lineitem_set.get().gst_tax_rate == Decimal("0.0025")
+
+
+def test_real_purchase_bin_uses_current_credit_and_stales_an_old_preview(part2_credit):
+    from billing.models import FiledPeriod
+
+    client = client_for(person("current-bin-credit-owner", "admin"))
+    business = firm(gstin="08VRHFA2322D1ZI")
+    supplier = buyer("Supplier", gst_number="08WWUFP9975S1ZN")
+    created = client.post("/api/purchases/", {
+        "business": business.pk, "supplier": supplier.pk, "invoice_number": "SUP-001",
+        "invoice_date": "2026-03-31", "itc_month": "2026-04", "itc_eligible": False,
+        "lines": [{"product_name": "Silver", "hsn_code": "711311", "gst_percent": "3",
+                   "quantity": "1", "unit": "gms", "rate": "10000", "note": "Saved line"}],
+    }, format="json")
+    assert created.status_code == 201, created.data
+    deleted = client.delete(f"/api/purchases/{created.data['id']}/", format="json")
+    assert deleted.status_code == 200, deleted.data
+    data = registered_payload("sup/001")
+    data["invoices"][0].update(invoice_date="2026-02-01", itc_month=None)
+    preview = client.post("/api/backup/restore/preview/", {"file": upload(data)}, format="multipart")
+    assert preview.status_code == 200, preview.data
+    assert preview.data["plan"]["purchases"]["add_count"] == 1
+    binned = BinnedInvoice.objects.get(original_id=created.data["id"])
+    binned.data["invoice"]["itc_month"] = "2026-05-01"
+    binned.save(update_fields=["data"])
+    stale = client.post("/api/backup/restore/", {
+        "file": upload(data), "fingerprint": preview.data["fingerprint"],
+    }, format="multipart")
+    assert stale.status_code == 409 and stale.data["code"] == "plan_changed"
+    assert not Invoice.objects.exists()
+    closed = FiledPeriod.objects.create(business=business, year=2026, month=5)
+    plan = client.post("/api/backup/restore/preview/", {"file": upload(data)}, format="multipart").data["plan"]
+    assert plan["purchases"]["add_count"] == 0
+    assert "May 2026" in plan["purchases"]["fail"][0]["why"]
+    closed.delete()
+    result = restore(client, data)
+    restored = Invoice.objects.get(pk=result["added"]["purchases"][0])
+    assert restored.pk == created.data["id"]
+    assert restored.invoice_date == date(2026, 3, 31)
+    assert restored.invoice_number == "SUP-001"
+    assert restored.itc_month == date(2026, 5, 1)
+    assert restored.itc_eligible is False
+    assert restored.lineitem_set.get().note == "Saved line"
+
+
+def test_real_gstr1_only_month_does_not_block_purchase_restore(part2_credit):
+    from billing import models
+
+    if not hasattr(models, "FilingRecord"):
+        reason = "Requires 3A's real filing source merged after 2A (X-40)."
+        if os.environ.get("GST_RESTORE_REQUIRE_PART3") == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+    client = client_for(person("gstr1-credit-restore-owner", "admin"))
+    business = firm(gstin="08VRHFA2322D1ZI")
+    buyer("Supplier", gst_number="08WWUFP9975S1ZN")
+    models.FilingRecord.objects.create(business=business, year=2026, month=3, kind="gstr1", filed_on=date(2026, 4, 1))
+    result = restore(client, registered_payload())
+    restored = Invoice.objects.get(pk=result["added"]["purchases"][0])
+    assert part2_credit.credit_month_of(restored) == date(2026, 3, 1)
+
+
+def test_real_purchase_restore_budget_after_part2(part2_credit):
+    """P4-8/X-40: mocks cannot prove the purchase service's query/time budget."""
+    from time import monotonic
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    client = client_for(person("purchase-budget-owner", "admin"))
+    data = registered_payload()
+    row = data["invoices"][0]
+    data["invoices"] = [{**row, "invoice_number": f"SUP-{n:04d}"} for n in range(2000)]
+    started = monotonic()
+    with CaptureQueriesContext(connection) as queries:
+        result = restore(client, data)
+    elapsed = monotonic() - started
+    assert result["plan"]["purchases"]["add_count"] == 2000
+    assert elapsed < 30, f"2000 real purchases took {elapsed:.2f}s ({len(queries)} queries)"
