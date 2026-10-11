@@ -9,6 +9,7 @@ import type { Me } from "@/core/auth/AuthProvider";
 import { wireBin, wirePage, wireRow } from "@/core/sales/fixtures";
 import { renderApp } from "@/test/render";
 import { Palette } from "./Palette";
+import "./PaletteRecords"; // These tests control records' timers; the cold code boundary is covered by paletteImmediate.test.
 
 type Answer = (config: InternalAxiosRequestConfig) => ReturnType<AxiosAdapter>;
 const answer = (config: InternalAxiosRequestConfig, data: unknown) => Promise.resolve({ status: 200, statusText: "", headers: {}, config, data });

@@ -7,6 +7,8 @@ if (dom) Element.prototype.scrollTo = function (this: HTMLElement, a?: number | 
   this.scrollTop = typeof a === "object" ? a.top ?? 0 : b ?? 0;
 } as typeof Element.prototype.scrollTo;
 if (dom) Element.prototype.scrollIntoView = function () {};
+// Router tests leave idle page preloads pending; idle.test installs and advances its own scheduler.
+if (dom) window.requestIdleCallback = () => 0;
 const g = globalThis as unknown as Record<string, unknown>;
 g.CSS ??= { escape: (s: string) => s.replace(/["\\\]\[]/g, "\\$&"), supports: () => false };
 class NoopObserver { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } }

@@ -38,7 +38,7 @@ test("empty, it offers recent records, actions the role allows, and pages", asyn
   noteVisit(1, { to: "/sales/32", label: "KGH/2026-27/32" });
   mount();
   expect(screen.getByRole("combobox")).toHaveFocus();
-  expect(screen.getByRole("option", { name: /KGH\/2026-27\/32/ })).toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: /KGH\/2026-27\/32/ }, { timeout: 5000 })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /New sales bill/ })).toBeInTheDocument();
 }, 15_000); // the file's first draw of search: past 5 s on a busy 2-CPU machine
 

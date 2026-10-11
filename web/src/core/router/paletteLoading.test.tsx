@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { AuthContext } from "@/core/auth/AuthProvider";
@@ -12,11 +12,10 @@ const missing = vi.hoisted(() => {
   let fail!: (e: Error) => void;
   return { arrival: new Promise<never>((_resolve, reject) => { fail = reject; }), fail: (e: Error) => fail(e) };
 });
-vi.mock("@/core/shell/Palette", () => missing.arrival);
+vi.mock("@/core/shell/PaletteRecords", () => missing.arrival);
 
-test("Search code that cannot load keeps the page and shell, and can recover to home", async () => {
+test("a failed records chunk keeps Search's box and shows its own FailNote without changing the page", async () => {
   fakeToday();
-  vi.stubGlobal("requestIdleCallback", vi.fn()); // the first press, before idle could fetch Search
   const reported = vi.spyOn(console, "error").mockImplementation(() => {});
   const qc = testQueryClient();
   try {
@@ -24,15 +23,25 @@ test("Search code that cannot load keeps the page and shell, and can recover to 
     const router = createMemoryRouter(appRoutes, { initialEntries: ["/"] });
     render(<QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
     const main = screen.getByRole("main");
-    fireEvent.click(screen.getByRole("button", { name: "Search (Ctrl K)" }));
-    expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const box = screen.getByRole("combobox");
+    fireEvent.change(box, { target: { value: "meena" } });
     await act(async () => missing.fail(new TypeError("Failed to fetch dynamically imported module")));
-    expect(await screen.findByRole("button", { name: "Reload the app" }, { timeout: 5000 })).toBeInTheDocument();
+    const note = await screen.findByRole("alert", {}, { timeout: 5000 });
+    const dialog = screen.getByRole("dialog", { name: "Search" });
+    expect(dialog).toContainElement(note);
+    expect(note).toHaveTextContent("Search couldn't load");
+    expect(note).toHaveTextContent("Reload the page");
+    expect(within(dialog).getByRole("combobox")).toHaveFocus();
+    expect(box).toHaveValue("meena");
+    expect(within(dialog).getByRole("button", { name: "Reload the page" })).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong on this page")).not.toBeInTheDocument();
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("main")).toBe(main);
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Go to the home page" }));
-    expect(screen.queryByRole("button", { name: "Reload the app" })).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+    fireEvent.keyDown(within(dialog).getByRole("combobox"), { key: "Escape" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
-  } finally { reported.mockRestore(); vi.unstubAllGlobals(); vi.useRealTimers(); qc.clear(); }
+  } finally { reported.mockRestore(); vi.useRealTimers(); qc.clear(); }
 });

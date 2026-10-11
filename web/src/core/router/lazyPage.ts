@@ -9,19 +9,30 @@ export function lazyPage<T extends ComponentType<object>>(load: () => Promise<{ 
   return Object.assign(lazy(load), { load });
 }
 
-/** Called once the shell shows: fetch only page code in idle time, once per app load (Ruling 1E-12). */
+/** Called when a real page shows: fetch only page code online and idle, once per app load (Ruling 1E-12). */
 export function idlePages(pages: { load: () => Promise<unknown> }[]): () => void {
+  let started = false;
   let scheduled = false;
-  return () => {
-    if (scheduled) return;
+  const schedule = () => {
+    if (started || scheduled) return;
+    if (navigator.onLine === false) {
+      window.addEventListener("online", schedule, { once: true });
+      return;
+    }
     scheduled = true;
     const load = () => {
-      // A failed warm-up stays quiet; opening that page uses the normal lazy-page boundary and its Reload action.
+      scheduled = false;
+      // The line can go away between a page showing and idle time. Leave this run for the next online event or page.
+      if (navigator.onLine === false) { schedule(); return; }
+      started = true;
+      window.removeEventListener("online", schedule);
+      // A failed warm-up stays quiet; each screen offers its own load-failure note and Reload action when opened.
       for (const page of pages) void page.load().catch(() => {});
     };
     if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(load);
-    else window.setTimeout(load, 0);
+    else window.setTimeout(load, 2000);
   };
+  return schedule;
 }
 
 /** The screen a route's element shows: a lazy page's component once loaded, else the element's own type. For tests. */

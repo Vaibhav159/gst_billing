@@ -1,6 +1,7 @@
 import { Navigate, useLocation, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
-import { AppLayout, paletteCode, RootLayout } from "@/core/shell/AppLayout";
+import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
+import { paletteCode } from "@/core/shell/Palette";
 import { AppFailed } from "@/core/shell/ScreenBoundary";
 import Login from "@/pages/core/Login";
 import More from "@/pages/core/More";
@@ -9,7 +10,7 @@ import Placeholder from "@/pages/core/Placeholder";
 import { customerPages, customerRoutes } from "@/pages/customers/routes";
 import { idlePages, lazyPage } from "./lazyPage";
 
-// Selling's pages load on demand (Ruling 1B-4): the app's first download is the shell, and each page comes as it opens.
+// Selling's pages load on demand (Ruling 1B-4): code comes as each page opens, or while idle after a real page shows.
 // react-pdf comes later still, with the first PDF made (core/print/make.ts).
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));

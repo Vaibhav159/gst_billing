@@ -1,76 +1,130 @@
-import { isValidElement } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { salesServer } from "@/core/sales/fixtures";
+import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { ToastProvider } from "@/core/ui";
-import { fakeToday } from "@/pages/sales/form/testing";
 import { stubAuth, testQueryClient } from "@/test/render";
-import { idlePages } from "./lazyPage";
-import { appRoutes } from "./routes";
+import { idlePages, lazyPage } from "./lazyPage";
 
-const { rendererLoaded, paletteLoaded } = vi.hoisted(() => ({ rendererLoaded: vi.fn(), paletteLoaded: vi.fn() }));
-vi.mock("@/core/shell/Palette", async (real) => { paletteLoaded(); return real<typeof import("@/core/shell/Palette")>(); });
-vi.mock("@react-pdf/renderer", () => { rendererLoaded(); return {}; });
-
-// This test imports all fourteen screens; module transforms share the dispatch's two CPUs with other suites.
-vi.setConfig({ testTimeout: 20_000 });
-
-const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((r) => [r, ...all(r.children ?? [])]);
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  vi.setSystemTime(new Date("2026-10-08T10:00:00+05:30"));
+});
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-test("Selling's code waits for the shell and idle, loads each screen once, and fetches neither PDF renderer nor API data", async () => {
-  const user = fakeToday();
-  let idle!: IdleRequestCallback;
-  const requestIdle = vi.fn((callback: IdleRequestCallback) => { idle = callback; return 1; });
+function idleClock() {
+  const callbacks: IdleRequestCallback[] = [];
+  const requestIdle = vi.fn((callback: IdleRequestCallback) => { callbacks.push(callback); return callbacks.length; });
   vi.stubGlobal("requestIdleCallback", requestIdle);
-  const pages = [...new Set(all(appRoutes).flatMap((r) => isValidElement(r.element) && typeof r.element.type !== "string" && "load" in r.element.type ? [r.element.type as { load: () => Promise<unknown> }] : []))];
-  const loads = pages.map((page) => vi.spyOn(page, "load"));
+  const run = () => callbacks.shift()?.({ didTimeout: false, timeRemaining: () => 50 });
+  return { requestIdle, run };
+}
+
+function mount(onShown: () => void, pages: RouteObject[], path = "/first") {
+  const client = testQueryClient();
+  const router = createMemoryRouter([{ element: <RootLayout />, children: [{ element: <AppLayout onShown={onShown} />, children: pages }] }], { initialEntries: [path] });
+  const shown = render(<QueryClientProvider client={client}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+  return { router, client, ...shown };
+}
+
+test("code waits for a real page, not its skeleton, then runs once at idle without fetching API data", async () => {
+  const { requestIdle, run } = idleClock();
+  const pages = Array.from({ length: 15 }, () => ({ load: vi.fn().mockResolvedValue({}) }));
+  const shown = idlePages(pages);
+  let arrive!: () => void;
+  const Later = lazyPage(() => new Promise<{ default: () => JSX.Element }>((resolve) => { arrive = () => resolve({ default: () => <h1>First page</h1> }); }));
   const { calls } = salesServer();
-  expect(loads.every((load) => load.mock.calls.length === 0)).toBe(true);
   expect(requestIdle).not.toHaveBeenCalled();
-  expect(rendererLoaded).not.toHaveBeenCalled();
-  expect(paletteLoaded).not.toHaveBeenCalled();
-  const qc = testQueryClient();
-  const router = createMemoryRouter(appRoutes, { initialEntries: ["/"] });
-  const tree = () => <QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
-  const shown = render(tree());
-  expect(screen.getByRole("banner")).toBeInTheDocument();
+  const mounted = mount(shown, [{ path: "/first", element: <Later /> }, { path: "/next", element: <h1>Next page</h1> }]);
+  expect(screen.getByRole("status")).toHaveTextContent("Loading this page…");
+  expect(requestIdle).not.toHaveBeenCalled();
+  expect(pages.every(({ load }) => load.mock.calls.length === 0)).toBe(true);
+  await act(async () => { arrive(); await vi.advanceTimersByTimeAsync(100); });
+  expect(screen.getByRole("heading", { name: "First page" })).toBeInTheDocument();
   expect(requestIdle).toHaveBeenCalledTimes(1);
-  expect(loads.every((load) => load.mock.calls.length === 0)).toBe(true);
-  await waitFor(() => expect(qc.isFetching()).toBe(0), { timeout: 5000 });
+  expect(pages.every(({ load }) => load.mock.calls.length === 0)).toBe(true);
   const before = calls.length;
-  await act(async () => {
-    idle({ didTimeout: false, timeRemaining: () => 50 });
-    await Promise.all(loads.map((load) => load.mock.results[0]?.value));
-  });
-  expect(pages).toHaveLength(14);
-  await waitFor(() => expect(paletteLoaded).toHaveBeenCalledTimes(1), { timeout: 5000 });
-  for (const load of loads) expect(load).toHaveBeenCalledTimes(1);
-  expect(rendererLoaded).not.toHaveBeenCalled();
+  await act(async () => run());
+  for (const { load } of pages) expect(load).toHaveBeenCalledTimes(1);
   expect(calls).toHaveLength(before);
-  await user.click(screen.getByRole("button", { name: "Search (Ctrl K)" }));
-  expect(await screen.findByRole("dialog", { name: "Search" }, { timeout: 5000 })).toBeInTheDocument();
-  // Remounting the signed-in shell still belongs to this page load.
-  shown.unmount();
-  render(tree());
+  await act(async () => { await mounted.router.navigate("/next"); await vi.advanceTimersByTimeAsync(100); });
+  expect(screen.getByRole("heading", { name: "Next page" })).toBeInTheDocument();
   expect(requestIdle).toHaveBeenCalledTimes(1);
-  for (const load of loads) expect(load).toHaveBeenCalledTimes(1);
-  qc.clear();
+  for (const { load } of pages) expect(load).toHaveBeenCalledTimes(1);
+  mounted.unmount(); mounted.client.clear();
 });
 
-test("without requestIdleCallback the code waits for a timer, once, and a failed warm-up is handled", async () => {
-  vi.useFakeTimers();
+test("offline at first show waits for online and then idle, without using up its one run", async () => {
+  let online = false;
+  vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
+  const { requestIdle, run } = idleClock();
+  const load = vi.fn().mockResolvedValue({});
+  const shown = idlePages([{ load }]);
+  shown(); shown();
+  expect(requestIdle).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(load).not.toHaveBeenCalled();
+  online = true;
+  window.dispatchEvent(new Event("online"));
+  expect(requestIdle).toHaveBeenCalledTimes(1);
+  expect(load).not.toHaveBeenCalled();
+  await act(async () => run());
+  expect(load).toHaveBeenCalledTimes(1);
+  shown(); window.dispatchEvent(new Event("online"));
+  expect(requestIdle).toHaveBeenCalledTimes(1);
+});
+
+test("a line lost before the idle callback leaves the fetch available when the line returns", async () => {
+  let online = true;
+  vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
+  const { requestIdle, run } = idleClock();
+  const load = vi.fn().mockResolvedValue({});
+  const shown = idlePages([{ load }]);
+  shown();
+  online = false;
+  await act(async () => run());
+  expect(load).not.toHaveBeenCalled();
+  shown();
+  expect(requestIdle).toHaveBeenCalledTimes(1);
+  online = true;
+  window.dispatchEvent(new Event("online"));
+  expect(requestIdle).toHaveBeenCalledTimes(2);
+  await act(async () => run());
+  expect(load).toHaveBeenCalledTimes(1);
+});
+
+test("a later real page can start a fetch that never ran on the first page", async () => {
+  let online = false;
+  vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
+  const { requestIdle, run } = idleClock();
+  const load = vi.fn().mockResolvedValue({});
+  salesServer();
+  const mounted = mount(idlePages([{ load }]), [{ path: "/first", element: <h1>First page</h1> }, { path: "/next", element: <h1>Next page</h1> }]);
+  expect(screen.getByRole("heading", { name: "First page" })).toBeInTheDocument();
+  expect(requestIdle).not.toHaveBeenCalled();
+  online = true; // a later page can notice the recovered line even if the online event was missed
+  await act(async () => { await mounted.router.navigate("/next"); await vi.advanceTimersByTimeAsync(100); });
+  expect(screen.getByRole("heading", { name: "Next page" })).toBeInTheDocument();
+  expect(requestIdle).toHaveBeenCalledTimes(1);
+  await act(async () => run());
+  expect(load).toHaveBeenCalledTimes(1);
+  window.dispatchEvent(new Event("online"));
+  expect(requestIdle).toHaveBeenCalledTimes(1);
+  mounted.unmount(); mounted.client.clear();
+});
+
+test("without requestIdleCallback the code waits two seconds, once, and a failed warm-up is handled", async () => {
   vi.stubGlobal("requestIdleCallback", undefined);
   const load = vi.fn(() => Promise.reject(new TypeError("Failed to fetch dynamically imported module")));
   const shown = idlePages([{ load }]);
-  expect(load).not.toHaveBeenCalled();
   shown(); shown();
+  await vi.advanceTimersByTimeAsync(1999);
   expect(load).not.toHaveBeenCalled();
-  await vi.runOnlyPendingTimersAsync();
+  await vi.advanceTimersByTimeAsync(1);
   expect(load).toHaveBeenCalledTimes(1);
   shown();
-  await vi.runOnlyPendingTimersAsync();
+  await vi.advanceTimersByTimeAsync(2000);
   expect(load).toHaveBeenCalledTimes(1);
 });

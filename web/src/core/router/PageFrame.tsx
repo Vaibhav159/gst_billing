@@ -99,7 +99,7 @@ class PlaceKeeper extends Component<KeeperProps> {
  * Pages rise in on desktop; on phones they slide forward or back. A record stayed on is noted for search's "Opened recently".
  * A page is its path: a filter change (?query) re-renders it, and none of the above happens.
  */
-export function PageFrame({ children }: { children: ReactNode }) {
+export function PageFrame({ children, onShown }: { children: ReactNode; onShown?: () => void }) {
   const location = useLocation();
   const { pathname, key } = location;
   const nav = useNavigationType();
@@ -113,6 +113,8 @@ export function PageFrame({ children }: { children: ReactNode }) {
   // 90 ms focus timer that fires after another page took its place does nothing, so a quick Back isn't overtaken (Ruling 60)
   const shown = useRef(pathname);
   useLayoutEffect(() => { shown.current = pathname; }, [pathname]);
+  // Inside the page Suspense: this runs only after real page content commits, never for its loading skeleton.
+  useEffect(() => { onShown?.(); }, [pathname, onShown]);
 
   // the phone header's Back with no page before it goes up a level in place (a replace marked dir: "back"): still a step back
   const stepBack = nav === "POP" || (location.state as { dir?: string } | null)?.dir === "back";
