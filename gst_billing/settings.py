@@ -439,9 +439,10 @@ LOGGING = {
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})
 
-# Password codes ship off; fake is used only by synthetic tests.
+# Password codes ship off; a fake outbox file is only for DEBUG sandbox tests.
 SMS_RESET_ENABLED = os.environ.get("SMS_RESET_ENABLED", "").lower() in {"1", "true", "yes"}
 SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "msg91")
+SMS_FAKE_OUTBOX_FILE = os.environ.get("SMS_FAKE_OUTBOX_FILE", "")
 MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
 MSG91_TEMPLATE_ID = os.environ.get("MSG91_TEMPLATE_ID", "")
 MSG91_SENDER = os.environ.get("MSG91_SENDER", "")

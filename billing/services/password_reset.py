@@ -31,6 +31,10 @@ def username_from(data):
 @transaction.atomic
 def start_reset(data, address):
     username = username_from(data)
+    # Hash once even when the code is a dummy for an unknown, ineligible or
+    # limited username. Provider latency remains observable when SMS is on.
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    code_hash = make_password(code)
     answer = {"detail": f"If @{username} is an owner with a mobile number saved, a 6-digit code is on its way by SMS. It works for 10 minutes."}
     user = uncached(User).select_for_update().filter(username=username).first()
     if user is None or not user.is_active or role_of(user) != "owner":
@@ -44,8 +48,7 @@ def start_reset(data, address):
         return answer, 200
     codes.filter(used_at__isnull=True).update(used_at=now)
     invalidate(PasswordResetCode)
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    record = PasswordResetCode.objects.create(user=user, code_hash=make_password(code),
+    record = PasswordResetCode.objects.create(user=user, code_hash=code_hash,
                   expires_at=now + timedelta(minutes=10),
                   ip_hash=salted_hmac("password-reset-address", address, algorithm="sha256").hexdigest())
     if not send_code(security.phone, code):

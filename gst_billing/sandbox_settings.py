@@ -21,6 +21,14 @@ if (
         "(GST_SANDBOX=1, DB_HOST=db, DB_NAME=gst_sandbox*) — see deploy/sandbox/."
     )
 
+# Explicit browser-test harness, enabled only after the sandbox DB guard.
+# Leave environment SMS_PROVIDER unset: production settings refuse fake.
+if os.environ.get("SANDBOX_FAKE_SMS") == "1":
+    DEBUG = True
+    SMS_PROVIDER = "fake"
+    SMS_RESET_ENABLED = True
+    SMS_FAKE_OUTBOX_FILE = os.environ.get("SMS_FAKE_OUTBOX_FILE") or "/tmp/gst-sandbox-sms/outbox.json"
+
 # Reached on localhost ports through an SSH tunnel, and by service name from
 # the Vite container's proxy (which rewrites Host to "nginx").
 ALLOWED_HOSTS = [*ALLOWED_HOSTS, "nginx", "web"]

@@ -7,6 +7,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -425,9 +427,12 @@ GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})
 
-# Password codes ship off; fake is used only by synthetic tests.
+# Password codes ship off. The fake provider must never boot in production.
 SMS_RESET_ENABLED = os.environ.get("SMS_RESET_ENABLED", "").lower() in {"1", "true", "yes"}
 SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "msg91")
+if SMS_PROVIDER == "fake":
+    raise ImproperlyConfigured("SMS_PROVIDER=fake is not allowed in production settings.")
+SMS_FAKE_OUTBOX_FILE = os.environ.get("SMS_FAKE_OUTBOX_FILE", "")
 MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
 MSG91_TEMPLATE_ID = os.environ.get("MSG91_TEMPLATE_ID", "")
 MSG91_SENDER = os.environ.get("MSG91_SENDER", "")
