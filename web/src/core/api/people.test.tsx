@@ -11,9 +11,19 @@ function wrapper() { const client = testQueryClient(); return ({ children }: { c
 test("a role table for non-owners never asks for people", () => {
   const calls = serve({}); renderHook(() => usePeople(false), { wrapper: wrapper() }); expect(calls).toEqual([]);
 });
+test("people are fetched only when the caller says the person may manage users", () => {
+  // @ts-expect-error the caller has to decide: there is no default that fetches
+  renderHook(() => usePeople(), { wrapper: wrapper() });
+});
+test("private mutations offer only the submission that forgets its secrets", () => {
+  serve({});
+  const { result } = renderHook(() => useChangePassword(), { wrapper: wrapper() });
+  expect("mutate" in result.current).toBe(false);
+  expect(typeof result.current.mutateAsync).toBe("function");
+});
 test("a usual firm sends business, keeps null, and invalidates people", async () => {
   const calls = serve({ "GET people/": { results: [] }, "POST people/2/usual-firm/": { id: 2 } });
-  const { result } = renderHook(() => ({ list: usePeople(), change: useChangePerson() }), { wrapper: wrapper() });
+  const { result } = renderHook(() => ({ list: usePeople(true), change: useChangePerson() }), { wrapper: wrapper() });
   await waitFor(() => expect(result.current.list.isSuccess).toBe(true));
   await act(async () => { await result.current.change.mutateAsync({ id: 2, action: "usual-firm", body: { business: null } }); });
   expect(calls.find(c => c.method === "POST")?.data).toEqual({ business: null });

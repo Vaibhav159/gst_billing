@@ -76,7 +76,7 @@ function RolePicker({ person, onPick, full = false }: { person: Person; onPick: 
 type Change = { person: Person; kind: "role"; role: Role } | { person: Person; kind: "stop" | "allow" };
 function Manage() {
   const { isPhone } = useView();
-  const query = usePeople();
+  const query = usePeople(useAuth().can("users.manage"));
   const change = useChangePerson();
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("all");

@@ -27,8 +27,12 @@ export function useSaveProfile() {
 }
 export function useChangePassword() {
   const qc = useQueryClient();
-  return usePrivateMutation(async (input: { current: string; password: string }) => { const requestAccess = getTokens().access; const response = await api.post<PasswordAnswer>("account/password/", input, requestAccess ? {headers:{Authorization:`Bearer ${requestAccess}`}} : undefined); return { ...response.data, requestAccess: String(response.config.headers.Authorization ?? "").replace(/^Bearer /, "") || requestAccess }; },
-    () => { qc.removeQueries({queryKey:["account","sessions"]}); });
+  return usePrivateMutation(async (input: { current: string; password: string }) => {
+    const requestAccess = getTokens().access;
+    const response = await api.post<PasswordAnswer>("account/password/", input, requestAccess ? { headers: { Authorization: `Bearer ${requestAccess}` } } : undefined);
+    // The access token of the request that succeeded (a refresh may have replaced it), kept only in memory.
+    return { ...response.data, requestAccess: String(response.config.headers.Authorization ?? "").replace(/^Bearer /, "") || requestAccess };
+  }, () => { qc.removeQueries({ queryKey: ["account", "sessions"] }); });
 }
 export function useSessions() { return useQuery({ queryKey: ["account", "sessions"], queryFn: async ({ signal }) => (await api.get<{ results: Session[] }>("account/sessions/", { signal })).data }); }
 export function useSignOutSession() {
