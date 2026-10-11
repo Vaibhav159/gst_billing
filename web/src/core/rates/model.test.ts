@@ -3,6 +3,7 @@ import { RATE_ROWS, changed, moved, perGram, quotedErrors, rateKey } from './mod
 import { rateSlip, rateNote } from './slip';
 import { wireBoard } from './testing';
 
+// X-40: rows.json is 5A Task 1's file; this file runs once 5A Task 1 lands.
 test('five contract rows keep their order and quote units', () => {
   expect(RATE_ROWS.map(r => [r.key, r.label, r.sub, r.per, r.per_label])).toEqual([
     ['gold-24K', 'Gold 24K', '999', 10, '10 g'], ['gold-22K', 'Gold 22K', '916', 10, '10 g'],
