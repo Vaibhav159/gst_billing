@@ -317,7 +317,7 @@ test("Sign out sticks while a refresh is out: the late refresh brings no one bac
   setTokens("a", "r");
   let land: ((r: unknown) => void) | undefined;
   vi.spyOn(axios, "post").mockImplementation(() => new Promise((resolve) => { land = resolve; })); // the refresh, held open
-  api.defaults.adapter = ((config) => (config.headers.Authorization === "Bearer a" ? reply(config, 401, { detail: "Token expired" }) : reply(config, 200, ME))) as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url === "auth/sign-out/" ? reply(config, 204, null) : config.headers.Authorization === "Bearer a" ? reply(config, 401, { detail: "Token expired" }) : reply(config, 200, ME))) as AxiosAdapter;
   const first = mount();
   await waitFor(() => expect(land).toBeDefined()); // the start's /api/me/ got a 401, and the refresh is out
   await act(async () => { screen.getByText("out").click(); });
@@ -418,7 +418,7 @@ test("a refresh still out at Sign out and refused afterwards doesn't turn the si
   localStorage.setItem("gst3.me", JSON.stringify(REMEMBERED));
   let refuse: ((e: unknown) => void) | undefined;
   vi.spyOn(axios, "post").mockImplementation(() => new Promise((_resolve, reject) => { refuse = reject; })); // the refresh, held open
-  api.defaults.adapter = ((config) => reply(config, 401, { detail: "Token expired" })) as AxiosAdapter;
+  api.defaults.adapter = ((config) => config.url === "auth/sign-out/" ? reply(config, 204, null) : reply(config, 401, { detail: "Token expired" })) as AxiosAdapter;
   const router = mountRouted(["/users", "/sales/31"]);
   expect(screen.getByText("who:Rakesh Soni")).toBeInTheDocument(); // remembered, while the start's question is out
   await waitFor(() => expect(refuse).toBeDefined()); // its 401 sent the refresh out

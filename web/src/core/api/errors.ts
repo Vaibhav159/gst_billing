@@ -73,7 +73,7 @@ export function problemOf(error: unknown): ApiProblem {
   const { status, data } = error.response;
   const said = data && typeof data === "object" ? (data as { code?: unknown }).code : undefined;
   const extra = { ...(typeof said === "string" ? { code: said } : {}), ...(data && typeof data === "object" ? { body: data } : {}) };
-  if (status === 401) return { kind: "auth", message: "You've been signed out. Sign in again.", ...extra };
+  if (status === 401) return { kind: "auth", message: said === "stopped" || said === "signed_out" ? firstMessage(data) || "You've been signed out. Sign in again." : "You've been signed out. Sign in again.", ...extra };
   if (status === 403) return { kind: "forbidden", message: firstMessage(data) || "Your role can't do this. Ask the owner if you need it.", ...extra };
   if (status === 404) return { kind: "notfound", message: "That isn't there any more.", ...extra };
   if (status === 409) return { kind: "conflict", message: firstMessage(data) || "Someone changed this at the same time. Open it again.", ...extra };

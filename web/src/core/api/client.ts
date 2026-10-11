@@ -1,3 +1,5 @@
+import { sameTokenSession } from "@/core/auth/session";
+export { sameTokenSession } from "@/core/auth/session";
 import { readStored as read, writeStored } from "@/core/storage";
 import axios, { AxiosError, CanceledError, type InternalAxiosRequestConfig } from "axios";
 import { markReachable, markUnreachable } from "./network";
@@ -12,12 +14,25 @@ declare module "axios" {
 export const ACCESS_KEY = "gst_access_token";
 export const REFRESH_KEY = "gst_refresh_token";
 
-export function getTokens() { return { access: read(ACCESS_KEY), refresh: read(REFRESH_KEY) }; }
-export function setTokens(access: string, refresh?: string) {
-  if (writeStored(ACCESS_KEY, access) && refresh) writeStored(REFRESH_KEY, refresh);
+const TAB_SESSION = "gst3.tabSession";
+function tabOnly(): boolean { try { return sessionStorage.getItem(TAB_SESSION) === "1"; } catch { return false; } }
+function tabRead(key: string): string | null { try { return sessionStorage.getItem(key); } catch { return null; } }
+export function getTokens() { return { access: tabOnly() ? tabRead(ACCESS_KEY) : read(ACCESS_KEY), refresh: tabOnly() ? tabRead(REFRESH_KEY) : read(REFRESH_KEY) }; }
+export function setTokens(access: string, refresh?: string, remember?: boolean) {
+  const temporary = remember === undefined ? tabOnly() : !remember;
+  if (temporary) {
+    // Never leave a persistent older sign-in to return after this tab closes.
+    writeStored(ACCESS_KEY, null); writeStored(REFRESH_KEY, null);
+    sessionStorage.setItem(TAB_SESSION, "1"); sessionStorage.setItem(ACCESS_KEY, access);
+    if (refresh) sessionStorage.setItem(REFRESH_KEY, refresh);
+  } else {
+    try { sessionStorage.removeItem(TAB_SESSION); sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); } catch { /* no tab session */ }
+    if (writeStored(ACCESS_KEY, access) && refresh) writeStored(REFRESH_KEY, refresh);
+  }
 }
 export function clearTokens() {
-  if (writeStored(ACCESS_KEY, null)) writeStored(REFRESH_KEY, null);
+  if (tabOnly()) { try { sessionStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(REFRESH_KEY); } catch { /* storage refused */ } }
+  else if (writeStored(ACCESS_KEY, null)) writeStored(REFRESH_KEY, null);
 }
 
 /** The user id an access token names (SimpleJWT's user_id claim), read without asking the server. Null when it can't be read. */
@@ -30,8 +45,15 @@ export function tokenUser(access: string | null | undefined): string | null {
   } catch { return null; }
 }
 
-let onExpired: ((from: string) => void) | null = null;
-export function setSessionExpiredHandler(fn: ((from: string) => void) | null) { onExpired = fn; }
+function tokenHasSession(access: string): boolean {
+  try { return Boolean(JSON.parse(atob(access.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).sid); } catch { return false; }
+}
+
+let onExpired: ((from: string, reason?: "signed_out") => void) | null = null;
+export function setSessionExpiredHandler(fn: ((from: string, reason?: "signed_out") => void) | null) { onExpired = fn; }
+
+let onPasswordNeeded: (() => void) | null = null;
+export function setPasswordNeededHandler(fn: (() => void) | null) { onPasswordNeeded = fn; }
 
 /**
  * How long any request, the refresh included, waits for its answer: just over nginx's 95 s proxy_read_timeout, so a reply
@@ -47,7 +69,10 @@ api.interceptors.request.use((config) => {
   if (config.expectedUserId !== undefined && tokenUser(access) !== String(config.expectedUserId)) {
     throw new CanceledError("The person signed in changed. These files stay with the person who added them.");
   }
-  if (access) config.headers.Authorization = `Bearer ${access}`;
+  const path = config.url?.replace(/^\/+/, "") ?? "";
+  const publicCall = path.startsWith("token/") || path.startsWith("auth/reset/") || path === "auth/options/" || path === "auth/password-rules/";
+  if (publicCall) delete config.headers.Authorization;
+  if (access && !publicCall && !config.headers.Authorization) config.headers.Authorization = `Bearer ${access}`;
   if (config.data instanceof FormData) delete config.headers["Content-Type"];
   return config;
 });
@@ -65,7 +90,7 @@ function noteFailure(error: AxiosError) {
 }
 
 /** The server refused the refresh token, or there is none: the person has to sign in again. */
-class SessionEnded extends Error {}
+class SessionEnded extends Error { constructor(message: string, readonly reason?: "signed_out") { super(message); } }
 /** Signed out, or signed in as someone else, in this tab or another while this tab's refresh was out. That stands; the session didn't expire. */
 class SignedOutMeanwhile extends Error {}
 
@@ -133,7 +158,7 @@ async function renew(started: string | null): Promise<string> {
       const rotated = rotatedElsewhere(sent);
       if (rotated) return rotated;
       clearTokens();
-      throw new SessionEnded("refresh token refused");
+      throw new SessionEnded("refresh token refused", e.response?.data?.code === "signed_out" ? "signed_out" : undefined);
     }
     noteFailure(e);
     for (const c of [e.config, e.response?.config]) if (c) c.data = undefined; // the refresh token is a 30-day credential: keep it out of errors
@@ -152,12 +177,24 @@ export function refreshAccessToken(): Promise<string> {
     const started = getTokens().refresh;
     refreshing = underLock(() => renew(started))
       .catch((e: unknown) => {
-        if (e instanceof SessionEnded) onExpired?.(window.location.pathname + window.location.search);
+        if (e instanceof SessionEnded) { const from = window.location.pathname + window.location.search; if (e.reason) onExpired?.(from, e.reason); else onExpired?.(from); }
         throw e;
       })
       .finally(() => { refreshing = null; });
   }
   return refreshing;
+}
+
+/** Final failures may be reported; credentials must never travel with them. A retry still needs its private body. */
+function rejectRequest(error: unknown, original?: InternalAxiosRequestConfig): Promise<never> {
+  const failure = axios.isAxiosError(error) ? error : null;
+  for (const config of [original, failure?.config, failure?.response?.config]) {
+    if (!config) continue;
+    const path = config.url?.replace(/^\/+/, "") ?? "";
+    if (config.headers) delete config.headers.Authorization;
+    if (path === "token/" || path.includes("password/") || path.startsWith("auth/reset/") || path === "auth/sign-out/" || (path === "people/" && config.method === "post")) config.data = undefined;
+  }
+  return Promise.reject(error);
 }
 
 type Retryable = InternalAxiosRequestConfig & { _retry?: boolean };
@@ -167,8 +204,19 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     noteFailure(error);
     const original = error.config as Retryable | undefined;
-    const authCall = original?.url?.replace(/^\/+/, "").startsWith("token/");
-    if (error.response?.status !== 401 || !original || original._retry || authCall) return Promise.reject(error);
+    const path = original?.url?.replace(/^\/+/, "") ?? "";
+    const authCall = path.startsWith("token/") || path.startsWith("auth/reset/") || path === "auth/options/" || path === "auth/password-rules/";
+    const body = error.response?.data as { code?: string } | undefined;
+    const sentToken = String(original?.headers.Authorization ?? "").replace(/^Bearer /, "");
+    const sameSession = sameTokenSession(sentToken, getTokens().access);
+    if (body?.code === "password_change_needed" && sameSession) onPasswordNeeded?.();
+    if (body?.code === "signed_out" && !authCall) {
+      if (sameSession) { clearTokens(); onExpired?.(window.location.pathname + window.location.search, "signed_out"); }
+      return rejectRequest(error, original);
+    }
+    if (error.response?.status !== 401 || !original || original._retry || authCall) return rejectRequest(error, original);
+    // A request from an older signed-in session never runs as the newer one, even for the same user.
+    if (tokenHasSession(sentToken) && tokenHasSession(getTokens().access ?? "") && !sameSession) return rejectRequest(error, original);
     original._retry = true;
     // who this request was sent for, by its own token
     const sentFor = tokenUser(String(original.headers.Authorization ?? "").replace(/^Bearer /, ""));
@@ -178,10 +226,10 @@ api.interceptors.response.use(
       // Someone else signed in meanwhile (another tab, or v2): sent again, this request would act for them (a phone-mode
       // save would change their setting). It doesn't go again; their sign-in stands, and this one is over.
       const now = tokenUser(access);
-      if (sentFor !== null && now !== null && now !== sentFor) throw new SignedOutMeanwhile("someone else signed in while the refresh was out");
+      if ((sentFor !== null && now !== null && now !== sentFor) || (tokenHasSession(sentToken) && tokenHasSession(access) && !sameTokenSession(sentToken, access))) throw new SignedOutMeanwhile("someone else signed in while the refresh was out");
     } catch (e) {
       // Refused, or signed out meanwhile: the session is over, and the original 401 says so. A blip: the person stays signed in and sees the blip.
-      return Promise.reject(e instanceof SessionEnded || e instanceof SignedOutMeanwhile ? error : e);
+      return rejectRequest(e instanceof SessionEnded || e instanceof SignedOutMeanwhile ? error : e, original);
     }
     original.headers.Authorization = `Bearer ${access}`;
     return api(original);

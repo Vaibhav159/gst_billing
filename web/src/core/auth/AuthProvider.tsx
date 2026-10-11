@@ -1,19 +1,19 @@
 import { readStored, writeStored } from "@/core/storage";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setTokens, tokenUser } from "@/core/api/client";
+import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setPasswordNeededHandler, sameTokenSession, setTokens, tokenUser } from "@/core/api/client";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { can as canDo, whyNot as whyNotFor, type Action } from "./permissions";
 import { RoleContext, type Role } from "./role";
 
-export type Me = { id: number; username: string; fullName: string; role: Role; roleLabel: string; permissions: "*" | Action[]; needsRoleChoice: boolean };
+export type Me = { id: number; username: string; fullName: string; role: Role; roleLabel: string; permissions: "*" | Action[]; needsRoleChoice: boolean; mustChangePassword?: boolean; sessionId?: string | null };
 type Status = "loading" | "signed-in" | "signed-out" | "error";
 type SignIn = { ok: true } | { ok: false; problem: ApiProblem };
 export type AuthValue = {
   me: Me | null; status: Status; startProblem: ApiProblem | null; expiredFrom: string | null;
   /** Signed out on purpose, here or on another tab, since anyone last signed in on this tab (it survives a reload): the sign-in page keeps no page for whoever is next. */
-  signedOutOnPurpose: boolean;
-  signIn(username: string, password: string): Promise<SignIn>; signOut(): void; retryStart(): void;
+  signedOutOnPurpose: boolean; expiredReason?: "signed_out";
+  signIn(username: string, password: string, remember?: boolean): Promise<SignIn>; signOut(): Promise<void>; retryStart(): void; refreshMe(): Promise<void>; acceptPasswordChange(pair: {access:string;refresh:string;requestAccess?:string|null}): Promise<void>;
   can(a: Action): boolean; whyNot(a: Action, what?: string): string;
 };
 
@@ -23,7 +23,7 @@ const ME_KEY = "gst3.me";
 function readMe(): Me | null { try { const s = readStored(ME_KEY); return s ? (JSON.parse(s) as Me) : null; } catch { return null; } }
 function saveMe(me: Me | null) { try { writeStored(ME_KEY, me ? JSON.stringify(me) : null); } catch { /* storage refused */ } }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice }; }
+function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice, mustChangePassword: Boolean(d.must_change_password), sessionId: d.session_id ?? null }; }
 
 /**
  * This tab saw a sign-out on purpose (Ruling 39). Per tab, in sessionStorage: a reload or a link opened here still starts
@@ -57,6 +57,7 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
   const [status, setStatus] = useState<Status>(() => (!getTokens().access ? "signed-out" : remembered() ? "signed-in" : "loading"));
   const [startProblem, setStartProblem] = useState<ApiProblem | null>(null);
   const [expiredFrom, setExpiredFrom] = useState<string | null>(null);
+  const [expiredReason, setExpiredReason] = useState<"signed_out" | undefined>();
   const [onPurpose, setOnPurpose] = useState(readMark);
   /** The person this tab last showed (signing out forgets them), for the callbacks below. */
   const shown = useRef(me);
@@ -73,7 +74,13 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
   }, [qc]);
   // On a shared counter computer the next person mustn't land on this person's page: a sign-out here, or one heard
   // from another tab (which can't be told from a session that ran out there), leaves the sign-in page plain, reloads included.
-  const signOut = useCallback(() => { saveMark(true); setOnPurpose(true); forget(); }, [forget]);
+  const forgetOnPurpose = useCallback(() => { saveMark(true); setOnPurpose(true); forget(); }, [forget]);
+  const signOut = useCallback(async () => {
+    const sent = getTokens();
+    if (!sent.access) { forgetOnPurpose(); return; }
+    await api.post("auth/sign-out/", { refresh: sent.refresh }, { headers: { Authorization: `Bearer ${sent.access}` } });
+    if (sameTokenSession(sent.access, getTokens().access)) forgetOnPurpose();
+  }, [forgetOnPurpose]);
 
   /** This tab's person is now `m`. Someone other than the person shown clears the cache and, unless this tab signed them in, is announced. */
   const adopt = useCallback((m: Me, announce: boolean) => {
@@ -83,7 +90,7 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     // what's on screen refetches for the new person (clear() would leave a mounted list showing the last person's rows)
     if (other) { void qc.resetQueries(); qc.getMutationCache().clear(); }
     shown.current = next;
-    saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null); setOnPurpose(false); saveMark(false);
+    saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null); setExpiredReason(undefined); setOnPurpose(false); saveMark(false);
     if (other && announce) switched.current?.(next);
   }, [qc]);
 
@@ -121,10 +128,11 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
   }, [ask, adopt, forget, unconfirmed]);
 
   useEffect(() => {
-    setSessionExpiredHandler((from) => { setExpiredFrom(from); forget(); });
+    setSessionExpiredHandler((from, reason) => { setExpiredFrom(from); setExpiredReason(reason); forget(); });
+    setPasswordNeededHandler(() => { if (shown.current) adopt({ ...shown.current, mustChangePassword: true }, false); });
     start();
-    return () => setSessionExpiredHandler(null);
-  }, [start, forget]);
+    return () => { setSessionExpiredHandler(null); setPasswordNeededHandler(null); };
+  }, [start, forget, adopt]);
 
   /**
    * The sign-in stored now, followed (Ruling 30). What's stored decides, not the event that told this tab: a sign-out
@@ -134,9 +142,9 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
    */
   const follow = useCallback(() => {
     const { access } = getTokens();
-    if (!access) { if (checked.current !== null) signOut(); }
+    if (!access) { if (checked.current !== null) forgetOnPurpose(); }
     else if (access !== checked.current) start();
-  }, [signOut, start]);
+  }, [forgetOnPurpose, start]);
 
   // Another tab signed out, signed in or refreshed.
   useEffect(() => {
@@ -162,12 +170,12 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     return () => window.removeEventListener("pageshow", onShow);
   }, [follow]);
 
-  const signIn = useCallback(async (username: string, password: string): Promise<SignIn> => {
+  const signIn = useCallback(async (username: string, password: string, remember = true): Promise<SignIn> => {
     let mine: string | null = null;
     try {
-      const r = await api.post("token/", { username, password });
+      const r = await api.post("token/", { username, password, remember });
       mine = r.data.access as string;
-      setTokens(r.data.access, r.data.refresh);
+      setTokens(r.data.access, r.data.refresh, remember);
       const m = await ask();
       if (m) adopt(m, false);
       return { ok: true };
@@ -180,11 +188,21 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
     }
   }, [ask, adopt]);
 
+  const refreshMe = useCallback(async () => { const m = await ask(); if (m) adopt(m, false); }, [ask, adopt]);
+  const acceptPasswordChange = useCallback(async (pair: {access:string;refresh:string;requestAccess?:string|null}) => {
+    if (!shown.current || !tokenFits(shown.current, pair.access) || !sameTokenSession(pair.requestAccess === undefined ? pair.access : pair.requestAccess, getTokens().access)) return;
+    setTokens(pair.access, pair.refresh);
+    // The endpoint has changed the password even if the follow-up read is offline.
+    adopt({ ...shown.current, mustChangePassword: false }, false);
+    await refreshMe().catch(() => {}); // password saved; an unavailable follow-up cannot undo it
+    await qc.invalidateQueries({queryKey:["account"]});
+  }, [adopt, refreshMe, qc]);
+
   const value = useMemo<AuthValue>(() => ({
-    me, status, startProblem, expiredFrom, signedOutOnPurpose: onPurpose, signIn, signOut, retryStart: start,
+    me, status, startProblem, expiredFrom, expiredReason, refreshMe, acceptPasswordChange, signedOutOnPurpose: onPurpose, signIn, signOut, retryStart: start,
     can: (a) => canDo(me?.permissions, a),
     whyNot: (a, what) => (me ? whyNotFor(me.role, a, what) : ""),
-  }), [me, status, startProblem, expiredFrom, onPurpose, signIn, signOut, start]);
+  }), [me, status, startProblem, expiredFrom, expiredReason, refreshMe, acceptPasswordChange, onPurpose, signIn, signOut, start]);
 
   return <AuthContext.Provider value={value}><RoleContext.Provider value={me?.role ?? null}>{children}</RoleContext.Provider></AuthContext.Provider>;
 }

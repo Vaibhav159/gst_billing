@@ -727,10 +727,10 @@ function signedIn() {
 test("unfinished bills stay on this device through a sign-out, and one kept as the session runs out isn't lost (part 0 carry)", async () => {
   keepOnDevice(copy());
   setTokens("a", "r");
-  serve({ "GET me/": ME });
+  serve({ "GET me/": ME, "POST auth/sign-out/": () => ({ status: 204 }) });
   const first = signedIn();
   await waitFor(() => expect(first.result.current.auth.status).toBe("signed-in"));
-  act(() => first.result.current.auth.signOut());
+  await act(async () => { await first.result.current.auth.signOut(); });
   expect(first.result.current.auth.status).toBe("signed-out");
   expect(keptDrafts().map((d) => d.id)).toEqual([ID]);
   first.unmount();
