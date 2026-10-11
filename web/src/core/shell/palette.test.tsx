@@ -40,7 +40,7 @@ test("empty, it offers recent records, actions the role allows, and pages", asyn
   expect(screen.getByRole("combobox")).toHaveFocus();
   expect(screen.getByRole("option", { name: /KGH\/2026-27\/32/ })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /New sales bill/ })).toBeInTheDocument();
-});
+}, 15_000); // the file's first draw of search: past 5 s on a busy 2-CPU machine
 
 test("a view-only person isn't offered actions they can't do", () => {
   mount("viewer");
@@ -57,7 +57,7 @@ test("typing searches customers and bills once, after a pause, and Enter opens t
   expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=meena"]);
   await userEvent.keyboard("{Enter}");
   await waitFor(() => expect(screen.getByText("customer 7")).toBeInTheDocument());
-});
+}, 15_000); // a typed search and many role queries: past 5 s on a busy 2-CPU machine
 
 test("arrow keys move the highlight and the input says which option is active", async () => {
   mount();
@@ -73,11 +73,26 @@ test("arrow keys move the highlight and the input says which option is active", 
 
 afterEach(() => { act(() => { __setNetState("online"); onlineManager.setOnline(true); }); vi.restoreAllMocks(); vi.useRealTimers(); (window as unknown as { __phone?: boolean }).__phone = false; });
 
-const wait = (ms: number) => act(() => new Promise<void>((r) => { setTimeout(r, ms); }));
+/**
+ * A clock the test moves (Ruling 1C-4), for tests that type with userEvent: the search's 250 ms pause and the dialog's
+ * 350 ms guard pass when the test says, never on real time (it also runs with real time, for Testing Library's polling).
+ */
+function typingClock() {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+}
+/**
+ * The clock moves `ms` on, and what that set off has its turn: a search asked for (the request reaches the server in a
+ * second round, after the page has drawn), its answer drawn. So "nothing was asked" is checked after a request would be.
+ */
+async function move(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+}
 const answer = (config: Parameters<AxiosAdapter>[0], data: unknown) => Promise.resolve({ status: 200, statusText: "", headers: {}, config, data });
 const NOTHING = { customers: [], invoices: [], products: [] };
 type Held = { q: string; signal?: AbortSignal; reply(data: unknown): void };
-/** A server that holds each search until the test replies (the firm list answers at once, with none). */
+/** A server that holds each search until the test replies (the firm list, today's bills and the bin answer at once, with none). */
 function holdingServer(): Held[] {
   const held: Held[] = [];
   api.defaults.adapter = ((config) => {
@@ -89,33 +104,36 @@ function holdingServer(): Held[] {
   return held;
 }
 
-test("nothing is asked on opening or for one character; a search waits for a pause, and a newer one cancels the one still out", async () => {
+test("no search is made on opening or for one character; a search waits for a pause, and a newer one cancels the one still out", async () => {
   const held = holdingServer();
+  const user = typingClock();
   mount();
-  await wait(300);
+  await move(300);
   expect(held).toHaveLength(0);
   const box = screen.getByRole("combobox");
-  await userEvent.type(box, "9");
-  await wait(300);
+  await user.type(box, "9");
+  await move(300);
   expect(held).toHaveLength(0);
   expect(screen.getByRole("status")).toHaveTextContent("Keep typing to search customers and bills.");
-  await userEvent.type(box, "4");
+  await user.type(box, "4");
   expect(held).toHaveLength(0);
   // while it's out the box says so: not "Nothing matches"
   expect(screen.getByRole("status")).toHaveTextContent("Searching…");
+  await move(250);
   await waitFor(() => expect(held).toHaveLength(1));
   expect(held[0].q).toBe("94");
   expect(held[0].signal?.aborted).toBe(false);
-  await userEvent.type(box, "1");
+  await user.type(box, "1");
+  await move(250);
   await waitFor(() => expect(held).toHaveLength(2));
   expect(held[0].signal?.aborted).toBe(true);
   expect(held[1].q).toBe("941");
   expect(held[1].signal?.aborted).toBe(false);
   // a space at the end is the same search
-  await userEvent.type(box, " ");
-  await wait(300);
+  await user.type(box, " ");
+  await move(300);
   expect(held).toHaveLength(2);
-});
+}, 15_000); // typing on the clock and many role queries: past 5 s on a busy 2-CPU machine
 
 test("a phone number typed in groups is asked for as its digits, and its rows show; a bill's year keeps its hyphen", async () => {
   mount();
@@ -127,20 +145,23 @@ test("a phone number typed in groups is asked for as its digits, and its rows sh
   await userEvent.clear(box);
   await userEvent.type(box, "2026-27");
   await waitFor(() => expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=9829041122", "search/quick/?q=2026-27"]));
-});
+}, 15_000); // two typed searches and many role queries: past 5 s on a busy 2-CPU machine
 
 test("a term searched in the last 30 s comes back without asking again", async () => {
+  const user = typingClock();
   mount();
   const box = screen.getByRole("combobox");
-  await userEvent.type(box, "meena");
+  await user.type(box, "meena");
+  await move(250);
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
-  await userEvent.clear(box);
-  await wait(300); // long enough for the box's emptiness to count
-  await userEvent.type(box, "meena");
+  await user.clear(box);
+  await move(300); // long enough for the box's emptiness to count
+  await user.type(box, "meena");
+  await move(250);
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
-  await wait(300);
+  await move(300);
   expect(calls.filter((c) => c.startsWith("search/"))).toEqual(["search/quick/?q=meena"]);
-});
+}, 15_000); // as above
 
 test("an older search's rows never stand in for what's typed now", async () => {
   const held = holdingServer();
@@ -156,7 +177,7 @@ test("an older search's rows never stand in for what's typed now", async () => {
   await waitFor(() => expect(held).toHaveLength(2));
   await act(async () => { held[1].reply(NOTHING); });
   expect(await screen.findByText(/^Nothing matches “meenax”/)).toBeInTheDocument();
-});
+}, 15_000); // as above
 
 test("each record says what it is: a mobile in two groups, else as typed, else the GSTIN, else Customer; a product's HSN and GST; a firm's GSTIN", async () => {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? {
@@ -223,7 +244,7 @@ test("sales bills: by number and from each customer found, sales only, each once
   // a customer's own bill names that customer
   expect(screen.getByRole("option", { name: "KGH/2026-27/33 Mohan Lal · 08 Oct 2026 · ₹1,000.00" })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /KGH-P/ })).not.toBeInTheDocument();
-});
+}, 15_000); // a typed search and many role queries: past 5 s on a busy 2-CPU machine
 
 test("a product from a server that doesn't send its rate shows its HSN alone, never “GST NaN%”", async () => {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? { ...NOTHING, products: [{ id: 5, name: "Anklet", hsn_code: "7113" }] } : { results: [] })) as AxiosAdapter;
@@ -245,35 +266,39 @@ test("when the server can't be searched it says what wasn't, firms still show, n
   const asked: string[] = [];
   api.defaults.adapter = ((config) => {
     if (config.url?.startsWith("businesses/")) return answer(config, { results: [{ id: 4, name: "MEENA ORNAMENTS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" }] });
+    if (!config.url?.startsWith("search/quick/")) return answer(config, { results: [] });
     asked.push((config.params as { q: string }).q);
     return down ? Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config)) : answer(config, MEENA);
   }) as AxiosAdapter;
   const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const user = typingClock();
   mount();
   // the browser's word, once the app listens for it: a query that waits for the network would wait here
   act(() => { window.dispatchEvent(new Event("offline")); });
   const box = screen.getByRole("combobox");
-  await userEvent.type(box, "meena");
+  await user.type(box, "meena");
+  await move(250);
   // offline it still asks, and says so at once: it doesn't wait for the network to come back
   expect(await screen.findByText("You're offline, so customers, bills and products can't be searched.")).toHaveAttribute("role", "status");
   expect(screen.getByRole("option", { name: /^MEENA ORNAMENTS/ })).toBeInTheDocument();
   onLine.mockReturnValue(true);
   act(() => { window.dispatchEvent(new Event("online")); });
-  await userEvent.type(box, "{Backspace}");
+  await user.type(box, "{Backspace}");
+  await move(250);
   expect(await screen.findByText("The app couldn't reach the shop's records just now, so customers, bills and products weren't searched.")).toBeInTheDocument();
   expect(screen.getByRole("option", { name: /^MEENA ORNAMENTS/ })).toBeInTheDocument();
   expect(screen.queryByText(/Nothing matches/)).not.toBeInTheDocument();
   // once each: no retry behind the person's back
   expect(asked).toEqual(["meena", "meen"]);
   down = false;
-  await wait(400); // past the dialog's guard against the tail of the tap that opened it
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await move(400); // past the dialog's guard against the tail of the tap that opened it
+  await user.click(screen.getByRole("button", { name: "Try again" }));
   expect(box).toHaveFocus();
   expect(await screen.findByRole("option", { name: /^Meena Jain/ })).toBeInTheDocument();
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   expect(asked).toEqual(["meena", "meen", "meen"]);
-});
+}, 15_000); // as above
 
 test("typing finds the actions and pages it names, as far as the role allows", async () => {
   holdingServer(); // records never come: only what typing matches here
@@ -288,7 +313,7 @@ test("typing finds the actions and pages it names, as far as the role allows", a
   mount("viewer");
   await userEvent.type(screen.getByRole("combobox"), "set");
   expect(screen.queryByRole("option", { name: /^Settings/ })).not.toBeInTheDocument();
-});
+}, 15_000); // three typed words and many role queries: past 5 s on a busy 2-CPU machine
 
 test("Home and End jump to the ends, pointing moves the highlight, and choosing a row closes search and opens its page", async () => {
   const order: string[] = [];
@@ -311,20 +336,19 @@ test("Home and End jump to the ends, pointing moves the highlight, and choosing 
   await userEvent.keyboard("{Enter}");
   expect(await screen.findByText("reports page")).toBeInTheDocument();
   expect(order[0]).toBe("closed");
-});
+}, 15_000); // every row and many role queries: past 5 s on a busy 2-CPU machine
 
-test("on a desktop the footer shows the keys and a hint that promises only what search does; a phone's sheet has neither", () => {
+test("on a desktop the footer shows the keys and what to try; a phone's sheet has neither", () => {
   const view = mount();
   let dialog = screen.getByRole("dialog", { name: "Search" });
-  expect(dialog).toHaveTextContent("Type a name, phone, bill number or page");
-  expect(dialog).not.toHaveTextContent(/udhaar|gstr1|new anil/);
-  expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", "Customer, phone, bill number or a page");
+  expect(dialog).toHaveTextContent("Try “udhaar sep”, “kiran gstr1” or “new anil”");
+  expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", "Customer, phone, bill number, a page, or “udhaar sep”");
   expect(screen.getByRole("option", { name: /^New sales bill/ }).querySelector("kbd")).toHaveTextContent(/N$/);
   view.unmount();
   (window as unknown as { __phone?: boolean }).__phone = true;
   mount();
   dialog = screen.getByRole("dialog", { name: "Search" });
-  expect(dialog).not.toHaveTextContent("Type a name, phone, bill number or page");
+  expect(dialog).not.toHaveTextContent("Try “udhaar sep”");
   expect(dialog.querySelector("kbd")).toBeNull();
 });
 
@@ -339,7 +363,7 @@ test("Opened recently: this person's newest five records, each under its own ico
   rows.slice(0, 5).forEach((r, k) => expect(r.querySelector("svg")).toHaveClass(icons[k]));
   expect(document.querySelectorAll("#palette-list .caps")[0]).toHaveTextContent("Opened recently");
   expect(screen.queryByRole("option", { name: /KGH\/2026-27\/(31|99)/ })).not.toBeInTheDocument();
-});
+}, 15_000); // as above
 
 test("noteVisit keeps a person's last eight, newest first and each once; storage that refuses or holds junk costs nothing", () => {
   for (let n = 1; n <= 10; n++) noteVisit(1, { to: `/sales/${n}`, label: `Bill ${n}` });
@@ -434,7 +458,7 @@ test("on a desktop, the header's Search and Ctrl K open search; choosing a page 
   expect(router.state.location.pathname).toBe("/customers");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await waitFor(() => expect(h1).toHaveFocus());
-});
+}, 15_000); // the whole shell and a typed search: past 5 s on a busy 2-CPU machine
 
 test("on a phone, Today carries Search last in its header, after its own buttons; it opens the same search, and a record found opens with focus on its title", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
@@ -462,7 +486,7 @@ test("on a phone, Today carries Search last in its header, after its own buttons
   const h1 = await screen.findByRole("heading", { level: 1, name: "Meena Jain" });
   expect(router.state.location.pathname).toBe("/customers/7");
   await waitFor(() => expect(h1).toHaveFocus());
-});
+}, 15_000); // as above
 
 test("on a phone only Today carries Search: not Bills, Customers or More, and not where a page asks for it in Easy or on a form", async () => {
   (window as unknown as { __phone?: boolean }).__phone = true;
