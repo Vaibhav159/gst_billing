@@ -7,12 +7,13 @@ from django.db.models.functions import Cast
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.cache import uncached
 from billing.models import AuditLog, BinnedInvoice, Invoice
 from billing.params import date_param, id_param, text_param
-from billing.services.audit import GROUPS, KIND_ENTITIES, entry_row, read_entries
+from billing.services.audit import GROUPS, KIND_ENTITIES, act, entry_row, read_entries
 from billing.text import person
 
 from .permissions import V3Permission
@@ -94,6 +95,14 @@ class AuditView(APIView):
             people = AuditLog.objects.order_by().values("user_id", "user__first_name", "user__last_name", "user__username").distinct()
             response.data["people"] = [{"id": row["user_id"], "name": (" ".join(filter(None, [row["user__first_name"], row["user__last_name"]])) or row["user__username"]) if row["user_id"] else "Someone no longer here"} for row in people]
         return response
+
+
+class AuditActionView(APIView):
+    permission_classes = [V3Permission]
+    v3_actions = {"POST": "audit.undo"}
+
+    def post(self, request, pk, action):
+        return Response(act(pk, action, request.user))
 
 
 def safe_cell(value):

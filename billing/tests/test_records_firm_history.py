@@ -194,3 +194,41 @@ class FirmHistoryProtectionTests(TestCase):
                     self.assertTrue(Business.objects.filter(pk=self.business.pk).exists())
                     self.entry.refresh_from_db()
                     self.assertNotIn("_undo", self.entry.snapshot)
+
+class FirmHistoryAuditTests(TestCase):
+    def setUp(self):
+        self.owner = person("history-audit-owner", "admin")
+        self.client = client_for(self.owner)
+        self.business = firm()
+        self.entry = AuditLog.objects.create(user=self.owner, action="created", entity="business", entity_id=self.business.pk,
+                                             entity_name=self.business.name, snapshot=snapshot_of(self.business))
+
+    def test_v3_audit_undo_uses_the_same_retained_history_guard(self):
+        cases = [("filed_periods", lambda: FiledPeriod.objects.create(business=self.business, year=2025, month=4)),
+                 ("opening_credits", lambda: ITCReclaimLedger.objects.create(business=self.business))]
+        for key, create in cases:
+            with self.subTest(key=key):
+                row = create()
+                response = self.client.post(f"/api/audit/{self.entry.pk}/undo/")
+                self.assertEqual(response.status_code, 409, response.data)
+                self.assertEqual(response.data["code"], "in_use")
+                self.assertEqual(response.data["detail"], "KIRAN GOLD HOUSE has filing records or opening credit, so it can't be deleted. Its GST history keeps its firm.")
+                self.assertEqual(response.data["uses"][key], 1)
+                self.assertTrue(type(row).objects.filter(pk=row.pk).exists())
+                self.assertTrue(Business.objects.filter(pk=self.business.pk).exists())
+                self.entry.refresh_from_db()
+                self.assertNotIn("_undo", self.entry.snapshot)
+                row.delete()
+
+    def test_real_part3_history_blocks_v3_audit_undo(self):
+        for key, row in part3_history_rows(self.business, self.owner):
+            with self.subTest(model=type(row).__name__):
+                response = self.client.post(f"/api/audit/{self.entry.pk}/undo/")
+                self.assertEqual(response.status_code, 409, response.data)
+                self.assertEqual(response.data["code"], "in_use")
+                self.assertEqual(response.data["detail"], "KIRAN GOLD HOUSE has filing records or opening credit, so it can't be deleted. Its GST history keeps its firm.")
+                self.assertEqual(response.data["uses"][key], 1)
+                self.assertTrue(type(row).objects.filter(pk=row.pk).exists())
+                self.assertTrue(Business.objects.filter(pk=self.business.pk).exists())
+                self.entry.refresh_from_db()
+                self.assertNotIn("_undo", self.entry.snapshot)

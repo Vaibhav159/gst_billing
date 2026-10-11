@@ -1,9 +1,12 @@
+from decimal import Decimal
+
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 
-from billing.models import AuditLog, Customer
-from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, person
+from billing.api.mixins import snapshot_of
+from billing.models import AuditLog, Customer, FiledPeriod, LineItem, Product
+from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, line, person, sale
 
 
 class AuditReadTest(TestCase):
@@ -41,3 +44,124 @@ class AuditReadTest(TestCase):
         content = b"".join(response.streaming_content).decode("utf-8-sig")
         self.assertIn("'=SUM(1,2)", content)
         self.assertTrue(AuditLog.objects.filter(entity="backup", action="exported").exists())
+
+
+class AuditActionsTest(TestCase):
+    def setUp(self):
+        self.owner = person("undo-owner", *ROLE_GROUPS["owner"])
+        self.client = client_for(self.owner)
+        self.customer = buyer()
+
+    def entry(self, action, instance, changes=None):
+        entity = "product" if isinstance(instance, Product) else "customer"
+        return AuditLog.objects.create(user=self.owner, entity=entity, entity_id=instance.pk, entity_name=instance.name, action=action, changes=changes, snapshot=snapshot_of(instance))
+
+    def test_revert_changes_only_listed_fields_and_is_itself_revertible(self):
+        entry = self.entry("updated", self.customer, {"mobile_number": {"old": "", "new": "9000000000"}})
+        Customer.objects.filter(pk=self.customer.pk).update(mobile_number="9000000000", address="Keep this")
+        response = self.client.post(f"/api/audit/{entry.pk}/revert/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.customer.refresh_from_db()
+        self.assertEqual((self.customer.mobile_number, self.customer.address), ("", "Keep this"))
+        again = response.data["new_entry"]["id"]
+        self.assertEqual(self.client.post(f"/api/audit/{again}/revert/").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/audit/{entry.pk}/revert/").data["code"], "already_undone")
+
+    def test_changed_since_refuses_all_fields(self):
+        entry = self.entry("updated", self.customer, {"mobile_number": {"old": "", "new": "9000000000"}, "address": {"old": "", "new": "Somewhere"}})
+        Customer.objects.filter(pk=self.customer.pk).update(mobile_number="9000000001", address="Somewhere")
+        response = self.client.post(f"/api/audit/{entry.pk}/revert/")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["detail"], "Phone changed again since. Revert the later change first.")
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.address, "Somewhere")
+
+    def test_undo_unused_product_and_restore_original_id(self):
+        product = Product.objects.create(name="Unused gold")
+        pk = product.pk
+        entry = self.entry("created", product)
+        response = self.client.post(f"/api/audit/{entry.pk}/undo/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(Product.objects.filter(pk=pk).exists())
+        deletion = response.data["new_entry"]["id"]
+        response = self.client.post(f"/api/audit/{deletion}/restore/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Product.objects.get(pk=pk).name, "Unused gold")
+        self.assertEqual(response.data["link"], f"/products/{pk}")
+
+    def test_restore_name_collision_and_owner_only(self):
+        entry = self.entry("deleted", self.customer)
+        self.customer.delete()
+        buyer("ANIL GUPTA")
+        response = self.client.post(f"/api/audit/{entry.pk}/restore/")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "name_taken")
+        accountant = client_for(person("audit-accountant", *ROLE_GROUPS["accountant"]))
+        self.assertEqual(accountant.post(f"/api/audit/{entry.pk}/restore/").status_code, 403)
+
+    def test_sale_undo_restore_and_closed_month(self):
+        business = firm()
+        bill = sale(business, self.customer, "17", "2026-10-02")
+        entry = AuditLog.objects.create(user=self.owner, action="created", entity="invoice", entity_id=bill.pk, entity_name=bill.invoice_number, snapshot=snapshot_of(bill))
+        response = self.client.post(f"/api/audit/{entry.pk}/undo/")
+        self.assertEqual(response.status_code, 200, response.data)
+        deletion = response.data["new_entry"]["id"]
+        FiledPeriod.objects.create(business=business, year=2026, month=10)
+        response = self.client.post(f"/api/audit/{deletion}/restore/")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "month_closed")
+        FiledPeriod.objects.all().delete()
+        response = self.client.post(f"/api/audit/{deletion}/restore/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["link"], f"/sales/{bill.pk}")
+
+    def test_firm_restore_and_revert_refuse_registration_or_short_name_taken(self):
+        original = firm(name="First firm", short_name="First", invoice_prefix="F")
+        entry = AuditLog.objects.create(user=self.owner, action="deleted", entity="business", entity_id=original.pk, entity_name=original.name, snapshot=snapshot_of(original))
+        original.delete()
+        firm(name="Second firm", short_name="First", invoice_prefix="S")
+        response = self.client.post(f"/api/audit/{entry.pk}/restore/")
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(response.data["code"], "name_taken")
+
+    def test_head_has_the_same_audit_permission_as_get(self):
+        viewer = client_for(person("head-viewer", *ROLE_GROUPS["viewer"]))
+        self.assertEqual(viewer.head("/api/audit/").status_code, 403)
+        self.assertEqual(viewer.head("/api/audit/export/").status_code, 403)
+
+    def test_firm_revert_reports_the_holder_of_an_implicit_short_name(self):
+        original = firm(name="KIRAN GOLD HOUSE", short_name="K", invoice_prefix="KGH")
+        holder = firm(name="Other firm", short_name="Kiran", invoice_prefix="OTHER")
+        entry = AuditLog.objects.create(user=self.owner, action="updated", entity="business", entity_id=original.pk, entity_name=original.name, changes={"short_name": {"old": "", "new": "K"}}, snapshot=snapshot_of(original))
+        response = self.client.post(f"/api/audit/{entry.pk}/revert/")
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(response.data["code"], "name_taken")
+        self.assertEqual(response.data["holder"], {"id": holder.pk, "name": "Other firm", "short": "Kiran"})
+
+    def test_sale_restore_names_the_amendment_in_a_previously_filed_month(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        business = firm()
+        bill = sale(business, self.customer, "18", "2026-10-02")
+        entry = AuditLog.objects.create(user=self.owner, action="created", entity="invoice", entity_id=bill.pk, entity_name=bill.invoice_number, snapshot=snapshot_of(bill))
+        deletion = self.client.post(f"/api/audit/{entry.pk}/undo/").data["new_entry"]["id"]
+        with patch("billing.period_lock.month_status", create=True, return_value=SimpleNamespace(unlocked=True)):
+            rows = self.client.get("/api/audit/").data["results"]
+        row = next(row for row in rows if row["id"] == deletion)
+        self.assertIn(" October 2026 was filed before and is open for a correction, so this change needs an amendment in the next return.", row["can"]["effect"])
+
+    def test_legacy_heads_round_per_line_in_bill_and_restore_effect(self):
+        business = firm()
+        bill = sale(business, self.customer, "19", "2026-10-02", line(), line())
+        LineItem.objects.filter(invoice=bill).update(cgst=Decimal("0.025"), sgst=Decimal("0.025"), igst=Decimal("0"))
+        from billing.services.bill_reads import sums
+        figures = sums(LineItem.objects.filter(invoice=bill))
+        self.assertEqual(figures["cgst"], Decimal("0.06"))
+        self.assertEqual(figures["sgst"], Decimal("0.06"))
+        self.assertEqual(figures["tax"], Decimal("0.12"))
+        entry = AuditLog.objects.create(user=self.owner, action="created", entity="invoice", entity_id=bill.pk, entity_name=bill.invoice_number, snapshot=snapshot_of(bill))
+        deletion = self.client.post(f"/api/audit/{entry.pk}/undo/").data["new_entry"]["id"]
+        rows = self.client.get("/api/audit/").data["results"]
+        row = next(row for row in rows if row["id"] == deletion)
+        self.assertIn("tax by ₹0.12.", row["can"]["effect"])

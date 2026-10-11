@@ -1,12 +1,15 @@
 """Audit words and field-level actions, shared by the log and record saves."""
 from decimal import Decimal, InvalidOperation
 
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, F, OuterRef
+from rest_framework.exceptions import NotFound, ValidationError
 
+from billing.api.mixins import drop_settled_party_rows, mark_undone, snapshot_of
 from billing.cache import uncached
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice, InwardCapture, LineItem, Product
 from billing.refusals import Refusal
-from billing.text import inr, person, stamp
+from billing.text import day_text, inr, person, stamp
 
 MODEL_MAP = {"invoice": Invoice, "customer": Customer, "product": Product, "business": Business}
 PATHS = {"invoice": "sales", "customer": "customers", "product": "products", "business": "firms"}
@@ -293,3 +296,135 @@ def entry_row(entry, actions=True):
             "words": words, "link": link, "note": "In the bin" if binned else "",
             "details": entry.details, "changes": change_rows(MODEL_MAP.get(entry.entity), entry.changes), "result": result,
             "can": available(entry, obj, binned) if actions else None}
+
+
+def name_available(model, name, pk):
+    rows = uncached(model).filter(name__iexact=name).exclude(pk=pk).only(*(["id", "name", "short_name"] if model is Business else ["id", "name"]))
+    holder = rows.first()
+    if holder is not None:
+        what = {Product: "product", Customer: "customer", Business: "firm"}[model]
+        raise Refusal(f"A {what} called {holder.name} was added since. Rename one of them first.", "name_taken", holder=({"id": holder.pk, "name": holder.name, "short": holder.short_name or holder.name.split()[0].title()} if model is Business else {"id": holder.pk, "name": holder.name}))
+
+
+def firm_unique_or_refuse(values, business=None):
+    from billing.services.firms import check_firm_unique, firm_ref, short_name
+    try:
+        check_firm_unique(values, business)
+    except ValidationError as error:
+        field_name, messages = next(iter(error.detail.items()))
+        def effective(key):
+            return values.get(key, getattr(business, key, ""))
+        wanted = effective(field_name)
+        if field_name == "short_name":
+            wanted = wanted or (effective("name").split() or [""])[0].title()
+        others = uncached(Business).exclude(pk=getattr(business, "pk", None)).only("id", "name", "short_name", "gst_number", "invoice_prefix")
+        holder = next((other for other in others
+                       if str(wanted or "").casefold() == str(short_name(other) if field_name == "short_name" else getattr(other, field_name, "")).casefold()), None)
+        raise Refusal(str(messages[0]), "name_taken", holder=firm_ref(holder) if holder else None) from None
+
+def snapshot_values(model, snapshot):
+    values = {}
+    for field in model._meta.concrete_fields:
+        if field.name not in snapshot or field.primary_key:
+            continue
+        raw = snapshot[field.name]
+        if field.many_to_one:
+            values[field.attname] = _resolve_fk(field, raw)
+        else:
+            values[field.name] = field.to_python(None if raw == "None" and field.null else raw)
+    return values
+
+
+def act(entry_id, action, user):
+    with transaction.atomic():
+        entry = AuditLog.objects.select_for_update().filter(pk=entry_id).first()
+        if entry is None:
+            raise NotFound("This entry isn't on file.")
+        marker = (entry.snapshot or {}).get("_undo")
+        if marker:
+            from django.contrib.auth import get_user_model
+            by = get_user_model().objects.filter(pk=marker.get("by")).only("id", "username", "first_name", "last_name").first()
+            at = marker.get("at", "")
+            from django.utils.dateparse import parse_datetime
+            when = parse_datetime(at)
+            date_words = day_text(when.date()) if when else at[:10]
+            raise Refusal(f"This was undone already, on {date_words} by {person(by)['name'] if by else 'someone no longer here'}.", "already_undone", by=person(by), at=at)
+        entry.used = False
+        if entry.entity == "product":
+            from billing.services.catalog import catalog_names_lock
+            catalog_names_lock()
+        if entry.entity == "business":
+            from billing.models import ShopSetting
+            ShopSetting.objects.select_for_update().get_or_create(pk=1)
+            list(uncached(Business).order_by("pk").select_for_update(no_key=True).values_list("pk", flat=True))
+        obj = record_for(entry, lock=True)
+        binned = binned_for(entry, full=True) if entry.entity == "invoice" else None
+        offered = available(entry, obj, binned)
+        if offered is None or offered["kind"] != action:
+            raise ValidationError({"detail": "This entry can't be undone."})
+        if entry.entity == "invoice":
+            from billing.services.bin import bin_bill, restore_from_bin
+            if action == "undo":
+                binned, new = bin_bill(obj, user, reason="Undone from the Audit log")
+                new = AuditLog.objects.get(pk=binned.audit_log_id)
+                mark_undone(entry, user, new)
+            else:
+                obj = restore_from_bin(binned, user, via="audit_log")
+                entry.refresh_from_db()
+                new = AuditLog.objects.get(pk=entry.snapshot["_undo"]["log"])
+        else:
+            model = MODEL_MAP[entry.entity]
+            if action == "undo":
+                if isinstance(obj, Business):
+                    from billing.services.firms import assert_firm_unused
+                    assert_firm_unused(obj)
+                uses = uses_for(obj)
+                if any(uses.values()):
+                    raise Refusal(f"{entry.entity_name} is in use, so it can't be deleted.", "in_use", uses=uses)
+                # Load a full row only for this explicit write's restorable snapshot.
+                obj = uncached(model).get(pk=obj.pk)
+                snapshot = snapshot_of(obj)
+                drop_settled_party_rows(obj)
+                obj.delete()
+                new = AuditLog.objects.create(user=user, action="deleted", entity=entry.entity, entity_id=entry.entity_id,
+                    entity_name=entry.entity_name, details="Undone from the Audit log", snapshot=snapshot)
+            elif action == "revert":
+                bad = changed_fields(entry, obj)
+                if bad:
+                    raise Refusal(f"{', '.join(bad)} changed again since. Revert the later change first.", "changed_since", fields=bad)
+                old = {key: change["old"] for key, change in entry.changes.items()}
+                if "name" in old:
+                    name_available(model, old["name"], obj.pk)
+                values = snapshot_values(model, old)
+                if model is Business:
+                    from billing.services.firms import freeze_older_bills
+                    # The complete legal block is needed only for this explicit write.
+                    obj = uncached(Business).get(pk=obj.pk)
+                    firm_unique_or_refuse(values, obj)
+                    freeze_older_bills(obj, set(values))
+                for key, value in values.items():
+                    setattr(obj, key, value)
+                obj.save(update_fields=[*values, "updated_at"])
+                changes = {key: {"old": value["new"], "new": value["old"]} for key, value in entry.changes.items()}
+                new = AuditLog.objects.create(user=user, action="reverted", entity=entry.entity, entity_id=obj.pk,
+                    entity_name=obj.name, changes=changes, details="Put back the earlier values")
+            else:
+                snapshot = entry.snapshot or {}
+                if not snapshot or uncached(model).filter(pk=entry.entity_id).exists():
+                    raise ValidationError({"detail": "This entry can't be undone."})
+                name_available(model, snapshot.get("name", ""), entry.entity_id)
+                if model is Business:
+                    firm_unique_or_refuse(snapshot_values(model, snapshot))
+                try:
+                    with transaction.atomic():
+                        obj = model(pk=entry.entity_id, **snapshot_values(model, snapshot))
+                        obj.save(force_insert=True)
+                except IntegrityError:
+                    raise Refusal(f"A record called {entry.entity_name} was added since. Rename one of them first.", "name_taken", holder={"id": entry.entity_id, "name": entry.entity_name}) from None
+                new = AuditLog.objects.create(user=user, action="restored", entity=entry.entity, entity_id=obj.pk,
+                    entity_name=obj.name, details="Restored from the Audit log", snapshot=snapshot_of(obj))
+            mark_undone(entry, user, new)
+    answer = {"entry": entry_row(read_entries().get(pk=entry.pk)), "new_entry": entry_row(read_entries().get(pk=new.pk))}
+    if action in {"restore", "revert"}:
+        answer["link"] = f"/{PATHS[entry.entity]}/{obj.pk}"
+    return answer
