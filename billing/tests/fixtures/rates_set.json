@@ -1,0 +1,5 @@
+{
+  "action": "set", "entity": "rates", "entity_id": 41, "entity_name": "Today's rates",
+  "details": "Gold 22K ₹65,125.00 per 10 g · Silver 999 ₹78,500.00 per kg",
+  "expected": {"kind": "admin", "group": "change", "words": {"text": "Set today's rates", "target": "", "after": ""}}
+}

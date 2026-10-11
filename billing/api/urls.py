@@ -9,6 +9,7 @@ from .bill_imports import PurchaseImportView, SalesImportView
 from .captures import CaptureDetailView, CaptureReadView, CaptureRestoreView, CapturesView
 from .catalog import CatalogDetail, CatalogList
 from .customer_merge import CustomerDuplicatesView, CustomerMergeView
+from .dashboard import RatesView
 from .drafts import DraftViewSet
 from .firms import FirmDetailView, FirmSignatureView, FirmsView
 from .gst import (
@@ -110,6 +111,7 @@ urlpatterns = [
     path("gst/months/relock/", GstMonthAction.as_view(), {"operation": "relock"}),
     path("gst/months/filed-before/", GstMonthAction.as_view(), {"operation": "filed-before"}),
     path("gst/opening-credit/", GstOpeningCredit.as_view()),
+    path("rates/", RatesView.as_view(), name="rates"),
     # Explicit paths BEFORE router to avoid router's <pk> catching them
     path("invoices/bulk-import/", BulkInvoiceImportView.as_view(), name="bulk-invoice-import"),
     path("reports/generate/", ReportView.as_view(), name="generate-report"),

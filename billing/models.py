@@ -1418,3 +1418,16 @@ class PasswordResetCode(models.Model):
     tries = models.PositiveSmallIntegerField(default=0, db_default=0)
     used_at = models.DateTimeField(null=True, blank=True)
     ip_hash = models.CharField(max_length=64)
+
+
+class RateBoard(models.Model):
+    """Append-only shop quotes; a same-day correction is another setting."""
+
+    on = models.DateField(db_index=True)
+    quoted = models.JSONField()
+    set_at = models.DateTimeField(auto_now_add=True)
+    set_by = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL,
+                               db_constraint=False, related_name="+")
+
+    class Meta:
+        ordering = ["-on", "-set_at", "-id"]
