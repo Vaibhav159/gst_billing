@@ -15,13 +15,19 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import invalidate
-from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD
+from billing.constants import BILL_ACTIVE, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, UNIT_TO_GRAM, V2_LINE_SNAPSHOT_FIELDS
 from billing.fy import fy_of
 from billing.models import AuditLog, Invoice, LineItem
 from billing.numbering import checked_number, format_number, refuse_taken
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
-from billing.tax_rules import default_place_of_supply, normalize_rate, normalize_tax_heads, supply_interstate
+from billing.tax_rules import (
+    chosen_place,
+    default_place_of_supply,
+    normalize_rate,
+    normalize_tax_heads,
+    supply_interstate,
+)
 from billing.text import day_text, inr, money, stamp
 
 CANCELLED_WORDS = "Cancelled bills can't be changed. Make it again from the bill instead."
@@ -197,13 +203,22 @@ def move_bill(invoice, user, business, typed):
 # The header fields an edit reports old -> new (audit `changes`).
 EDIT_FIELDS = ("business", "customer", "invoice_number", "invoice_date", "payment_mode", "place_of_supply", "notes",
                "total_amount")
-# The most a bill's total (numeric(12, 3)) can hold.
+# What an edit changed, in its audit row's words and in this order (Ruling 1A-41); "lines" is the items.
+CHANGED_WORDS = {"invoice_number": "the number", "invoice_date": "the date", "customer": "the customer",
+                 "business": "the firm", "payment_mode": "the payment", "place_of_supply": "the place of supply",
+                 "notes": "the note", "lines": "the items", "total_amount": "the total"}
+# What a line stores, as an edit compares it with what's sent: v2's snapshot keys and the note.
+LINE_COLUMNS = (*V2_LINE_SNAPSHOT_FIELDS, "note")
+# The most the columns hold: a rate, a line's amount and a bill's total (numeric(12, 3)); a quantity and a tax head
+# (numeric(10, 3)).
 MOST = Decimal("999999999.999")
+LINE_MOST = Decimal("9999999.999")
 
 
 def _audit_values(invoice):
-    """EDIT_FIELDS as they are, the parties by id."""
-    return {f: getattr(invoice, f + "_id" if f in ("business", "customer") else f) for f in EDIT_FIELDS}
+    """EDIT_FIELDS as they are, the parties by id and the place as chosen: a blank one is the rule, as NULL is."""
+    return {**{f: getattr(invoice, f + "_id" if f in ("business", "customer") else f) for f in EDIT_FIELDS},
+            "place_of_supply": chosen_place(invoice) or None}
 
 
 def _audit_text(value):
@@ -214,6 +229,24 @@ def _audit_text(value):
 def _changes(before, after, fields):
     """{field: {"old", "new"}} for each of `fields` whose value changed."""
     return {f: {"old": _audit_text(before[f]), "new": _audit_text(after[f])} for f in fields if before[f] != after[f]}
+
+
+def _changed_words(changed):
+    """ "Changed the payment and the total": what an edit changed (Ruling 1A-41)."""
+    words = [w for f, w in CHANGED_WORDS.items() if f in changed]
+    return f"Changed {', '.join(words[:-1])} and {words[-1]}" if len(words) > 1 else f"Changed {words[0]}"
+
+
+def _too_big(lines):
+    """The 400's words, by position, for each built line whose amount or tax its columns can't hold: the builder's
+    own figures, so the line maths has one copy. The words follow the unit, as the quantity's do."""
+    return {n: {"rate": [f"This item comes to more than one bill can hold. Check {_counted(li.unit)} and the rate."]}
+            for n, li in enumerate(lines) if li.amount > MOST or max(li.cgst, li.sgst, li.igst) > LINE_MOST}
+
+
+def _counted(unit):
+    """What a line's quantity is, in words: the weight of what's weighed, else the number of pieces."""
+    return "the weight" if unit in UNIT_TO_GRAM else "the number of pieces"
 
 
 def _date_problem(day):
@@ -243,13 +276,14 @@ def save_bill(data, user, invoice=None):
     builder (billing.services.line_items), which works out every figure the server's way. The
     number is checked only when it, the firm or the FY changes, so an older bill whose number
     predates the rules can still be edited (and a date, only when it changes); a new firm freezes
-    that firm on the bill. The audit row is written before the answer is read, so the answer
-    shows it.
+    that firm on the bill. An edit that changes nothing writes nothing. The audit row is written
+    before the answer is read, so the answer shows it.
     """
+    from billing.services.bill_reads import lines_of
     from billing.services.bin import v2_snapshot
     from billing.services.line_items import build_line_items
 
-    business, customer, day = data["business"], data["customer"], data["invoice_date"]
+    business, customer, day, typed = data["business"], data["customer"], data["invoice_date"], data["invoice_number"]
     with transaction.atomic():
         old = locked_bill(invoice) if invoice else None
         if old is not None:
@@ -261,11 +295,14 @@ def save_bill(data, user, invoice=None):
             raise ValidationError({"invoice_date": [problem]})
         assert_sales_open(business, day, "edit" if old else "create")
         moved = old is not None and business.pk != old.business_id
-        number = format_number(business, day, data["invoice_number"])
-        if old is not None and not moved and fy_of(day) == fy_of(old.invoice_date) and number == old.invoice_number.strip():
-            number = old.invoice_number  # unchanged: kept as stored, never checked again
+        number = format_number(business, day, typed)
+        # Unchanged when the stored number is what's typed or its formatted form: the form sends it back as it is, so
+        # a v2 "31" stays "31" (contract 2.3). Kept as stored, and never checked again.
+        if (old is not None and not moved and fy_of(day) == fy_of(old.invoice_date)
+                and old.invoice_number.strip() in (typed.strip(), number)):
+            number = old.invoice_number
         else:
-            number = checked_number(business, day, data["invoice_number"], exclude_invoice=old.pk if old else None)
+            number = checked_number(business, day, typed, exclude_invoice=old.pk if old else None)
         replaces = data["replaces"] if old is None else old.replaces
         if old is None and replaces is not None:
             replaces = _remade(replaces).pk
@@ -285,10 +322,22 @@ def save_bill(data, user, invoice=None):
              "rate": li["rate"], "unit": li["unit"], "note": li["note"],
              "gst_tax_rate": normalize_rate(li["gst_percent"], assume="percent")}
             for li in data["lines"]], source="api")
+        too_big = _too_big(lines)
+        if too_big:
+            raise ValidationError({"lines": too_big})
         if total > MOST:
             raise ValidationError({"lines": ["These items come to more than one bill can hold. Split them into two bills."]})
         bill.total_amount = total
         if old is not None:
+            after, stored = _audit_values(bill), lines_of([old])[old.pk]
+            changed = {f for f in EDIT_FIELDS if after[f] != before[f]}
+            if len(stored) != len(lines) or any(getattr(new, f) != getattr(was, f)
+                                                for new, was in zip(lines, stored, strict=True) for f in LINE_COLUMNS):
+                changed.add("lines")
+            if not changed:
+                # Nothing changed: nothing is written or logged, no cache cleared, and the bill answers as it is
+                # (contract 2.3), so an edit saved unchanged never asks for a corrected bill to be sent.
+                return Invoice.objects.sales().select_related("customer", "business").get(pk=old.pk)
             stale = LineItem.objects.filter(invoice=bill)
             stale._raw_delete(stale.db)  # no per-line signal; the total is set above
         save_number(bill)
@@ -298,9 +347,7 @@ def save_bill(data, user, invoice=None):
             paper = f" · From the paper bill book, dated {day_text(day)}" if bill.paper else ""
             log(bill, user, "created", f"{customer.name} · {inr(total)}{paper}", snapshot=v2_snapshot(bill))
         else:
-            changes = _changes(before, _audit_values(bill), EDIT_FIELDS)
-            log(bill, user, "updated", f"Updated {', '.join(changes)}" if changes else "Updated the lines",
-                changes=changes or None)
+            log(bill, user, "updated", _changed_words(changed), changes=_changes(before, after, EDIT_FIELDS) or None)
     return Invoice.objects.sales().select_related("customer", "business").get(pk=bill.pk)
 
 

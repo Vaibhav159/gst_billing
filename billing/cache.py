@@ -24,6 +24,7 @@ after them.
 """
 
 import logging
+from contextlib import suppress
 
 from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS
@@ -60,6 +61,14 @@ def _queued():
         return None, set()
 
 
+def _waiting_calls(queue):
+    """How many calls wait in the innermost open block; None outside a transaction, or when it can't tell."""
+    try:
+        return len(queue[-1]["cbs"]) if queue else None
+    except Exception:
+        return None
+
+
 def invalidate(*models):
     """Drop cacheops' cached queries for `models`.
 
@@ -79,10 +88,13 @@ def invalidate(*models):
         for model in models:
             if model in waiting:
                 continue
-            asked = len(queue[-1]["cbs"]) if queue else None
+            asked = _waiting_calls(queue)
             invalidate_model(model)
-            if queue and len(queue[-1]["cbs"]) > asked:  # queued for the commit, not run now
-                queue.push((_Waiting(model), (), {}))
-                waiting.add(model)
+            # The dedupe's own bookkeeping, kept apart: if it fails, a later ask clears again, and no model misses its
+            # clear now.
+            with suppress(Exception):
+                if asked is not None and _waiting_calls(queue) > asked:  # queued for the commit, not run now
+                    queue.push((_Waiting(model), (), {}))
+                    waiting.add(model)
     except Exception:
         logger.warning("cacheops invalidation failed", exc_info=True)

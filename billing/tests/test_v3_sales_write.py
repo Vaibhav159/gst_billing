@@ -10,7 +10,7 @@ from unittest.mock import patch
 from cacheops.conf import prepare_profiles
 from cacheops.conf import settings as cacheops_settings
 from django.db import connection
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -166,6 +166,20 @@ class CreateTest(TestCase):
         self.assertEqual((r.data["notes"], r.data["lines"][0]["product_name"], r.data["lines"][0]["note"]),
                          ("Order 77", "Gold Ring", "Hallmarked"))
 
+    def test_the_paper_flag_in_words(self):
+        for value in ("maybe", None, [], 2):
+            with self.subTest(paper=value):
+                self.assertEqual(self.make(paper=value).data, {"paper": ["Say whether the bill is from the paper bill book."]})
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_a_bill_made_again_reads_the_cancelled_one_under_its_row_lock(self):
+        # Two saves at once can't both make it again: the second waits for the first, then finds it made.
+        old = sale(self.kgh, self.anil, "KGH/2026-27/19", "2026-10-01", status=BILL_CANCELLED)
+        with CaptureQueriesContext(connection) as seen:
+            self.assertEqual(self.make(replaces=old.pk).status_code, 201)
+        locked = [q["sql"] for q in seen.captured_queries if "FOR UPDATE" in q["sql"] and f"= {old.pk}" in q["sql"]]
+        self.assertEqual(len(locked), 1, [q["sql"][:160] for q in seen.captured_queries])
+
     def test_ids_that_arent_plain_digits_name_nothing(self):
         # Ruling 1A-5: 1.5 isn't firm 1, true isn't 1, and 0 or -1 is no bill to make again.
         customer = "Choose who this bill is for. Pick Walk-in customer for a counter sale."
@@ -185,6 +199,10 @@ class CreateTest(TestCase):
         huge = {**RING, "quantity": "9999999.999", "rate": "999999999.999"}
         self.assertEqual(self.make(lines=[huge]).json()["lines"]["0"],
                          {"rate": ["This item comes to more than one bill can hold. Check the weight and the rate."]})
+        # The words follow the unit, as the quantity's do (review fix 1): pieces have no weight.
+        self.assertEqual(self.make(lines=[RING, {**CHAIN, "quantity": "9999999", "rate": "999999999"}]).json()["lines"],
+                         {"1": {"rate": [("This item comes to more than one bill can hold. Check the number of pieces "
+                                          "and the rate.")]}})
         big = {**RING, "quantity": "1", "rate": "300000000"}  # ₹30.9 crore a line: its amount and its tax fit
         self.assertEqual(self.make(lines=[big] * 4).data,
                          {"lines": ["These items come to more than one bill can hold. Split them into two bills."]})
@@ -285,7 +303,7 @@ class UpdateTest(TestCase):
         self.owner.post(reverse("sale-sent", args=[self.bill.pk]), {"via": "whatsapp"}, format="json")
         r = self.put(payment_mode="cash")
         newest = r.data["history"]["activity"][0]
-        self.assertEqual((newest["action"], newest["details"]), ("updated", "Updated payment_mode"))
+        self.assertEqual((newest["action"], newest["details"]), ("updated", "Changed the payment"))
         self.assertGreater(datetime.fromisoformat(newest["at"]), datetime.fromisoformat(r.data["sent"]["last_at"]))
         self.assertEqual([a["action"] for a in r.data["history"]["activity"]], ["updated", "sent", "updated"])
 
@@ -317,6 +335,112 @@ class UpdateTest(TestCase):
         self.assertEqual((r.data["interstate"], r.data["igst"], r.data["cgst"], r.data["total_amount"]),
                          (True, "2411.90", "0.00", "82808.71"))
         self.assertEqual(set(LineItem.objects.filter(invoice=self.bill).values_list("customer_id", flat=True)), {mumbai.pk})
+
+    def test_an_unchanged_number_in_digits_is_kept(self):
+        # Review fix 1: the form sends the stored number back as it is. A v2 bill numbered "31", dated on or after the
+        # firm's paper_full_number_from, keeps "31" (contract 2.3) and isn't checked: never renumbered KGH/2026-27/31,
+        # and never refused because another bill holds that.
+        v2 = sale(self.kgh, self.anil, "31", "2026-10-03")
+        r = self.owner.put(reverse("sale-detail", args=[v2.pk]), {
+            "business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "31", "invoice_date": "2026-10-03",
+            "payment_mode": "bank", "lines": [RING]}, format="json")
+        self.assertEqual((r.status_code, r.data["invoice_number"]), (200, "31"))
+        self.assertNotIn("invoice_number", AuditLog.objects.get(action="updated", entity_id=v2.pk).changes)
+        held = sale(self.kgh, self.anil, "32", "2026-10-03")
+        sale(self.kgh, self.anil, "KGH/2026-27/32", "2026-10-04")
+        r = self.owner.put(reverse("sale-detail", args=[held.pk]), {
+            "business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": " 32 ", "invoice_date": "2026-10-03",
+            "payment_mode": "bank", "lines": [RING]}, format="json")
+        self.assertEqual((r.status_code, r.data["invoice_number"]), (200, "32"))
+        # Typed as digits, a number stored in the firm's format is the same number: a v2 twin in another case, which
+        # the check would name, doesn't stop the edit.
+        full = sale(self.kgh, self.anil, "KGH/2026-27/33", "2026-10-03")
+        sale(self.kgh, self.anil, "kgh/2026-27/33", "2026-10-04")
+        r = self.owner.put(reverse("sale-detail", args=[full.pk]), {
+            "business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "33", "invoice_date": "2026-10-03",
+            "payment_mode": "bank", "lines": [RING]}, format="json")
+        self.assertEqual((r.status_code, r.data["invoice_number"]), (200, "KGH/2026-27/33"))
+
+    def test_an_edit_that_changes_nothing_writes_nothing(self):
+        # Review fix 2: a PUT with the header and the lines as they are stored writes nothing, logs nothing and clears
+        # no cache, and answers the bill as it is (contract 2.3). An edit logged for nothing made 1B's saved panel ask
+        # for a corrected bill to be sent.
+        self.assertEqual(self.put().status_code, 200)  # a real edit first
+        lines = list(LineItem.objects.filter(invoice=self.bill).values_list("pk", flat=True))
+        with patch("billing.services.sales.invalidate") as invalidate, CaptureQueriesContext(connection) as seen:
+            r = self.put()
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.json(), self.owner.get(reverse("sale-detail", args=[self.bill.pk])).json())
+        self.assertEqual(list(LineItem.objects.filter(invoice=self.bill).values_list("pk", flat=True)), lines)
+        self.assertEqual(AuditLog.objects.filter(action="updated", entity_id=self.bill.pk).count(), 1)
+        invalidate.assert_not_called()
+        self.assertEqual([q["sql"] for q in seen.captured_queries
+                          if q["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))], [])
+        # A line as stored but typed again, the number and spaces as stored: still nothing.
+        r = self.put(invoice_number=" INV 7/old ", lines=[{**RING, "quantity": 12.345, "gst_percent": "3.0"}])
+        self.assertEqual(AuditLog.objects.filter(action="updated", entity_id=self.bill.pk).count(), 1)
+
+    def test_an_edits_words_say_what_changed(self):
+        # Ruling 1A-41: in words, in this order: the number, the date, the customer, the firm, the payment, the place
+        # of supply, the note, the items, the total. `changes` keeps v2's old -> new for its log and Undo.
+        def said(**more):
+            self.assertEqual(self.put(**more).status_code, 200)
+            entry = AuditLog.objects.filter(action="updated", entity_id=self.bill.pk).latest("pk")
+            return entry.details, sorted(entry.changes or {})
+
+        self.assertEqual(said(), ("Changed the payment, the items and the total", ["payment_mode", "total_amount"]))
+        self.assertEqual(said(notes="Hallmarked"), ("Changed the note", ["notes"]))
+        self.assertEqual(said(notes="Hallmarked", lines=[{**RING, "product_name": "Gold Ring 22K (plain)"}]),
+                         ("Changed the items", []))
+        # Any one thing a line stores is a change of the items, its figures the same or not.
+        line = {**RING, "product_name": "Gold Ring 22K (plain)"}
+        for change in ({"note": "Hallmarked 916"}, {"unit": "g"}, {"hsn_code": "7113"}):
+            with self.subTest(**change):
+                line = {**line, **change}
+                self.assertEqual(said(notes="Hallmarked", lines=[line]), ("Changed the items", []))
+                stored = LineItem.objects.get(invoice=self.bill)
+                self.assertEqual(getattr(stored, next(iter(change))), next(iter(change.values())))
+        mo = firm("MEERA ORNAMENTS", gstin="08AAAAA0000A1Z5", invoice_prefix="MO", paper_full_number_from=date(2026, 4, 1))
+        hemant = buyer("Hemant Dave")
+        self.assertEqual(said(business=mo.pk, customer=hemant.pk, invoice_number="9", invoice_date="2026-10-01",
+                              place_of_supply="24", payment_mode="cash", notes="", lines=[CHAIN]),
+                         (("Changed the number, the date, the customer, the firm, the payment, the place of supply, the "
+                           "note, the items and the total"),
+                          ["business", "customer", "invoice_date", "invoice_number", "notes", "payment_mode",
+                           "place_of_supply", "total_amount"]))
+
+    def test_a_blank_place_is_the_rule_as_null_is(self):
+        # Review fix 1 (minor 6): a v2 bill whose place_of_supply holds "" has no place chosen, so an edit that doesn't
+        # touch it logs no place change.
+        Invoice.objects.filter(pk=self.bill.pk).update(place_of_supply="")
+        self.assertEqual(self.put().status_code, 200)
+        self.assertEqual(set(AuditLog.objects.get(action="updated", entity_id=self.bill.pk).changes),
+                         {"payment_mode", "total_amount"})
+
+    def test_moving_out_of_a_filed_month_by_date_or_by_firm(self):
+        # The old month is checked as well as the new (contract 2.3, 409 month_closed: "the old and the new month").
+        FiledPeriod.objects.create(business=self.kgh, year=2026, month=9)
+        filed = sale(self.kgh, self.anil, "KGH/2026-27/3", "2026-09-10")
+        mo = firm("MEERA ORNAMENTS", gstin="08AAAAA0000A1Z5", invoice_prefix="MO", paper_full_number_from=date(2026, 4, 1))
+        body = {"business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "KGH/2026-27/3",
+                "invoice_date": "2026-10-01", "lines": [RING]}
+        for more in ({}, {"business": mo.pk, "invoice_number": "3", "invoice_date": "2026-09-10"}):
+            with self.subTest(**more):
+                r = self.owner.put(reverse("sale-detail", args=[filed.pk]), {**body, **more}, format="json")
+                self.assertEqual((r.status_code, r.data["code"]), (409, "month_closed"))
+                self.assertIn("September 2026 is filed and locked for KIRAN GOLD HOUSE", r.data["detail"])
+
+    def test_a_number_dated_into_another_fy_is_checked_there(self):
+        # The same number in another FY is a new number of that FY's series: its bin and Rule 46 apply.
+        bill = sale(self.kgh, self.anil, "5", "2026-04-02")
+        bin_bill(sale(self.kgh, self.anil, "5", "2026-03-20"), None, "Entered twice")  # FY 2025-26's 5, in the bin
+        r = self.owner.put(reverse("sale-detail", args=[bill.pk]), {
+            "business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "5", "invoice_date": "2026-03-31",
+            "lines": [RING]}, format="json")
+        self.assertEqual((r.status_code, r.data["code"]), (409, "number_deleted"))
+        r = self.put(invoice_date="2026-03-31")  # "INV 7/old" from before the rules: FY 2025-26 can't take it
+        self.assertEqual(r.data, {"invoice_number": [
+            'Use only letters, digits, "-" and "/" (GST rule 46). Spaces and other marks aren\'t allowed.']})
 
     def test_a_missing_bill_or_a_purchase_is_a_404(self):
         purchase = sale(self.kgh, self.anil, "P-1", "2026-10-02", kind="inward")
@@ -402,6 +526,16 @@ class EwayAndHeadsTest(TestCase):
                                  "15.00" if lines == 1 else "300.00")
             asked.append(len(seen.captured_queries))
         self.assertEqual(asked[0], asked[1])
+
+    def test_fixing_the_heads_clears_v2s_cached_lines(self):
+        # bulk_update sends no signal: without the clear, v2 would show the old heads for 30 minutes (Ruling 1A-34).
+        LineItem.objects.filter(invoice=self.bill).update(cgst=0, sgst=0, igst=300)
+        with patch("billing.services.sales.invalidate") as invalidate:
+            self.assertEqual(self.owner.post(reverse("sale-fix-heads", args=[self.bill.pk])).status_code, 200)
+        invalidate.assert_called_once_with(LineItem)
+        with patch("billing.services.sales.invalidate") as invalidate:  # nothing to move: nothing written, no clear
+            self.owner.post(reverse("sale-fix-heads", args=[self.bill.pk]))
+        invalidate.assert_not_called()
 
     def test_heads_already_right_change_nothing(self):
         r = self.owner.post(reverse("sale-fix-heads", args=[self.bill.pk]))
@@ -510,7 +644,8 @@ class SaveQueriesTest(TestCase):
 
         def asked(send, url, lines, number):
             body = {"business": kgh.pk, "customer": anil.pk, "invoice_number": number, "invoice_date": "2026-10-08",
-                    "payment_mode": "cash", "lines": [{**RING, "rate": str(6000 + n)} for n in range(lines)]}
+                    "payment_mode": "cash" if send == owner.post else "bank",  # the edit changes something
+                    "lines": [{**RING, "rate": str(6000 + n)} for n in range(lines)]}
             with CaptureQueriesContext(connection) as seen:
                 r = send(url, body, format="json")
             self.assertIn(r.status_code, (200, 201), r.data)

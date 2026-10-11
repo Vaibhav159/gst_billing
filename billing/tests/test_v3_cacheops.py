@@ -285,6 +285,22 @@ class OneClearPerTransactionTest(TransactionTestCase):
         self.assertEqual(self.scanned(redis), ["billing_invoice"])
         self.assertEqual(set(LineItem.objects.filter(invoice=bill).values_list("customer_id", flat=True)), {rathore.pk})
 
+    def test_a_marker_that_cant_be_kept_still_clears_every_model(self):
+        # Review fix 1: the bookkeeping is the dedupe's only; when it fails, each model still gets its clear.
+        from cacheops.transaction import TransactionState
+
+        push = TransactionState.push
+
+        def failing(state, item):
+            if type(item[0]).__name__ == "_Waiting":
+                raise AttributeError("no push here")
+            return push(state, item)
+
+        with self.redis() as redis, patch.object(TransactionState, "push", failing):
+            with transaction.atomic():
+                invalidate(Invoice, LineItem)
+            self.assertEqual(self.scanned(redis), ["billing_invoice", "billing_lineitem"])
+
     def test_a_clear_waits_for_the_commit_and_goes_with_a_rolled_back_savepoint(self):
         with self.redis() as redis:
             invalidate(Invoice)  # outside a transaction: at once

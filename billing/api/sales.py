@@ -8,7 +8,6 @@ permission key in v3_actions; V3Permission refuses the rest.
 import re
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
-from types import SimpleNamespace
 
 from django.db.models import Q
 from django.http import Http404
@@ -33,18 +32,10 @@ from billing.fy import fy_label, fy_of, fy_range
 from billing.models import BinnedInvoice, Business, Customer, Invoice
 from billing.params import PICK_A_FIRM, date_param, firm_param, fy_param, id_param, month_param, text_param
 from billing.period_lock import closed_months
-from billing.services.bill_reads import (
-    Reads,
-    bill_detail,
-    bill_rows,
-    facets,
-    filter_bills,
-    line_taxable,
-    ordered,
-    summary,
-)
+from billing.services.bill_reads import Reads, bill_detail, bill_rows, facets, filter_bills, ordered, summary
 from billing.services.bin import bin_bill, bin_row, live_bin, restore_from_bin
 from billing.services.sales import (
+    LINE_MOST,
     MOST,
     cancel_bill,
     mobile_of,
@@ -56,7 +47,7 @@ from billing.services.sales import (
     save_eway,
     sent_block,
 )
-from billing.tax_rules import GST_SLABS, to_paise
+from billing.tax_rules import GST_SLABS
 from billing.text import person, stamp
 
 from .permissions import V3Permission
@@ -198,8 +189,6 @@ WEIGHED = ("kg", "ct", "oz", "tola")
 PER = {"gms": "gram", "g": "gram", "kg": "kg", "ct": "carat", "oz": "ounce", "tola": "tola", "pcs": "piece",
        "nos": "piece", "unit": "unit", "mtr": "metre", "ltr": "litre", "ml": "ml", "box": "box", "pair": "pair",
        "set": "set", "dozen": "dozen"}
-# The most a quantity or a tax head holds (numeric(10, 3)); MOST is a rate's, a line's amount's and a bill's total's.
-LINE_MOST = Decimal("9999999.999")
 ADD_ONE = "Add at least one item: pick a product, then type its weight."
 
 
@@ -235,7 +224,7 @@ class Lines(serializers.ListSerializer):
 
 class LineSerializer(serializers.Serializer):
     """One line as sent (contract 2.3). Its figures come as text or JSON numbers; validate() reads them in the words
-    of the line's unit."""
+    of the line's unit. Whether the line the builder makes of them fits its columns is save_bill's to say."""
 
     product_name = Text("Type the item's name.", long="Keep the item's name to 255 characters.", max_length=255)
     hsn_code = TypedNumber()
@@ -263,13 +252,6 @@ class LineSerializer(serializers.Serializer):
                                   "Type the weight, like 1.250." if unit in WEIGHED else "Type how many pieces."]
         if rate is None or rate <= 0:
             errors["rate"] = [f"Type the rate per {PER[unit]}."]
-        elif not errors:
-            # The line as the builder (billing.services.line_items) will work it out: its amount and its tax, all of
-            # it on one head when inter-state, must fit their columns.
-            taxable = line_taxable(SimpleNamespace(quantity=quantity, rate=rate))
-            tax = to_paise(taxable * percent / 100)
-            if taxable + tax > MOST or tax > LINE_MOST:
-                errors["rate"] = ["This item comes to more than one bill can hold. Check the weight and the rate."]
         if errors:
             raise serializers.ValidationError(errors)
         return {**attrs, "hsn_code": attrs["hsn_code"].strip(), "gst_percent": format((percent + 0).normalize(), "f"),
@@ -299,7 +281,7 @@ class SaleSerializer(serializers.Serializer):
     notes = Text("Keep the note to 500 characters.", max_length=500, required=False, allow_blank=True, allow_null=True,
                  default="")
     paper = serializers.BooleanField(required=False, default=False, error_messages=dict.fromkeys(
-        ("invalid", "null"), "Say whether the bill is from the paper bill book: true or false."))
+        ("invalid", "null"), "Say whether the bill is from the paper bill book."))
     replaces = serializers.IntegerField(required=False, allow_null=True, default=None, error_messages=dict.fromkeys(
         ("invalid", "max_string_length"), "Only a cancelled bill can be made again."))
     lines = LineSerializer(many=True, error_messages=dict.fromkeys(("required", "null"), ADD_ONE))
