@@ -61,18 +61,20 @@ def test_sql_totals_round_each_stored_head_before_adding_and_count_bills_once(sh
     assert facets["credit_months"] == [{"month": "2026-10", "bills": 1, "credit": "0.18"}]
 
 
-@pytest.mark.parametrize("value,paise", [("0.015", "0.02"), ("1.005", "1.01")])
-def test_sql_line_rounding_is_half_up_on_every_database(shop, value, paise):
+@pytest.mark.parametrize("quantity,rate,taxable,head,paise", [
+    ("1.5", "0.15", "0.23", "0.015", "0.02"), ("1.5", "0.29", "0.44", "1.005", "1.01")])
+def test_sql_line_rounding_is_exact_half_up_on_sqlite_and_postgres(shop, quantity, rate, taxable, head, paise):
+    # SQLite multiplies floats: 1.5 x 0.15 is 0.22499..., and its ROUND takes 1.005 down.
     business, supplier = shop
     bill = sale(business, supplier, "HALF-2", date(2026, 10, 1), kind="inward")
     LineItem.objects.filter(invoice=bill).delete()
     LineItem.objects.create(invoice=bill, customer=supplier, product_name="Old silver", hsn_code="7106",
-        quantity=Decimal(value), rate=Decimal("1"), cgst=Decimal(value), sgst=Decimal(value), igst=Decimal("0"),
-        amount=Decimal(value), gst_tax_rate=Decimal("0.03"), unit="gms")
+        quantity=Decimal(quantity), rate=Decimal(rate), cgst=Decimal(head), sgst=Decimal(head), igst=Decimal("0"),
+        amount=Decimal(taxable), gst_tax_rate=Decimal("0.03"), unit="gms")
     summary = purchase_summary(purchase_queryset())
     tax = str(Decimal(paise) * 2)
     assert (summary["taxable"], summary["cgst"], summary["sgst"], summary["tax"], summary["credit"]) == (
-        paise, paise, paise, tax, tax)
+        taxable, paise, paise, tax, tax)
 
 
 def test_summary_credit_follows_filtered_bills_even_when_their_claim_is_in_next_fy(shop):

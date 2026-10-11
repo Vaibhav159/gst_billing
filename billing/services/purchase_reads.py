@@ -133,6 +133,29 @@ class Paise(Func):
         return compiler.compile(Round(self.source_expressions[0], 2))
 
 
+def _sqlite_line_paise(quantity, rate):
+    if quantity is None or rate is None:
+        return None
+    return float((Decimal(str(quantity)) * Decimal(str(rate))).quantize(PAISA, ROUND_HALF_UP))
+
+
+class LinePaise(Func):
+    """quantity x rate in exact decimals, then Paise's half-up rounding."""
+    function = "v3_line_paise"
+    output_field = MONEY_SQL
+    arity = 2
+
+    def as_sqlite(self, compiler, connection, **extra_context):
+        # Multiplying SQLite floats first makes 1.5 x 0.15 0.22499..., which rounds down.
+        connection.ensure_connection()
+        connection.connection.create_function(self.function, 2, _sqlite_line_paise, deterministic=True)
+        return Func.as_sql(self, compiler, connection, **extra_context)
+
+    def as_sql(self, compiler, connection, **extra_context):
+        quantity, rate = self.source_expressions
+        return compiler.compile(Round(quantity * rate, 2))
+
+
 def _rounded_tax():
     return Paise(F("cgst")) + Paise(F("sgst")) + Paise(F("igst"))
 
@@ -416,7 +439,7 @@ def purchase_summary(qs, lines=None):
         bills=Count("pk"), total_amount=Sum("total_amount"), credit=Sum("_claimed"))
     line_rows = uncached(LineItem).filter(invoice_id__in=qs.order_by().values("pk"))
     total = line_rows.aggregate(
-        taxable=Sum(Paise(F("quantity") * F("rate")), output_field=MONEY_SQL),
+        taxable=Sum(LinePaise(F("quantity"), F("rate")), output_field=MONEY_SQL),
         **{head: Sum(Paise(F(head)), output_field=MONEY_SQL) for head in HEADS})
     total = {key: value or ZERO for key, value in total.items()}
     total["tax"] = sum((total[head] for head in HEADS), ZERO)
