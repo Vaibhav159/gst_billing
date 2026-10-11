@@ -352,6 +352,26 @@ class SalesListTest(TestCase):
                 self.get(fy="2026-27", **params)
         self.assertEqual(loads, [])
 
+    def test_a_facets_request_reads_the_fy_once(self):
+        # Ruling 1A-39: the facets' check view reads the firm's FY numbers and its active bills' lines; the page's twins
+        # and lines and the summary use what it read, and answer as they do without the facets. A page can hold bills
+        # the facets don't read (cancelled, or of another FY), and a list of every year has a summary they don't
+        # cover: those are read as before.
+        fy = {"fy": "2026-27"}
+        for params, reads in (({**fy, "business_id": self.kgh.pk, "facets": "1", "page": "1", "page_size": "1"}, (1, 1)),
+                              ({**fy, "business_id": self.kgh.pk, "facets": "1", "q": "Anil"}, (1, 2)),
+                              ({**fy, "facets": "1"}, (1, 2)),
+                              ({"business_id": self.kgh.pk, "facets": "1"}, (2, 3))):
+            with self.subTest(params=params), patch.object(timezone, "localdate", return_value=date(2026, 10, 9)):
+                with CaptureQueriesContext(connection) as seen:
+                    shown = self.get(**params)
+                sqls = [q["sql"] for q in seen.captured_queries]
+                numbers = [sql for sql in sqls if '"billing_invoice"."invoice_number" AS "invoice_number"' in sql]
+                lines = [sql for sql in sqls if 'FROM "billing_lineitem"' in sql]
+                self.assertEqual((len(numbers), len(lines)), reads)
+                alone = self.get(**{k: v for k, v in params.items() if k != "facets"})
+                self.assertEqual((shown["results"], shown["summary"]), (alone["results"], alone["summary"]))
+
     def test_itax_finds_a_business_without_an_address(self):
         noaddr = Customer.objects.create(name="Desai Gems", gst_number=f" {GOOD_GSTIN} ")
         sale(self.mo, noaddr, "22", "2026-09-08", line(rate="1000"))
@@ -532,6 +552,24 @@ class SalesDetailTest(TestCase):
         self.assertEqual([d["id"] for d in self.get(twin.pk).data["duplicates"]], [self.bill.pk, spaced.pk])
         rows = self.client.get(reverse("sale-list"), {"dups": "1"}).data["results"]
         self.assertEqual({row["id"] for row in rows}, {self.bill.pk, twin.pk, spaced.pk})
+
+    def test_the_page_asks_only_for_numbers_with_its_number_part(self):
+        # Ruling 1A-39: the database narrows the firm's FY to the numbers that contain the bill's number part, and
+        # _number_key still decides, as in the list's duplicate check (test_the_same_number_twice). A number without a
+        # number part in plain digits (none, or another script's) is looked for among every number of the FY.
+        twin = sale(self.kgh, self.anil, " kgh/2026-27/31", "2026-10-09")
+        for n in (310, 131, 32):
+            sale(self.kgh, self.anil, f"KGH/2026-27/{n}", "2026-10-09")
+        with CaptureQueriesContext(connection) as seen:
+            data = self.get().data
+        self.assertEqual((data["checks"], [d["id"] for d in data["duplicates"]]), (["duplicate"], [twin.pk]))
+        numbers = [q["sql"] for q in seen.captured_queries if '"billing_invoice"."invoice_number" AS "invoice_number"' in q["sql"]]
+        self.assertEqual(len(numbers), 1)
+        self.assertIn("%31%", numbers[0])
+        for number, alike in (("INV-A", "inv-a "), ("KGH/٣١", "kgh/٣١")):
+            with self.subTest(number=number):
+                bill, other = sale(self.kgh, self.anil, number, "2026-10-08"), sale(self.kgh, self.anil, alike, "2026-10-09")
+                self.assertEqual([d["id"] for d in self.get(bill.pk).data["duplicates"]], [other.pk])
 
     def test_a_cancelled_bill(self):
         Invoice.objects.filter(pk=self.bill.pk).update(status=BILL_CANCELLED, cancel_reason="Customer returned it",

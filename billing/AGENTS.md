@@ -76,10 +76,15 @@ shared setup. Config is in `pyproject.toml` under `[tool.pytest.ini_options]`
 - `django-cacheops` caches Business, Customer, Product, Invoice and LineItem
   queries in production (it is off in tests). It can't see a subquery, an
   `Exists` or a `select_related` table change, so v3's server code reads around
-  it: `Invoice.objects.sales()`, or `billing.cache.uncached(Model)` (Ruling 1A-34;
-  `tests/test_v3_cacheops.py` fails on a v3 read that goes through it). Writes
-  must still invalidate for v2's cached reads: `save()` and `delete()` do; call
-  `billing.cache.invalidate()` after a queryset `update()` or a raw delete.
+  it: `Invoice.objects.sales()`, or `billing.cache.uncached(Model)` (Ruling 1A-34).
+  A lazy foreign key (`bill.customer` without `select_related`) and a related
+  manager (`invoice.lineitem_set`) still read through it. Build querysets per
+  request: `tests/test_v3_cacheops.py` turns cacheops on after import, and a
+  queryset built at import keeps no profile there (production doesn't care).
+  That test fails on a cached v3 read only on the paths it runs. Writes must
+  still invalidate for v2's cached reads: `save()` and `delete()` do; call
+  `billing.cache.invalidate()` after a queryset `update()` or a raw delete (it
+  clears each model once per transaction, after the commit).
 - `gst_billing/local.py` contains the prod DSN. `GST_DB=prod` alone is refused;
   it also needs `GST_ALLOW_PROD=1`. Leave both unset.
 

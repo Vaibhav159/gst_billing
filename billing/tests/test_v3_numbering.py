@@ -11,7 +11,9 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.db import DatabaseError, IntegrityError, connection
+from django.db.models import Model
 from django.test import Client, TestCase, TransactionTestCase, skipUnlessDBFeature
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from billing.api.sales import SalesViewSet
@@ -460,6 +462,91 @@ class PaperBookEveryBillTest(TestCase):
         self.assertEqual([(b["invoice_number"], b["counter"]) for b in data["bills"]],
                          [("OPENING", None), ("KGH/2026-27/17", 17), ("KGH/26-27/18", 18), ("KGH/2026-27/19", 19)])
         self.assertEqual((data["entered"], data["runs"], data["missing"]), (4, [[17, 19]], []))
+
+
+class NarrowReadsTest(TestCase):
+    """Ruling 1A-39 (Neon's 5 GB of public transfer a month): v3 reads around the cache, so every byte it reads crosses
+    the wire. The paper book and the number checks read only the columns they use."""
+
+    # Columns neither the paper book nor a number check uses: a query that has one reads whole rows.
+    WIDE = ('"billing_invoice"."notes"', '"billing_invoice"."firm_snapshot"', '"billing_customer"."address"',
+            '"billing_customer"."gst_number"', '"billing_binnedinvoice"."data"')
+
+    def setUp(self):
+        self.client = client_for(person("manoj", *ROLE_GROUPS["viewer"]))
+        self.kgh = firm(invoice_prefix="KGH", paper_full_number_from=date(2026, 4, 1))
+        anil = buyer(address="15 Demo Road", mobile_number="9829041122")
+        sale(self.kgh, anil, "KGH/2026-27/15", "2026-07-10")
+        self.b16 = sale(self.kgh, anil, "KGH/2026-27/16", "2026-08-30", notes="Order 77")
+        sale(self.kgh, anil, "KGH/2026-27/17", "2026-09-02", paper=True)
+        sale(self.kgh, anil, "KGH/2026-27/18", "2026-09-03", status=BILL_CANCELLED, cancel_reason="Customer returned it")
+        sent = sale(self.kgh, anil, "KGH/2026-27/21", "2026-09-04")
+        Invoice.objects.filter(pk=sent.pk).update(sent_at="2026-09-04T10:00:00+05:30")
+        sale(self.kgh, anil, "KGH-20", "2026-10-02")  # an odd shape in a later month
+        bin_bill(sale(self.kgh, anil, "KGH/2026-27/27", "2026-09-24"), None, "Entered twice")
+        bin_bill(sale(self.kgh, anil, "KGH-19", "2026-10-03"), None, "Typo")
+
+    def asked(self, url, **params):
+        with CaptureQueriesContext(connection) as seen:
+            r = self.client.get(reverse(url), {"business_id": self.kgh.pk, **params})
+        self.assertEqual(r.status_code, 200, r.data)
+        return r.data, [q["sql"] for q in seen.captured_queries]
+
+    def test_the_paper_book_reads_the_months_bills_and_the_years_numbers(self):
+        # The month's bills in the columns the book shows, naming their customers; the rest of the FY by number and
+        # date only, which is all `used`, the span and after_months read; the bin without the bills it keeps.
+        data, sqls = self.asked("sale-paper-book", month="2026-09")
+        self.assertEqual([sql for sql in sqls if any(column in sql for column in self.WIDE)], [])
+        self.assertEqual(len([sql for sql in sqls if '"billing_customer"' in sql]), 1)
+        self.assertEqual([(b["invoice_number"], b["customer_name"], b["status"], b["paper"], b["sent"]) for b in data["bills"]],
+                         [("KGH/2026-27/17", "Anil Gupta", "active", True, False),
+                          ("KGH/2026-27/18", "Anil Gupta", "cancelled", False, False),
+                          ("KGH/2026-27/21", "Anil Gupta", "active", False, True)])
+        self.assertEqual([(e["counter"], e["kind"], e["reason"]) for e in data["explained"]],
+                         [(18, "cancelled", "Customer returned it"), (27, "deleted", "Entered twice")])
+        self.assertEqual((data["runs"], data["missing"], data["next"]["counter"], data["after"]),
+                         ([[17, 18], [21, 21], [27, 27]], [22, 23, 24, 25, 26], 22, []))
+        # August's next skips the numbers later months used, a deleted "KGH-19" and an odd "KGH-20" among them.
+        data, _sqls = self.asked("sale-paper-book", month="2026-08")
+        self.assertEqual((data["missing"], data["next"]["counter"], data["after"], data["after_months"]),
+                         ([], 22, [17, 18, 19, 20, 21], ["2026-09", "2026-10"]))
+
+    def test_the_paper_book_never_reads_a_column_later(self):
+        loads = []
+        refresh = Model.refresh_from_db
+
+        def recorded(instance, *args, **kwargs):
+            loads.append((type(instance).__name__, kwargs.get("fields")))
+            return refresh(instance, *args, **kwargs)
+
+        with patch.object(Model, "refresh_from_db", recorded):
+            for month in ("2026-08", "2026-09", "2026-10"):
+                self.asked("sale-paper-book", month=month)
+        self.assertEqual(loads, [])
+
+    def test_the_number_checks_read_numbers_and_the_bill_they_name(self):
+        # Free, in use, deleted, the same number part as a bill or as a deleted bill, a shape problem: each check
+        # compares numbers, and reads a whole bill (its BillRef's columns) only for the one it names.
+        answers = {}
+        for typed in ("35", "kgh/2026-27/16", "27", "KGH-16", "19", ""):
+            with self.subTest(typed=typed):
+                answers[typed], sqls = self.asked("sale-check-number", invoice_date="2026-09-30", invoice_number=typed)
+                self.assertEqual([sql for sql in sqls if any(column in sql for column in self.WIDE)], [])
+        ref16 = {"id": self.b16.pk, "invoice_number": "KGH/2026-27/16", "invoice_date": "2026-08-30",
+                 "customer_name": "Anil Gupta", "status": "active"}
+        self.assertEqual((answers["kgh/2026-27/16"]["code"], answers["kgh/2026-27/16"]["bill"]), ("number_taken", ref16))
+        self.assertEqual((answers["27"]["code"], answers["27"]["binned"]["reason"]), ("number_deleted", "Entered twice"))
+        self.assertEqual(answers["KGH-16"]["same_counter"], ref16)
+        self.assertEqual(answers["19"]["note"], "KGH-19 in the bin has the same number part (19). If it's restored, "
+                                                "customers and your CA may mix them up.")
+        self.assertEqual(answers["35"]["note"], "Numbers 28 to 34 would be skipped. GSTR-1 lists skipped numbers, so only "
+                                                "do this on purpose.")
+        data, sqls = self.asked("sale-next-number", invoice_date="2026-09-30")
+        self.assertEqual(data["counter"], 28)
+        numbers = [sql for sql in sqls if sql.startswith("SELECT") and ('"billing_invoice"' in sql or '"billing_binnedinvoice"' in sql)]
+        self.assertEqual(len(numbers), 2)
+        for sql in numbers:
+            self.assertRegex(sql, r'^SELECT "billing_(invoice|binnedinvoice)"\."invoice_number" AS "invoice_number" FROM')
 
 
 class RenumberAndMoveTest(TestCase):

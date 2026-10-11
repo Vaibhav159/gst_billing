@@ -21,7 +21,7 @@ from billing.fy import fy_label, fy_of, fy_range
 from billing.models import BinnedInvoice, Business, Invoice
 from billing.params import PICK_A_FIRM, date_param, firm_param, fy_param, id_param, month_param, text_param
 from billing.period_lock import closed_months
-from billing.services.bill_reads import bill_detail, bill_rows, facets, filter_bills, ordered, summary
+from billing.services.bill_reads import Reads, bill_detail, bill_rows, facets, filter_bills, ordered, summary
 from billing.services.bin import bin_bill, bin_row, live_bin, restore_from_bin
 from billing.services.sales import cancel_bill, mobile_of, move_bill, record_send, renumber_bill, sent_block
 from billing.text import person, stamp
@@ -153,18 +153,27 @@ class SalesViewSet(viewsets.GenericViewSet):
                   "renumber": "bill.edit", "move": "bill.edit"}
 
     def get_queryset(self):
-        # Built for each request, as sales() reads around cacheops (Ruling 1A-34).
+        # sales() reads around cacheops (Ruling 1A-34). Built for each request for tests/test_v3_cacheops.py, which
+        # turns cacheops on after import: a queryset built at import keeps no cache profile, so nocache() does nothing
+        # on it there. Production imports with cacheops on, where either way would do (billing/cache.py).
         return Invoice.objects.sales().select_related("customer", "business")
 
     def list(self, request):
-        """The bills list: a page of BillRows, the whole filtered set's summary, and the facets when asked (2.1)."""
+        """The bills list: a page of BillRows, the whole filtered set's summary, and the facets when asked (2.1).
+
+        The facets come first: their FY-wide reads (the firm's numbers, the active bills and their lines) serve the
+        page and the summary too, so one request reads them once (Ruling 1A-39).
+        """
         params = request.query_params
         bills = filter_bills(self.get_queryset(), params)
         page = self.paginate_queryset(ordered(bills, params))
-        response = self.get_paginated_response(bill_rows(page))
-        response.data["summary"] = summary(bills, BILL_CANCELLED if params.get("status") == BILL_CANCELLED else BILL_ACTIVE)
-        if params.get("facets") == "1":
-            response.data["facets"] = facets(self.get_queryset(), params)
+        reads = Reads()
+        shown = facets(self.get_queryset(), params, reads) if params.get("facets") == "1" else None
+        response = self.get_paginated_response(bill_rows(page, reads))
+        of = BILL_CANCELLED if params.get("status") == BILL_CANCELLED else BILL_ACTIVE
+        response.data["summary"] = summary(bills, of, reads)
+        if shown is not None:
+            response.data["facets"] = shown
         return response
 
     def retrieve(self, request, pk=None):

@@ -10,7 +10,7 @@ so gaps are never refilled. Bin rows v2's undo already brought back hold no numb
 
 import re
 from calendar import monthrange
-from collections import Counter
+from collections import Counter, namedtuple
 from datetime import date
 from itertools import count, islice
 
@@ -33,6 +33,14 @@ _PREFIX = re.compile(r"[A-Za-z]+")
 _SERIES_SHAPE = re.compile(r"^(?:\d+|[A-Za-z]+/\d{4}-\d{2}/\d+)\s*$")
 # The most "not entered yet" numbers the paper book lists; missing_count says how many in all (Ruling 1A-1).
 LISTED = 500
+# What a bill or deleted bill named in another answer is read in (bill_ref, binned_ref, the refusals' words), and what
+# the paper book shows of the month's bills: since every v3 read crosses the wire to Neon, the rest of the row stays
+# unread (Ruling 1A-39).
+REF_FIELDS = ("invoice_number", "invoice_date", "status", "customer__name")
+BINNED_REF_FIELDS = ("original_id", "invoice_number", "invoice_date", "reason", "deleted_at")
+BOOK_FIELDS = (*REF_FIELDS, "total_amount", "paper", "sent_at", "cancel_reason")
+# A bill of the FY outside the paper book's month: its number and date are all the book reads of it.
+Numbered = namedtuple("Numbered", "invoice_number invoice_date")
 
 
 def counter_of(number):
@@ -100,12 +108,12 @@ def holder(business_id, fy, number, exclude_invoice=None, exclude_bin=None, bins
     number = (number or "").strip()
     if not number:
         return None
-    bills = series_bills(business_id, fy).filter(invoice_number__iexact=number).select_related("customer")
+    bills = series_bills(business_id, fy).filter(invoice_number__iexact=number).select_related("customer").only(*REF_FIELDS)
     if exclude_invoice:
         bills = bills.exclude(pk=exclude_invoice)
     found = bills.first()
     if found is None and bins:
-        binned = series_bin(business_id, fy).filter(invoice_number__iexact=number)
+        binned = series_bin(business_id, fy).filter(invoice_number__iexact=number).only(*BINNED_REF_FIELDS)
         if exclude_bin:
             binned = binned.exclude(pk=exclude_bin)
         found = binned.first()
@@ -190,19 +198,21 @@ def check_number(business, day, typed, exclude_invoice=None):
         return {**out, "code": "number_deleted", "problem": _deleted_words(found, following), "binned": binned_ref(found)}
     counter = out["counter"]
     # The same counter under another spelling ("107" beside "KGH/2026-27/107"): the database narrows by the
-    # number's ending, then the counter decides ("1107" ends the same way).
-    alike = (series_bills(business.pk, fy).filter(invoice_number__endswith=str(counter))
-             .exclude(pk=exclude_invoice).select_related("customer").order_by("invoice_date", "pk"))
-    twin = next((b for b in alike if counter_of(b.invoice_number) == counter), None)
+    # number's ending, then the counter decides ("1107" ends the same way). Numbers only, and the twin's BillRef.
+    alike = (series_bills(business.pk, fy).filter(invoice_number__endswith=str(counter)).exclude(pk=exclude_invoice)
+             .order_by("invoice_date", "pk").values_list("pk", "invoice_number"))
+    twin = next((pk for pk, number in alike if counter_of(number) == counter), None)
     if twin is not None:
+        twin = series_bills(business.pk, fy).select_related("customer").only(*REF_FIELDS).get(pk=twin)
         return {**out, "same_counter": bill_ref(twin),
                 "note": f"{twin.invoice_number} has the same number part ({counter}). Customers and your CA may mix them up."}
     # A deleted bill with that number part ("KGH-18" in the bin) doesn't hold the number, but restored it would read
     # alike: a note only, since a deleted bill has no BillRef (Ruling 1A-30).
-    binned_alike = series_bin(business.pk, fy).filter(invoice_number__endswith=str(counter)).order_by("invoice_date", "pk")
-    binned_twin = next((b for b in binned_alike if counter_of(b.invoice_number) == counter), None)
+    binned_alike = (series_bin(business.pk, fy).filter(invoice_number__endswith=str(counter))
+                    .order_by("invoice_date", "pk").values_list("invoice_number", flat=True))
+    binned_twin = next((number for number in binned_alike if counter_of(number) == counter), None)
     if binned_twin is not None:
-        return {**out, "note": f"{binned_twin.invoice_number} in the bin has the same number part ({counter}). "
+        return {**out, "note": f"{binned_twin} in the bin has the same number part ({counter}). "
                                "If it's restored, customers and your CA may mix them up."}
     if counter > following["counter"]:
         first = following["counter"]
@@ -246,10 +256,14 @@ def paper_book(business, year, month):
     """
     first, last = date(year, month, 1), date(year, month, monthrange(year, month)[1])
     fy = fy_of(first)
-    every = list(series_bills(business.pk, fy).select_related("customer"))
-    every_bin = list(series_bin(business.pk, fy))
-    listed = sorted((b for b in every if first <= b.invoice_date <= last),
+    bills = series_bills(business.pk, fy)
+    # The month's bills in the columns the book shows; the rest of the FY by number and date, all that `used`, the
+    # span and after_months read of it; the bin without the bills it keeps (Ruling 1A-39).
+    listed = sorted(bills.filter(invoice_date__range=(first, last)).select_related("customer").only(*BOOK_FIELDS),
                     key=lambda b: (counter_of(b.invoice_number) or 0, b.invoice_date, b.pk))
+    every = [*listed, *(Numbered(*row) for row in bills.exclude(invoice_date__range=(first, last))
+                        .values_list("invoice_number", "invoice_date"))]
+    every_bin = list(series_bin(business.pk, fy).only(*BINNED_REF_FIELDS))
     month_bills = [b for b in listed if _numbered(b)]
     month_bin = [b for b in every_bin if first <= b.invoice_date <= last and _numbered(b)]
     used = {counter_of(x.invoice_number) for x in (*every, *every_bin) if _numbered(x)}

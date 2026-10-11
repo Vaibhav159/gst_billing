@@ -11,13 +11,16 @@ still runs against the database. TransactionTestCase, not TestCase: inside TestC
 cacheops treats the data the test just wrote as uncommitted and caches nothing, which would hide a cached read.
 """
 
-from contextlib import contextmanager
-from unittest.mock import patch
+from contextlib import contextmanager, suppress
+from unittest.mock import call, patch
 
 from cacheops.conf import prepare_profiles
+from django.db import connection, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from billing.cache import invalidate
 from billing.constants import BILL_CANCELLED
 from billing.gstin import check_digit
 from billing.models import BinnedInvoice, Customer, FiledPeriod, Invoice, LineItem, Product
@@ -106,6 +109,7 @@ class ReadsAroundTheCacheTest(TransactionTestCase):
             (reverse("bin-list"), {"business_id": self.kgh.pk, "q": "27"}),
             (reverse("quick-search"), {"q": "31"}),
             (reverse("quick-search"), {"q": "Gold"}),
+            (reverse("quick-search"), {"q": "Anil"}),  # a customer that matches: their recent bills are read too
         ]
         with cacheops_on() as touched:
             for url, params in reads:
@@ -184,3 +188,96 @@ class WritesInvalidateTest(TestCase):
             li.save()
         invalidate.assert_called_once_with(Invoice)
         self.assertEqual(Invoice.objects.get(pk=bill.pk).total_amount, li.amount)
+
+
+# billing.cache.invalidate() acting as in production; each test replaces Redis (or cacheops' clear) with a mock.
+LIVE = {"CACHEOPS_ENABLED": True, "CACHEOPS_FAKE": False}
+
+
+class ClearsTest(TestCase):
+    """A model-wide clear is a Redis KEYS scan over the whole cache: none a write doesn't need (Task 7's re-review)."""
+
+    def setUp(self):
+        self.owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
+        self.kgh, self.anil = firm(), buyer(mobile_number="9829041122")
+
+    def bill(self, number, lines):
+        return sale(self.kgh, self.anil, number, "2026-09-11", *[line(rate=str(1000 + n)) for n in range(lines)])
+
+    def test_a_bills_delete_resyncs_no_line_and_clears_nothing(self):
+        # v2's resync (billing.signals) keeps a bill's total after a one-off line write. A bill going to the bin takes
+        # its lines with it: no total is left to keep, and cacheops' own delete handlers drop the bill's and its lines'
+        # cached queries. It used to re-read, re-sum and re-write the bill once per line, and ask for a clear each time.
+        asked = []
+        self.owner.get(reverse("sale-list"))  # anything a first request sets up
+        for number, lines in (("1", 1), ("2", 20)):
+            bill = self.bill(number, lines)
+            with override_settings(**LIVE), patch("cacheops.invalidate_model") as clear, \
+                    CaptureQueriesContext(connection) as seen:
+                r = self.owner.delete(reverse("sale-detail", args=[bill.pk]), {"reason": "Entered twice"}, format="json")
+            self.assertEqual(r.status_code, 200, r.data)
+            self.assertEqual(clear.call_args_list, [])
+            asked.append([q["sql"] for q in seen.captured_queries])
+        one, twenty = asked
+        self.assertEqual(len(twenty), len(one))
+        self.assertEqual([sql for sql in twenty if 'SUM("billing_lineitem"."amount")' in sql
+                          or sql.startswith('UPDATE "billing_invoice"')], [])
+
+    def test_a_one_off_line_save_or_delete_still_clears_the_bills_total(self):
+        # The resync stays for what it's for: an admin's or a shell's one-off line write, each asking for a clear.
+        bill = self.bill("4", 2)
+        first, second = LineItem.objects.filter(invoice=bill).order_by("pk")
+        first.amount += 1
+        with override_settings(**LIVE), patch("cacheops.invalidate_model") as clear:
+            first.save()
+        self.assertEqual(clear.call_args_list, [call(Invoice)])
+        self.assertEqual(Invoice.objects.get(pk=bill.pk).total_amount, first.amount + second.amount)
+        with override_settings(**LIVE), patch("cacheops.invalidate_model") as clear:
+            second.delete()
+        self.assertEqual(clear.call_args_list, [call(Invoice)])
+        self.assertEqual(Invoice.objects.get(pk=bill.pk).total_amount, first.amount)
+
+
+class OneClearPerTransactionTest(TransactionTestCase):
+    """cacheops queues a transaction's clears for its commit; billing.cache.invalidate() queues each model once, so the
+    commit scans Redis once per model however often the transaction asked. Real commits here (TransactionTestCase),
+    with Redis a mock that counts the scans."""
+
+    @contextmanager
+    def redis(self):
+        with override_settings(**LIVE), patch("cacheops.invalidation.redis_client") as redis:
+            redis.keys.return_value = []
+            yield redis
+
+    @staticmethod
+    def scanned(redis):
+        """The tables of the KEYS scans made so far."""
+        return [scan.args[0].split(":")[-2] for scan in redis.keys.call_args_list]
+
+    def test_a_v2_edit_that_resaves_20_lines_scans_once(self):
+        # v2's PATCH of a 20-line bill's customer re-saves every line (Invoice._follow_parties), and each line's resync
+        # asks for an Invoice clear: it used to scan 20 times.
+        owner = client_for(person("kailash", *ROLE_GROUPS["owner"]))
+        bill = sale(firm(), buyer(), "1", "2026-09-11", *[line(rate=str(1000 + n)) for n in range(20)])
+        rathore = buyer("Rathore Gems")
+        with self.redis() as redis:
+            r = owner.patch(reverse("invoice-detail", args=[bill.pk]), {"customer": rathore.pk}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.scanned(redis), ["billing_invoice"])
+        self.assertEqual(set(LineItem.objects.filter(invoice=bill).values_list("customer_id", flat=True)), {rathore.pk})
+
+    def test_a_clear_waits_for_the_commit_and_goes_with_a_rolled_back_savepoint(self):
+        with self.redis() as redis:
+            invalidate(Invoice)  # outside a transaction: at once
+            self.assertEqual(self.scanned(redis), ["billing_invoice"])
+            redis.reset_mock()
+            with transaction.atomic():
+                with suppress(RuntimeError), transaction.atomic():
+                    invalidate(LineItem)
+                    raise RuntimeError  # its writes are undone, and so is its clear
+                invalidate(Invoice, LineItem)
+                invalidate(LineItem)
+                with transaction.atomic():
+                    invalidate(Invoice)
+                self.assertEqual(self.scanned(redis), [])  # nothing before the commit
+            self.assertEqual(self.scanned(redis), ["billing_invoice", "billing_lineitem"])

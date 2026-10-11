@@ -11,7 +11,8 @@ from billing.models import Invoice, LineItem
 # Safety net for one-off saves (admin edits, shell fixes). Every bulk path —
 # invoice create/update_line_items, inward capture, CSV/AI/GSTR-2A imports —
 # uses bulk_create/_raw_delete precisely so these never fire per line; they
-# set total_amount themselves from totals they already hold.
+# set total_amount themselves from totals they already hold. A bill's own
+# delete skips them too: its lines go with it.
 
 
 def _resync_invoice_total(invoice):
@@ -33,7 +34,12 @@ def update_invoice_total_on_line_item_save(sender, instance, **kwargs):
 
 
 @receiver(post_delete, sender=LineItem)
-def update_invoice_total_on_line_item_delete(sender, instance, **kwargs):
+def update_invoice_total_on_line_item_delete(sender, instance, origin=None, **kwargs):
+    if isinstance(origin, Invoice):
+        # The bill's own delete, cascading to its lines: no total is left to keep, and cacheops' delete handlers
+        # drop the rows' cached queries. A 20-line bill to the bin used to re-read, re-sum and re-write the bill
+        # 20 times over (Task 7's re-review).
+        return
     # Cascade delete — the invoice went first.
     with contextlib.suppress(Invoice.DoesNotExist):
         _resync_invoice_total(instance.invoice)

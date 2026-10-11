@@ -62,6 +62,16 @@ ITAX_FIELDS = ("status", "payment_mode", "total_amount", "customer__name", "cust
 LINE_FIELDS = ("quantity", "rate", "gst_tax_rate", "cgst", "sgst", "igst", "hsn_code")
 
 
+class Reads:
+    """What one list request has read and its other parts use (Ruling 1A-39: every v3 read crosses the wire to Neon):
+    each firm and FY's numbers, for the duplicate check, and the facets' active bills with their lines (LINE_FIELDS)."""
+
+    def __init__(self):
+        self.numbers = {}  # (firm id, FY) -> [(pk, firm id, date, number)]
+        self.bills = {}  # pk -> a bill the facets read, in CHECK_FIELDS
+        self.lines = {}  # pk -> its lines
+
+
 # ── one bill ──────────────────────────────────────────────────────────────
 
 def line_taxable(li):
@@ -151,25 +161,40 @@ def _number_key(firm, day, number):
     return firm, fy_of(day), (number or "").strip().lower()
 
 
-def _by_number(invoices):
-    """{_number_key: [ids]} of every sale in the firms and FYs of `invoices` (any status): one query."""
+def _number_part(number):
+    """The digits a number ends in, as typed: every number with its _number_key ends in them too, so the database can
+    narrow by them, whatever their case and spaces. "" for a number that doesn't end in 0-9."""
+    found = re.search(r"[0-9]+$", (number or "").strip())
+    return found.group() if found else ""
+
+
+def _by_number(invoices, reads=None, contains=""):
+    """{_number_key: [ids]} of every sale in the firms and FYs of `invoices` (any status): one query, for the pairs
+    `reads` hasn't read yet. `contains`: only numbers containing it (and nothing kept in `reads`)."""
+    pairs = {(inv.business_id, fy_of(inv.invoice_date)) for inv in invoices}
+    known = reads.numbers if reads is not None and not contains else {}
     where = Q()
-    for firm, fy in {(inv.business_id, fy_of(inv.invoice_date)) for inv in invoices}:
+    for firm, fy in pairs - known.keys():
         where |= Q(business_id=firm, invoice_date__range=fy_range(fy))
-    groups = defaultdict(list)
+        known[firm, fy] = []
     if where:
-        for pk, *bill in Invoice.objects.sales().filter(where).values_list(
-                "pk", "business_id", "invoice_date", "invoice_number"):
-            key = _number_key(*bill)
-            if key[2]:
-                groups[key].append(pk)
+        found = Invoice.objects.sales().filter(where)
+        if contains:
+            found = found.filter(invoice_number__icontains=contains)
+        for row in found.values_list("pk", "business_id", "invoice_date", "invoice_number"):
+            known[row[1], fy_of(row[2])].append(row)
+    groups = defaultdict(list)
+    for pk, *bill in (row for pair in pairs for row in known[pair]):
+        key = _number_key(*bill)
+        if key[2]:
+            groups[key].append(pk)
     return groups
 
 
-def duplicated_ids(invoices):
+def duplicated_ids(invoices, reads=None):
     """Ids of the sales whose number another sale of the same firm and FY also has (any status, any case), in the
     firms and FYs of `invoices`."""
-    return {pk for ids in _by_number(invoices).values() if len(ids) > 1 for pk in ids}
+    return {pk for ids in _by_number(invoices, reads).values() if len(ids) > 1 for pk in ids}
 
 
 def _customer_ref(customer):
@@ -195,26 +220,33 @@ def bill_row(invoice, lines, closed, duplicated):
     }
 
 
-def lines_of(invoices, fields=None):
+def lines_of(invoices, fields=None, reads=None):
     """{invoice id: [its lines]} in one query, in the order they were made, read around cacheops (Ruling 1A-34).
 
     `invoices`: bills, or a queryset of them, read as a subquery and never fetched. `fields`: only these columns
-    (Ruling 1A-36); every line's by default.
+    (Ruling 1A-36); every line's by default. `reads`: the lines (in LINE_FIELDS) of the bills the facets read are
+    taken from it, and only the others' are read.
     """
+    out = defaultdict(list)
+    if reads is not None and reads.bills and fields == LINE_FIELDS and not isinstance(invoices, QuerySet):
+        out.update((inv.pk, reads.lines.get(inv.pk, [])) for inv in invoices if inv.pk in reads.bills)
+        invoices = [inv for inv in invoices if inv.pk not in reads.bills]
+        if not invoices:
+            return out
     ids = invoices.values("pk") if isinstance(invoices, QuerySet) else [inv.pk for inv in invoices]
     lines = uncached(LineItem).filter(invoice_id__in=ids).order_by("id")
-    out = defaultdict(list)
     for li in lines.only("invoice", *fields) if fields else lines:
         out[li.invoice_id].append(li)
     return out
 
 
-def bill_rows(invoices):
-    """BillRows for a page of sales (customer and firm joined): three queries however long the page."""
+def bill_rows(invoices, reads=None):
+    """BillRows for a page of sales (customer and firm joined): three queries however long the page, fewer with what
+    the facets read (`reads`)."""
     invoices = list(invoices)
-    lines = lines_of(invoices, LINE_FIELDS)  # a row shows figures, not items
+    lines = lines_of(invoices, LINE_FIELDS, reads)  # a row shows figures, not items
     closed = closed_months({inv.business_id for inv in invoices})
-    twice = duplicated_ids(invoices)
+    twice = duplicated_ids(invoices, reads)
     return [bill_row(inv, lines[inv.pk], closed, inv.pk in twice) for inv in invoices]
 
 
@@ -240,9 +272,11 @@ def _named(invoice, field):
 
 
 def _same_number(invoice):
-    """The other sales with this bill's number in its firm and FY, as the list's duplicate check finds them."""
+    """The other sales with this bill's number in its firm and FY, as the list's duplicate check finds them. The
+    database reads only the numbers that contain the bill's number part (Ruling 1A-39); _number_key still decides."""
     key = _number_key(invoice.business_id, invoice.invoice_date, invoice.invoice_number)
-    ids = [pk for pk in _by_number([invoice]).get(key, []) if pk != invoice.pk]
+    ids = [pk for pk in _by_number([invoice], contains=_number_part(invoice.invoice_number)).get(key, [])
+           if pk != invoice.pk]
     return list(Invoice.objects.sales().filter(pk__in=ids).select_related("customer").order_by("invoice_date", "pk")) if ids else []
 
 
@@ -411,11 +445,11 @@ def filter_bills(bills, params, dates=True):
     return bills
 
 
-def checked_ids(invoices):
-    """Ids of these bills that have a check code: two queries (their lines, the twins). Each bill needs CHECK_FIELDS,
-    customer and firm joined."""
+def checked_ids(invoices, reads=None):
+    """Ids of these bills that have a check code: two queries (their lines, the twins), none for what `reads` holds.
+    Each bill needs CHECK_FIELDS, customer and firm joined."""
     invoices = list(invoices)
-    lines, twice = lines_of(invoices, LINE_FIELDS), duplicated_ids(invoices)
+    lines, twice = lines_of(invoices, LINE_FIELDS, reads), duplicated_ids(invoices, reads)
     return {inv.pk for inv in invoices if bill_checks(inv, lines[inv.pk], inv.pk in twice)}
 
 
@@ -441,13 +475,21 @@ def ordered(bills, params):
     return bills.order_by(*keys)
 
 
-def summary(bills, of):
+def summary(bills, of, reads=None):
     """The list's figures over every bill in the filtered set (not the page): the active bills (counted()), or
-    with status=cancelled the cancelled ones' totals when issued. Three queries."""
+    with status=cancelled the cancelled ones' totals when issued. Three queries; two when the facets read every
+    active bill of the set with its lines (`reads`)."""
     chosen = bills.filter(status=BILL_CANCELLED) if of == BILL_CANCELLED else bills.counted()
-    totals = list(chosen.values_list("total_amount", flat=True))
-    # Every line of the set, as a subquery, in only the columns sums() reads (Rulings 1A-34, 1A-36).
-    lines = uncached(LineItem).filter(invoice__in=chosen.values("pk")).only("quantity", "rate", *HEADS)
+    lines = None
+    if reads is not None and reads.bills and of == BILL_ACTIVE:
+        ids = list(chosen.values_list("pk", flat=True))
+        if all(pk in reads.bills for pk in ids):
+            totals = [reads.bills[pk].total_amount for pk in ids]
+            lines = [li for pk in ids for li in reads.lines.get(pk, [])]
+    if lines is None:
+        totals = list(chosen.values_list("total_amount", flat=True))
+        # Every line of the set, as a subquery, in only the columns sums() reads (Rulings 1A-34, 1A-36).
+        lines = uncached(LineItem).filter(invoice__in=chosen.values("pk")).only("quantity", "rate", *HEADS)
     total = sum((t or ZERO for t in totals), ZERO)
     return {
         "of": of, "bills": len(totals), **figures(sums(lines)), "total_amount": money(total),
@@ -456,10 +498,11 @@ def summary(bills, of):
     }
 
 
-def facets(sales, params):
+def facets(sales, params, reads=None):
     """Month chips, view counts and other years' hits, for the firm and FY whatever else is filtered (part 1 API
     contract, 2.1). The FY's active bills are read once, with their lines, in only the columns the views and checks
-    use: a fixed number of queries."""
+    use: a fixed number of queries. They, their lines and the FY's numbers go into `reads`, for the list's page and
+    summary (Ruling 1A-39)."""
     firm = id_param(params, "business_id", PICK_A_FIRM)
     fy = fy_param(params)
     start, end = fy_range(fy_of(None) if fy is None else fy)
@@ -468,6 +511,8 @@ def facets(sales, params):
     if firm is not None:
         scope = scope.filter(business_id=firm)
     active = list(scope.counted().only(*CHECK_FIELDS))
+    reads = Reads() if reads is None else reads
+    reads.lines, reads.bills = lines_of(active, LINE_FIELDS), {b.pk: b for b in active}
     per_month = Counter((b.invoice_date.year, b.invoice_date.month) for b in active)
     firms = [firm] if firm is not None else list(uncached(Business).values_list("pk", flat=True))
     closed = closed_months(firms)
@@ -481,7 +526,7 @@ def facets(sales, params):
         "unsent_today": sum(b.invoice_date == today and not b.paper and b.sent_at is None for b in active),
         "credit_month": sum(b.payment_mode == "credit" and (b.invoice_date.year, b.invoice_date.month)
                             == (today.year, today.month) for b in active),
-        "check": len(checked_ids(active)),
+        "check": len(checked_ids(active, reads)),
         "cash": sum(b.payment_mode == "cash" and (b.total_amount or ZERO) >= ITAX_LIMIT for b in active),
     }, "elsewhere": []}
     if text_param(params, "q"):

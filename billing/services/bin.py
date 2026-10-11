@@ -18,6 +18,7 @@ from billing.models import AuditLog, BinnedInvoice, Business, Customer, Invoice,
 from billing.numbering import bill_ref, refuse_taken
 from billing.period_lock import assert_sales_open, locked_period_or_none
 from billing.refusals import Refusal
+from billing.services.bill_reads import lines_of
 from billing.services.sales import entity_name, locked_bill, log
 from billing.text import money, person, stamp
 
@@ -25,18 +26,13 @@ from billing.text import money, person, stamp
 RESTORED_FROM = {"bin": "the bin", "audit_log": "the Audit log"}
 
 
-def lines_now(invoice):
-    """The bill's lines as they are now, in the order they were made: read around cacheops (Ruling 1A-34), since a
-    snapshot or a bin row must never keep a stale line."""
-    return list(uncached(LineItem).filter(invoice_id=invoice.pk).order_by("id"))
-
-
 def v2_snapshot(invoice, lines=None):
-    """What v2's audit log keeps for a bill: every field, and its lines (`lines`, else read now) with v2's ten keys."""
+    """What v2's audit log keeps for a bill: every field, and its lines (`lines`, else read now, around cacheops: a
+    snapshot never keeps a stale line) with v2's ten keys."""
     data = snapshot_of(invoice)
     data["line_items"] = [
         {f: (str(getattr(li, f)) if getattr(li, f) is not None else None) for f in V2_LINE_SNAPSHOT_FIELDS}
-        for li in (lines_now(invoice) if lines is None else lines)
+        for li in (lines_of([invoice])[invoice.pk] if lines is None else lines)
     ]
     return data
 
@@ -71,7 +67,7 @@ def bin_bill(invoice, user, reason="", details=None, kind=BinnedInvoice.KIND_DEL
             assert_sales_open(invoice.business_id, invoice.invoice_date, "delete")
         name = entity_name(invoice)
         who = user if user and user.is_authenticated else None
-        lines = lines_now(invoice)
+        lines = lines_of([invoice])[invoice.pk]
         entry = AuditLog.objects.create(
             action="deleted", entity="invoice", entity_id=invoice.pk, entity_name=name, user=who,
             details=details or (f"Deleted invoice: {name}" + (f" · {reason}" if reason else "")),
