@@ -106,7 +106,7 @@ export type PaperBook = {
   explained: PaperBookExplained[]; twice: number[]; after: number[]; after_months: string[];
   next: { counter: number; invoice_number: string; invoice_date: string }; locked: boolean; gstr1_due: string;
 };
-export type ShopSettings = { copies: Copies; show_bank: boolean; share_message: string; updated_at: string | null; updated_by: Person };
+export type ShopSettings = { default_business?: number | null; default_business_name?: string; warnings?: string[]; copies: Copies; show_bank: boolean; share_message: string; updated_at: string | null; updated_by: Person };
 export type CancelResult = { id: number; invoice_number: string; status: "cancelled"; cancel_reason: string; cancelled_at: string; cancelled_by: Person };
 export type RenumberResult = { id: number; invoice_number: string; previous: string };
 export type MoveResult = { id: number; business: number; invoice_number: string; previous: { business: number; invoice_number: string } };

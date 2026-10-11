@@ -1,3 +1,4 @@
+import { BillReference } from "@/core/sales/BillReference";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Building2, ChevronRight, Landmark, MoreHorizontal, MoreVertical, Pencil, ReceiptText, Store, Trash2 } from "lucide-react";
@@ -42,7 +43,7 @@ function Detail({ f }: { f: Firm }) {
   const bank = <Card title="Bank details" subtitle={f.has_bank ? shop.data?.show_bank === false ? "Kept here, but turned off for bills in Settings" : "Printed on every bill, under the totals" : "None yet: bills print without a bank block"} actions={f.has_bank && shop.data?.show_bank === false ? <ButtonLink size="sm" to="/settings" variant="ghost">Settings</ButtonLink> : !f.has_bank && owner ? <ButtonLink size="sm" to={`/firms/${f.id}/edit`} variant="ghost">Add bank details</ButtonLink> : null}>{f.has_bank ? <DL rows={[["Bank", f.bank_name || "None"], ["Account number", f.bank_account_number], ["IFSC", f.bank_ifsc_code || "None"], ["Branch", f.bank_branch_name || "None"]]} /> : null}</Card>;
   const numbering = <Card title="Bill numbers" subtitle="Each firm numbers its own bills, from 1 every financial year"><DL rows={[
     ["Number prefix", f.invoice_prefix || "None (bare numbers)"], ["Numbering", `${f.invoice_prefix ? `${f.invoice_prefix}/${f.numbers.fy}/` : "Bare numbers: "}1, 2, 3…`],
-    ["Last bill this year", f.numbers.last ? <span>{f.numbers.last.invoice_number}<span className="block text-xs text-muted">{date(f.numbers.last.invoice_date)}</span></span> : "None yet"],
+    ["Last bill this year", f.numbers.last ? <span><BillReference bill={f.numbers.last} /><span className="block text-xs text-muted">{date(f.numbers.last.invoice_date)}</span></span> : "None yet"],
     ["Next bill number", <span className="tnum font-semibold text-brand">{f.numbers.next.invoice_number}</span>], ["Paper bills carry the full number from", f.paper_full_number_from ? date(f.paper_full_number_from) : "Not set"], ["Jurisdiction", `Subject to ${f.jurisdiction_printed} jurisdiction`],
   ]} /></Card>;
   const small = <Card title="Signature and declaration" subtitle="At the foot of every bill"><div className="flex flex-col gap-3"><SignaturePreview name={f.name} image={f.signature_url} on={f.signature_on_bills} className={isPhone ? "" : "max-w-[300px]"} /><div><p className="caps">Declaration</p><p className="text-fg2 mt-1">{f.declaration_printed}</p></div></div></Card>;

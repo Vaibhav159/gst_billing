@@ -1,5 +1,5 @@
 import { wireDetail, wireRow } from "./fixtures";
-import { toBillDetail, toBillRow, toBinPage, toNumberCheck, toPaperBook, toSalesPage, toShopSettings } from "./wire";
+import { toBillRef, toBillDetail, toBillRow, toBinPage, toNumberCheck, toPaperBook, toSalesPage, toShopSettings } from "./wire";
 
 test("the contract's bill reads whole: money in paise, quantities and rates as stored, the firm as frozen on the bill", () => {
   expect(toBillDetail(wireDetail())).toEqual({
@@ -17,6 +17,7 @@ test("the contract's bill reads whole: money in paise, quantities and rates as s
       name: "KIRAN GOLD HOUSE", address: "12 Sandbox Bazaar, Jaipur, Rajasthan", gst_number: "08ABCPK1234F1Z5", state_name: "RAJASTHAN", state_code: "08",
       pan_number: "ABCPK1234F", mobile_number: "9000000003", email: "firm3@example.com", bank_name: "Sandbox Bank", bank_account_number: "000000000003",
       bank_ifsc_code: "SBOX0000003", bank_branch_name: "Jaipur", invoice_prefix: "KGH", signature_url: null, frozen: true,
+      short: "", city: "", pin_code: "", signature_on_bills: true, jurisdiction_printed: "", declaration_printed: "",
     },
     lines: [
       { id: 901, product_name: "Gold Ring 22K", hsn_code: "711319", quantity: "12.345", unit: "gms", rate: "6512.500", gst_percent: "3",
@@ -71,7 +72,7 @@ test("an answer with fields left out reads as empty, never a crash", () => {
     summary: { of: "active", bills: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, tax: 0, total_amount: 0, average: null, cancelled: 0 },
   });
   expect(toBinPage(null)).toEqual({ count: 0, next: null, previous: null, results: [] });
-  expect(toShopSettings(undefined)).toEqual({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null });
+  expect(toShopSettings(undefined)).toEqual({ copies: "original", show_bank: true, share_message: "", updated_at: null, updated_by: null, default_business: null, default_business_name: "", warnings: [] });
   // a check answer that doesn't say the number is free isn't read as free (Ruling 1A-27)
   expect(toNumberCheck({})).toEqual({ invoice_number: "", counter: null, code: "unchecked", problem: "", bill: null, binned: null, note: "", same_counter: null, next: null });
 });
@@ -113,4 +114,9 @@ test("the paper book's month reads as the contract sends it, its money in paise"
   // missing lists at most the first 500, and missing_count counts them all (Ruling 1D-3); an answer without the count listed every one
   expect(toPaperBook({ missing: [31, 32], missing_count: 1234 }).missing_count).toBe(1234);
   expect(toPaperBook({ missing: [31, 32] }).missing_count).toBe(2);
+});
+
+test("a deleted BillRef keeps its original id and status", () => {
+  const ref = { id: 205, invoice_number: "KGH/2026-27/33", invoice_date: "2026-10-01", customer_name: "Anil", status: "deleted" };
+  expect(toBillRef(ref)).toEqual(ref);
 });

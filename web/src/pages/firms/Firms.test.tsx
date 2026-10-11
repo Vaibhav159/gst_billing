@@ -68,3 +68,12 @@ test("settings reads numbers without requesting FY aggregates", async () => {
   expect(calls).toHaveLength(1);
   expect(calls[0].params).toEqual({ numbers: 1 });
 });
+
+test.each([false, true])("the highest deleted bill is labelled and links only for the owner (viewer %s)", async (viewer) => {
+  const last = { id: 205, invoice_number: "KGH/2026-27/33", invoice_date: "2026-10-01", customer_name: "Anil", status: "deleted" };
+  server({ "GET firms/3/": reply({ numbers: { ...FIRM_DETAIL.numbers, last } }) });
+  mount([{ path: "/firms/:id", element: <FirmDetail /> }], ["/firms/3"], viewer ? { me: VIEWER } : {});
+  expect(await screen.findByText("Deleted")).toBeInTheDocument();
+  if (viewer) expect(screen.queryByRole("link", { name: "KGH/2026-27/33 · Deleted" })).not.toBeInTheDocument();
+  else expect(screen.getByRole("link", { name: "KGH/2026-27/33 · Deleted" })).toHaveAttribute("href", "/sales/205");
+});

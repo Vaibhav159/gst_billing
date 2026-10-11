@@ -23,7 +23,7 @@ export const MORE_NAV: NavItem[] = [
   { label: "Users and roles", to: "/users", section: "users", icon: ShieldCheck, need: "users.manage" },
   { label: "Backup and restore", to: "/backup", section: "backup", icon: DatabaseBackup, need: "backup.download" },
   { label: "Audit log", to: "/audit", section: "audit", icon: History, need: "audit.view" },
-  { label: "Settings", to: "/settings", section: "settings", icon: SettingsIcon, need: "settings.edit" },
+  { label: "Settings", to: "/settings", section: "settings", icon: SettingsIcon },
 ];
 export const EXPERT_TABS: TabItem[] = [
   { label: "Home", to: "/", tab: "home", icon: Home },

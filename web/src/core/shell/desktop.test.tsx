@@ -249,11 +249,11 @@ test("/ jumps to the page's own search box", async () => {
   expect(box).toHaveValue("");
 });
 
-test("the account menu offers Settings only to someone who can change them, and opens the shortcuts", async () => {
+test("the account menu offers personal Settings to every role, and opens the shortcuts", async () => {
   let view = shell("staff");
   await userEvent.click(screen.getByRole("button", { name: /account/i }));
   expect(await screen.findByRole("menuitem", { name: "Profile and password" })).toBeInTheDocument();
-  expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
   view.unmount();
 
   view = shell();

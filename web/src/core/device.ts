@@ -1,5 +1,5 @@
 import { readStored as read, writeStored as write } from "@/core/storage";
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 export type Theme = "obsidian" | "pearl" | "sapphire" | "ember" | "forest";
 export const THEMES: { value: Theme; label: string }[] = [
@@ -33,7 +33,15 @@ export function useTheme(): [Theme, (t: Theme) => void] {
     applyTheme(t);
     return t;
   });
-  const set = useCallback((t: Theme) => { write(THEME_KEY, t); applyTheme(t); setTheme(t); }, []);
+  useEffect(() => {
+    const changed = (event: Event) => setTheme((event as CustomEvent<Theme>).detail);
+    window.addEventListener("gst3-theme", changed);
+    return () => window.removeEventListener("gst3-theme", changed);
+  }, []);
+  const set = useCallback((t: Theme) => {
+    write(THEME_KEY, t); applyTheme(t); setTheme(t);
+    window.dispatchEvent(new CustomEvent<Theme>("gst3-theme", { detail: t }));
+  }, []);
   return [theme, set];
 }
 

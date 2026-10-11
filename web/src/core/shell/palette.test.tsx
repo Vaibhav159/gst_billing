@@ -338,7 +338,7 @@ test("typing finds the actions and pages it names, as far as the role allows", a
   view.unmount();
   mount("viewer");
   await userEvent.type(screen.getByRole("combobox"), "set");
-  expect(screen.queryByRole("option", { name: /^Settings/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /^Settings/ })).toBeInTheDocument();
 }, 15_000); // three typed words and many role queries: past 5 s on a busy 2-CPU machine
 
 test("Home and End jump to the ends, pointing moves the highlight, and choosing a row closes search and opens its page", async () => {

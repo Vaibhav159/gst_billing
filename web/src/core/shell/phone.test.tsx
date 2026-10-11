@@ -519,6 +519,7 @@ test("offline, a switch says so at once and asks the server nothing", async () =
   const s = server({ prefs: { phoneMode: "expert" } });
   const router = open("/more");
   const button = await screen.findByRole("button", { name: /switch to easy/i });
+  await wait(20); // finish startup reads before simulating a lost connection
   act(() => __setNetState("offline"));
   afterADoubleTap();
   await userEvent.click(button);
@@ -547,17 +548,18 @@ test("More offers only the pages this person's role can open, and says who is si
   server({ prefs: { phoneMode: "expert" } });
   /** Where the page's own links go (the tabs aside). */
   const offered = () => [...document.querySelectorAll("#app-main a")].map((a) => a.getAttribute("href"));
-  const ADMIN = ["/users", "/backup", "/audit", "/settings"];
+  const ADMIN = ["/users", "/backup", "/audit"];
   const STAFF = ["view", "bill.create", "bill.send", "capture", "purchase.create", "purchase.import", "supplier.edit", "customer.edit", "rates.edit", "reports.export"] as const;
   open("/more", stubAuth({ role: "staff", roleLabel: "Counter staff", permissions: [...STAFF] }));
   await screen.findByText("Kailash Mehta · Counter staff");
-  expect(offered()).toEqual(["/purchases", "/purchases/inbox", "/gst", "/reports", "/scan", "/products", "/suppliers", "/firms", "/profile"]);
+  expect(offered()).toEqual(["/purchases", "/purchases/inbox", "/gst", "/reports", "/scan", "/products", "/suppliers", "/firms", "/settings", "/profile"]);
   cleanup();
 
   open("/more", stubAuth({ role: "viewer", roleLabel: "View only", permissions: ["view", "reports.export"] }));
   await screen.findByText("Kailash Mehta · View only");
   expect(offered()).not.toContain("/purchases/inbox");
   expect(offered()).toContain("/products");
+  expect(offered()).toContain("/settings");
   cleanup();
 
   open("/more");

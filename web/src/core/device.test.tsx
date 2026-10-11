@@ -86,3 +86,13 @@ test("useIsPhone is false on a desktop-sized window", () => {
   expect(screen.getByText("false")).toBeInTheDocument();
   act(() => {});
 });
+
+test("Settings and the account menu see the same theme choice immediately", () => {
+  function ThemeControl({ name }: { name: string }) {
+    const [theme, set] = useTheme();
+    return <button aria-label={name} onClick={() => set("pearl")}>{theme}</button>;
+  }
+  render(<><ThemeControl name="Settings theme" /><ThemeControl name="Account theme" /></>);
+  act(() => { screen.getByRole("button", { name: "Settings theme" }).click(); });
+  expect(screen.getByRole("button", { name: "Account theme" })).toHaveTextContent("pearl");
+});

@@ -1,3 +1,5 @@
+import { shopSettingsQuery, toShopSettings } from "./shopSettings";
+export { shopSettingsQuery, useShopSettings } from "./shopSettings";
 // The sales/, bin/ and shop-settings/ endpoints (contract §2, §3, §5) as TanStack Query hooks, each answer read through
 // core/sales/wire.ts into paise-based types. A list that follows a firm asks nothing until the firm is known (firmId !==
 // null), so it never asks for every firm first (part 0 carry); a page's Try again goes through the client
@@ -9,7 +11,7 @@ import { todayIST } from "@/core/format";
 import type { BillDetail, BillInput, BillRow, BillStatus, BinRow, EwayInput, SalesPage, Segment, Sent, ShopSettings } from "@/core/sales/types";
 import {
   toBillDetail, toBinPage, toBinRow, toCancelResult, toFacets, toMoveResult, toNextNumber, toNumberCheck, toPaperBook, toRenumberResult, toSalesPage,
-  toSent, toShopSettings,
+  toSent,
 } from "@/core/sales/wire";
 import type { FirmId } from "@/core/scope";
 import { api } from "./client";
@@ -191,15 +193,6 @@ export function usePaperBook(business: number | null, month: string | null, enab
   });
 }
 
-/** useShopSettings' query, for queryClient.ensureQueryData outside React (plan 1E: a send's PDF reads show_bank). Kept 5 minutes. */
-export const shopSettingsQuery = queryOptions({
-  queryKey: ["shop-settings"], staleTime: 5 * 60_000, queryFn: async ({ signal }) => toShopSettings((await api.get("shop-settings/", { signal })).data),
-});
-/** The shop's settings: default copies, bank details on the bill, the share message (contract §5). */
-export function useShopSettings() {
-  return useQuery(shopSettingsQuery);
-}
-
 /**
  * After any bill write: every bill list and bill, the bin, customers' figures and search results ask again. keep: the
  * bill whose own answer the write brought back (keepBill), already in place, so its page doesn't ask for it again (as
@@ -221,8 +214,18 @@ function keepBill(qc: QueryClient, d: BillDetail) {
 export function useSaveShopSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (patch: Partial<Pick<ShopSettings, "copies" | "show_bank" | "share_message">>) => toShopSettings((await api.put("shop-settings/", patch)).data),
-    onSuccess: (s) => qc.setQueryData(shopSettingsQuery.queryKey, s),
+    mutationFn: async (patch: Partial<Pick<ShopSettings, "copies" | "show_bank" | "share_message" | "default_business">>) => toShopSettings((await api.put("shop-settings/", patch)).data),
+    onMutate: () => qc.cancelQueries({ queryKey: shopSettingsQuery.queryKey }),
+    onSuccess: (saved, patch) => qc.setQueryData<ShopSettings>(shopSettingsQuery.queryKey, (before) => {
+      if (!before) return saved;
+      // Rows save independently. A slower response must not roll another successful row back.
+      const changed = Object.fromEntries(Object.keys(patch).map((key) => [key, saved[key as keyof ShopSettings]]));
+      return { ...before, ...changed,
+        ...("default_business" in patch ? { default_business_name: saved.default_business_name } : {}),
+        ...("share_message" in patch ? { warnings: saved.warnings } : {}),
+        updated_at: saved.updated_at, updated_by: saved.updated_by,
+      };
+    }),
   });
 }
 

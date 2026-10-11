@@ -15,7 +15,7 @@ import { keptDraft } from "@/core/deviceDrafts";
 import { addMonths, monthOf, possessive, todayIST } from "@/core/format";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { useFirms, useScope } from "@/core/scope";
-import { ButtonLink, Card, EmptyState, Page, Skeleton } from "@/core/ui";
+import { Button, ButtonLink, Card, EmptyState, Page, Skeleton } from "@/core/ui";
 import { useView } from "@/core/view";
 import { DesktopForm } from "./DesktopForm";
 import { PAY_KEYS } from "./fields";
@@ -112,7 +112,7 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
   const lookUp = deciding && Boolean(draftId) && !fresher && !local?.gone;
   const unfinished = useUnfinishedBills(lookUp, { fresh: true });
   const listed = lookUp ? unfinished.bills.find((d) => d.id === draftId) : undefined;
-  const { firmId: scopeFirm, ready } = useScope();
+  const { firmId: scopeFirm, ready, defaultFirmId, defaultReady, defaultProblem, retryDefaults } = useScope();
   const today = todayIST();
   const fromId = idParam(params.get("from"));
   const remakeId = idParam(params.get("remake"));
@@ -134,8 +134,13 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
       </Page>
     );
   }
+  const explicitSource = Boolean(draftId && (fresher || listed)) || Boolean(source.data && (remakeId !== null || fromId !== null)) || (paper && firms.some((firm) => firm.id === idParam(params.get("firm"))));
+  if (scopeFirm === "all" && !defaultReady && !explicitSource) {
+    if (!defaultProblem) return <FormLoading title={title} />;
+    return <Page icon={FilePlus2} title={title} back="/sales"><Card><EmptyState title="The default firm couldn't load" actions={<Button onClick={retryDefaults}>Try again</Button>}>{defaultProblem.message}</EmptyState></Card></Page>;
+  }
   const known = (id: number | null) => id !== null && firms.some((x) => x.id === id);
-  const fallback = typeof scopeFirm === "number" && known(scopeFirm) ? { firmId: scopeFirm, firmSource: "scope" as const } : { firmId: firms[0].id, firmSource: "first" as const };
+  const fallback = typeof scopeFirm === "number" && known(scopeFirm) ? { firmId: scopeFirm, firmSource: "scope" as const } : { firmId: defaultFirmId ?? firms[0].id, firmSource: "first" as const };
   const bill = source.data ?? null;
   let start: Start;
   const draft = fresher ? { ...fresher, onDevice: true } : listed;

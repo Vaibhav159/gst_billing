@@ -17,6 +17,7 @@ import { idlePages, lazyPage } from "./lazyPage";
 // Selling's pages load on demand (Ruling 1B-4): code comes as each page opens, or while idle after a real page shows.
 // react-pdf comes later still, with the first PDF made (core/print/make.ts).
 const GstReturns = lazyPage(() => import("@/pages/gst/GstReturns"));
+const SettingsPage = lazyPage(() => import("@/pages/records/Settings"));
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -32,7 +33,7 @@ const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -121,6 +122,7 @@ export const appRoutes: RouteObject[] = [{
         { path: '/purchases/:id', element: <PurchasePage /> },
         ...productRoutes,
         ...firmRoutes,
+        { path: "/settings", element: <SettingsPage /> },
         // part 1D's pages, ahead of the placeholders: the bill form (the phone's tabs make way on it)
         { path: "/sales/new", element: <NewBillPage />, handle: { hideNav: true } },
         { path: "/sales/paper", element: <PaperBookPage /> },

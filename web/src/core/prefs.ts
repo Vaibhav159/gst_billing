@@ -5,7 +5,8 @@ import { api } from "@/core/api/client";
 import { useAuth } from "@/core/auth/AuthProvider";
 
 /** Per-person settings on the server (/api/preferences/). defaultBusinessId is the key v2's Settings already uses. */
-export type Prefs = { defaultBusinessId?: string; phoneMode?: "easy" | "expert"; [key: string]: unknown };
+export type SetupPrefs = { dismissed?: boolean; skipped?: ("firm" | "customer" | "product" | "bill")[] };
+export type Prefs = { defaultBusinessId?: string | null; phoneMode?: "easy" | "expert" | null; setup?: SetupPrefs | null; [key: string]: unknown };
 
 /** Each person's preferences as the server last gave them, kept on this device so the next load starts from them. */
 // The copy outlives sign-out by design (staff sign out every shift on the counter PC), so nothing secret belongs in preferences.
@@ -31,21 +32,29 @@ export function usePrefs() {
   const { status, me } = useAuth();
   const id = me?.id;
   const kept = useMemo(() => (id === undefined ? undefined : readKept(id)), [id]);
-  const q = useQuery({ queryKey: ["prefs", id], enabled: status === "signed-in", staleTime: Infinity, queryFn: async () => (await api.get("preferences/")).data.data as Prefs });
+  const q = useQuery({ queryKey: ["prefs", id], enabled: status === "signed-in", staleTime: Infinity, queryFn: async ({ signal }) => (await api.get("preferences/", { signal })).data.data as Prefs });
   // kept for whoever this query is for, once the server has answered. Not in queryFn: when someone else signs in on
   // another tab, AuthProvider's reset refetches the last person's query at once, with the new person's token.
   useEffect(() => { if (id !== undefined && q.data) keep(id, q.data); }, [id, q.data]);
   const m = useMutation({
     mutationFn: async (patch: Partial<Prefs>) => (await api.patch("preferences/", patch)).data.data as Prefs,
     // the answer belongs to whoever sent the change: onMutate keeps them, since a switch while it's out updates onSuccess in place
-    onMutate: () => me?.id,
-    onSuccess: (d, _patch, sentFor) => { qc.setQueryData(["prefs", sentFor], d); if (sentFor !== undefined) keep(sentFor, d); },
+    onMutate: async () => { const sentFor = me?.id; await qc.cancelQueries({ queryKey: ["prefs", sentFor] }); return sentFor; },
+    onSuccess: (data, patch, sentFor) => {
+      qc.setQueryData<Prefs>(["prefs", sentFor], (before) => {
+        // Personal rows can save at once; a late response owns only the keys it wrote.
+        const next = before ? { ...before, ...Object.fromEntries(Object.keys(patch).map((key) => [key, key in data ? data[key] : patch[key]])) } : data;
+        if (sentFor !== undefined) keep(sentFor, next);
+        return next;
+      });
+    },
   });
-  return { prefs: q.data ?? kept ?? {}, ready: q.data !== undefined || kept !== undefined || q.isError, loading: q.isPending, setPrefs: m.mutateAsync };
+  return { prefs: q.data ?? kept ?? {}, ready: q.data !== undefined || kept !== undefined || q.isError, loading: q.isPending, unavailable: q.data === undefined && kept === undefined && q.isError ? q.error : null, retry: q.refetch, setPrefs: m.mutateAsync };
 }
 
 /** Easy or Expert on a phone: the person's setting, else what v2 remembered on this phone, else Easy (today's default). */
 export function phoneModeOf(prefs: Prefs): "easy" | "expert" {
+  if (prefs.phoneMode === null) return "easy";
   if (prefs.phoneMode === "easy" || prefs.phoneMode === "expert") return prefs.phoneMode;
   const v2 = readStored("mobile-mode");
   if (v2 === "expert" || v2 === "easy") return v2;

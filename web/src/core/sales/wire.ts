@@ -6,7 +6,7 @@ import { readItaxFlags } from "./itax";
 import type {
   Activity, AuditAction, BillDetail, BillRef, BillRow, BillStatus, BinPage, BinRow, CancelResult, CheckCode, CustomerOnBill, CustomerRef,
   CustomerType, Eway, FirmOnBill, HsnRow, Line, MoveResult, NextNumber, NumberCheck, PaperBook, PaymentMode, Person,
-  RenumberResult, SalesFacets, SalesPage, SalesSummary, Segment, Sent, ShopSettings, Slab,
+  RenumberResult, SalesFacets, SalesPage, SalesSummary, Segment, Sent, Slab,
 } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the server's JSON, read field by field below
@@ -154,10 +154,7 @@ export function toPaperBook(w: W): PaperBook {
     locked: Boolean(w?.locked), gstr1_due: text(w?.gstr1_due),
   };
 }
-export function toShopSettings(w: W): ShopSettings {
-  const copies = w?.copies === "duplicate" || w?.copies === "triplicate" || w?.copies === "all" ? w.copies : "original";
-  return { copies, show_bank: w?.show_bank !== false, share_message: text(w?.share_message), updated_at: w?.updated_at ? text(w.updated_at) : null, updated_by: toPerson(w?.updated_by) };
-}
+export { toShopSettings } from "@/core/api/shopSettings";
 export function toCancelResult(w: W): CancelResult {
   return { id: whole(w?.id), invoice_number: text(w?.invoice_number), status: "cancelled", cancel_reason: text(w?.cancel_reason), cancelled_at: text(w?.cancelled_at), cancelled_by: toPerson(w?.cancelled_by) };
 }

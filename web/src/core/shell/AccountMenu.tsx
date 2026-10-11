@@ -6,14 +6,14 @@ import { Avatar, ConfirmDialog, Menu, type MenuItem } from "@/core/ui";
 
 /** Who is signed in, their pages, this device's theme and text size, and Sign out (asked first). */
 export function AccountMenu({ onShortcuts }: { onShortcuts: () => void }) {
-  const { me, can, signOut } = useAuth();
+  const { me, signOut } = useAuth();
   const [theme, setTheme] = useTheme();
   const [textSize, setTextSize] = useTextSize();
   const [leaving, setLeaving] = useState(false);
   const items: MenuItem[] = [
     { heading: `${me?.fullName} · ${me?.roleLabel}` },
     { label: "Profile and password", icon: UserRound, to: "/profile" },
-    ...(can("settings.edit") ? [{ label: "Settings", icon: SettingsIcon, to: "/settings" }] : []),
+    { label: "Settings", icon: SettingsIcon, to: "/settings" },
     { label: "Keyboard shortcuts", icon: Keyboard, onSelect: onShortcuts },
     { heading: "Theme · on this device" },
     ...THEMES.map((t) => ({ label: t.label, icon: PaletteIcon, checked: theme === t.value, onSelect: () => setTheme(t.value) })),

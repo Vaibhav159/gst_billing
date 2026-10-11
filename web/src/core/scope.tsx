@@ -6,6 +6,7 @@ import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { fyOf, todayIST } from "@/core/format";
 import { usePrefs } from "@/core/prefs";
+import { useShopSettings } from "@/core/api/shopSettings";
 
 /**
  * A firm (a business on the server). short: its name's first word, title-cased: "KIRAN GOLD HOUSE (SANDBOX)" gives "Kiran".
@@ -40,7 +41,7 @@ export function useFirms(): { firms: Firm[]; loading: boolean; error: boolean; p
  * firmId is null until the firm is known (a pick on this device, or the person's preferences), so a list can't ask for
  * every firm before the person's usual one is known: it waits for `firmId !== null`. ready says the same.
  */
-export type Scope = { firmId: FirmId | null; setFirmId(id: FirmId): void; fy: string; setFy(fy: string): void; fyChoices: string[]; ready: boolean };
+export type Scope = { firmId: FirmId | null; setFirmId(id: FirmId): void; fy: string; setFy(fy: string): void; fyChoices: string[]; ready: boolean; defaultFirmId: number | null; defaultReady: boolean; defaultProblem: ApiProblem | null; retryDefaults(): void };
 const ScopeCtx = createContext<Scope | null>(null);
 
 const FY_KEY = "gst3.fy";
@@ -73,13 +74,14 @@ function storedFy(choices: string[]): string {
 /**
  * Which firm and financial year lists and figures follow. The firm is this person's last pick on this device
  * (localStorage, per person), else their usual firm (preferences, kept from their last visit until the server
- * answers), else all firms. A firm the list doesn't have isn't used; until the list arrives the pick is trusted, so
+ * answers), else the shop's default, else the first firm by name. A firm the list doesn't have isn't used; until the list arrives the pick is trusted, so
  * pages don't ask for every firm first and then for one. Lists wait for `ready` for the same reason.
  */
 export function ScopeProvider({ children }: { children: ReactNode }) {
-  const { me } = useAuth();
-  const { prefs, ready: prefsReady } = usePrefs();
-  const { firms, loading, error } = useFirms();
+  const { me, status } = useAuth();
+  const { prefs, ready: prefsReady, unavailable: prefsError, retry: retryPrefs } = usePrefs();
+  const { firms, loading, error, problem: firmProblem } = useFirms();
+  const firmQuery = useQuery({ ...firmListQuery(), enabled: status === "signed-in" });
   const meId = me?.id ?? null;
 
   // each person's pick, read from this device once when they're first shown, then held here: another tab's later
@@ -91,8 +93,15 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const usable = (id: number | null): id is number => id !== null && (!listed || firms.some((f) => f.id === id));
   const usual = toId(prefs.defaultBusinessId);
   const picked = stored === "all" || usable(stored);
-  const ready = picked || prefsReady;
-  const firmId: FirmId | null = !ready ? null : stored === "all" ? "all" : usable(stored) ? stored : usable(usual) ? usual : "all";
+  const shop = useShopSettings(status === "signed-in" && prefsReady && !prefsError && !usable(usual));
+  const shopId = toId(shop.data?.default_business);
+  // Kept personal choices still work on first paint (1A-38). Without one, wait for the shop default.
+  const defaultReady = !prefsError && prefsReady && (usable(usual) || (shop.data !== undefined && (usable(shopId) || listed)));
+  const defaultFirmId = !defaultReady ? null : usable(usual) ? usual : usable(shopId) ? shopId : firms[0]?.id ?? null;
+  const defaultProblem = prefsError ? problemOf(prefsError) : error ? firmProblem : prefsReady && !usable(usual) && shop.isError ? problemOf(shop.error) : null;
+  const retryDefaults = useCallback(() => { if (prefsError) void retryPrefs(); else if (error) void firmQuery.refetch(); else void shop.refetch(); }, [prefsError, retryPrefs, error, firmQuery.refetch, shop.refetch]);
+  const ready = picked || (prefsReady && (defaultReady || defaultProblem !== null));
+  const firmId: FirmId | null = !ready ? null : stored === "all" ? "all" : usable(stored) ? stored : defaultFirmId ?? "all";
   const setFirmId = useCallback((id: FirmId) => {
     if (meId === null) return;
     write(scopeKey(meId), String(id));
@@ -105,7 +114,7 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const fy = fyChoices.includes(fyPick) ? fyPick : fyChoices[0];
   const setFy = useCallback((v: string) => { write(FY_KEY, v); setFyPick(v); }, []);
 
-  const value = useMemo<Scope>(() => ({ firmId, setFirmId, fy, setFy, fyChoices, ready }), [firmId, setFirmId, fy, setFy, fyChoices, ready]);
+  const value = useMemo<Scope>(() => ({ firmId, setFirmId, fy, setFy, fyChoices, ready, defaultFirmId, defaultReady, defaultProblem, retryDefaults }), [firmId, setFirmId, fy, setFy, fyChoices, ready, defaultFirmId, defaultReady, defaultProblem, retryDefaults]);
   return <ScopeCtx.Provider value={value}>{children}</ScopeCtx.Provider>;
 }
 
