@@ -180,7 +180,7 @@ function Footer({ b }: { b: PrintBill }) {
           <Text>Company&apos;s PAN : <Text style={s.bold}>{b.firm.pan}</Text></Text>
           <View>
             <Text style={[s.bold, { textDecoration: "underline" }]}>Declaration</Text>
-            <Text style={{ fontSize: 7.5 }}>{b.declaration}</Text>
+            <RupeeText style={{ fontSize: 7.5 }}>{b.declaration}</RupeeText>
           </View>
         </View>
         <View style={s.footRight}>
@@ -197,7 +197,7 @@ function Footer({ b }: { b: PrintBill }) {
           </View>
         </View>
       </View>
-      <Text style={[s.center, { borderBottom: B }]}>SUBJECT TO {b.jurisdiction.toUpperCase()} JURISDICTION</Text>
+      <RupeeText style={[s.center, { borderBottom: B }]}>{`SUBJECT TO ${b.jurisdiction.toUpperCase()} JURISDICTION`}</RupeeText>
       <Text style={[s.center, { color: GREY, fontSize: 7 }]}>This is a Computer Generated Invoice</Text>
     </View>
   );

@@ -48,7 +48,7 @@ export function hasBank(firm: Pick<FirmOnBill, "bank_account_number">): boolean 
 }
 
 export const DECLARATION = "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.";
-// ponytail: v2 prints Udaipur for every firm (TallyInvoicePDF.tsx:590) and no field holds a firm's own. Upgrade: part 4's firm form.
+// Older servers omit the live small-print fields; keep their existing default.
 export const JURISDICTION = "Udaipur";
 
 /* ── One bill, ready to draw ───────────────────────────── */
@@ -97,7 +97,7 @@ export type PrintBill = {
   /** qty: the total quantity when every line has one unit; amount: the bill's total, exact to the paisa. */
   total: { qty: string; amount: string };
   words: string; igst: boolean; hsn: PrintHsn[]; hsnTotal: PrintHsn; taxWords: string;
-  declaration: string; jurisdiction: string;
+  declaration: FreeText; jurisdiction: FreeText;
   pages: PrintPage[];
 };
 
@@ -155,7 +155,7 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     firm: {
       name: firmName, gstin: firmGstin,
       lines: [...linesOf(f.address), firmGstin ? `GSTIN/UIN: ${firmGstin}` : "", stateLine(f.state_code), f.email ? `E-Mail : ${f.email}` : ""].filter(Boolean),
-      pan: f.pan_number, signature: f.signature_url, bank,
+      pan: f.pan_number, signature: f.signature_on_bills ? f.signature_url : null, bank,
     },
     parties: [
       { label: "Consignee (Ship to)", name, lines: [...where, `GSTIN/UIN : ${gstin}`, stateLine(c.state_code)].filter(Boolean) },
@@ -187,7 +187,8 @@ export function printBill(d: BillDetail, { showBank }: { showBank: boolean }): P
     words: `INR ${d.total_in_words}`, igst, hsn,
     hsnTotal: { key: "total", hsn: "Total", taxable: amountText(d.taxable), rate: "", cgst: amountText(d.cgst), sgst: amountText(d.sgst), igst: amountText(d.igst), tax: amountText(d.tax) },
     taxWords: `INR ${d.tax_in_words}`,
-    declaration: DECLARATION, jurisdiction: JURISDICTION,
+    // These are paragraphs as on the prototype: collapse whitespace so valid small print cannot grow an unbounded footer.
+    declaration: oneLine(f.declaration_printed) || DECLARATION, jurisdiction: oneLine(f.jurisdiction_printed) || oneLine(f.city) || JURISDICTION,
   };
   return { ...bill, pages: pagesOf(bill) };
 }
@@ -230,6 +231,8 @@ export const PAGE_FIT = {
    * "for {firm}". BillDocument draws the box and the signature at these heights.
    */
   footLine: 8.96, sign: 58, signature: 30,
+  // Small print can be 500/100 characters: allow wide capitals at 7.5 pt in each column.
+  smallPrintLine: 8.4, declarationChars: 40, jurisdictionChars: 75,
   /** A line that holds a ₹ stands taller, as the ₹'s own font (Tinos, 1.1499 em) is taller than Times (1.12). */
   rupee: 1.027,
   /** Kept free on every page, for what the estimates above can't see (a word that wraps early). */
@@ -287,10 +290,12 @@ function lastExtra(b: Omit<PrintBill, "pages">): number {
   // "for {firm}" (8 pt across the 230 pt box holds about what the firm's 11 pt name holds in its block), the signature if
   // there is one, then "Authorised Signatory"
   const sign = Math.max(F.sign, F.blockPad + tall(`for ${b.firm.name}`, F.firmChars, F.footLine) + (b.firm.signature ? F.signature : 0) + F.footLine);
+  const declaration = F.blockPad + 2 * F.footLine + tall(b.declaration, F.declarationChars, F.smallPrintLine);
+  const jurisdiction = tall(`SUBJECT TO ${b.jurisdiction.toUpperCase()} JURISDICTION`, F.jurisdictionChars, F.smallPrintLine);
   return F.taxRow * b.taxes.length + (b.note ? Math.max(F.row, F.rowPad + tall(b.note, F.nameChars, F.billNoteLine)) : 0)
     + Math.max(F.closing, 1 + F.rowPad + tall(b.total.qty, F.qtyChars, F.nameLine)) - F.closing
     // an IGST bill's summary heads its five columns on one line
-    + F.footer - (b.igst ? F.footLine : 0) + F.hsnRow * b.hsn.length + bank + sign - F.sign
+    + F.footer - (b.igst ? F.footLine : 0) + F.hsnRow * b.hsn.length + Math.max(bank + sign, declaration) - F.sign + jurisdiction - F.smallPrintLine
     + tall(b.words, F.wordsChars, F.infoLine) - F.infoLine + tall(b.taxWords, F.taxWordsChars, F.footLine) - F.footLine;
 }
 

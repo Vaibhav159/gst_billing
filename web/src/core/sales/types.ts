@@ -45,7 +45,9 @@ export type Line = {
 export type FirmOnBill = {
   name: string; address: string; gst_number: string; state_name: string; state_code: string; pan_number: string; mobile_number: string;
   email: string; bank_name: string; bank_account_number: string; bank_ifsc_code: string; bank_branch_name: string; invoice_prefix: string;
-  signature_url: string | null; frozen: boolean;
+  signature_url: string | null; signature_on_bills: boolean; frozen: boolean;
+  /** Live on every bill, including one whose printed firm identity is frozen. */
+  city: string; pin_code: string; jurisdiction_printed: string; declaration_printed: string; short: string;
 };
 /** The live customer. gstin_valid: null without a GSTIN; pan: the PAN to print (typed, or from a GSTIN that checks out). */
 export type CustomerOnBill = CustomerRef & {

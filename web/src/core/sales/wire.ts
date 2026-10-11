@@ -59,7 +59,8 @@ const toFirm = (w: W): FirmOnBill => ({
   name: text(w?.name), address: text(w?.address), gst_number: text(w?.gst_number), state_name: text(w?.state_name), state_code: text(w?.state_code),
   pan_number: text(w?.pan_number), mobile_number: text(w?.mobile_number), email: text(w?.email), bank_name: text(w?.bank_name),
   bank_account_number: text(w?.bank_account_number), bank_ifsc_code: text(w?.bank_ifsc_code), bank_branch_name: text(w?.bank_branch_name),
-  invoice_prefix: text(w?.invoice_prefix), signature_url: w?.signature_url ? text(w.signature_url) : null, frozen: Boolean(w?.frozen),
+  invoice_prefix: text(w?.invoice_prefix), signature_url: w?.signature_url ? text(w.signature_url) : null, signature_on_bills: w?.signature_on_bills !== false, frozen: Boolean(w?.frozen),
+  city: text(w?.city), pin_code: text(w?.pin_code), jurisdiction_printed: text(w?.jurisdiction_printed), declaration_printed: text(w?.declaration_printed), short: text(w?.short),
 });
 const toCustomerOnBill = (w: W): CustomerOnBill => ({
   ...toCustomerRef(w), address: text(w?.address), city: text(w?.city), state_name: text(w?.state_name), state_code: text(w?.state_code),

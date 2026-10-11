@@ -204,7 +204,7 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
                 <div>Company&apos;s PAN : <span className="font-bold">{b.firm.pan}</span></div>
                 <div>
                   <div role="heading" aria-level={3} className="font-bold underline">Declaration</div>
-                  <div style={{ fontSize: pt(7.5) }}>{b.declaration}</div>
+                  <div style={{ fontSize: pt(7.5) }}><RupeeText>{b.declaration}</RupeeText></div>
                 </div>
               </div>
               <div className="flex flex-col">
@@ -224,7 +224,7 @@ export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy
                 </div>
               </div>
             </div>
-            <div className="border-t border-black text-center" style={{ fontSize: pt(7.5), paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>SUBJECT TO {b.jurisdiction.toUpperCase()} JURISDICTION</div>
+            <div className="border-t border-black text-center" style={{ fontSize: pt(7.5), paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}><RupeeText>{`SUBJECT TO ${b.jurisdiction.toUpperCase()} JURISDICTION`}</RupeeText></div>
             <div className="border-t border-black text-center" style={{ fontSize: pt(7), color: GREY, paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>This is a Computer Generated Invoice</div>
           </>
         ) : null}
