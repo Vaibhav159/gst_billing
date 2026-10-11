@@ -50,6 +50,7 @@ class PurchaseFilesTest(TestCase):
         self.assertTrue(AuditLog.objects.filter(details="File removed: bill.pdf").exists())
 
     def test_filed_credit_month_blocks_both_file_mutations(self):
+        self.assertEqual(self.owner.post(self.url, {"file": upload()}, format="multipart").status_code, 200)
         FiledPeriod.objects.create(business=self.bill.business, year=2026, month=10)
         for response in (self.owner.post(self.url, {"file": upload()}, format="multipart"), self.owner.delete(self.url + "src/")):
             self.assertEqual((response.status_code, response.data["code"]), (409, "month_closed"))
@@ -62,3 +63,10 @@ class PurchaseFilesTest(TestCase):
         response = self.owner.post(self.url, {"file": upload("bill.jpg")}, format="multipart")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual((response.data["files"][0]["kind"], response.data["files"][0]["name"]), ("pdf", "bill.pdf"))
+
+    def test_unknown_file_stays_404_even_when_the_credit_month_is_filed(self):
+        FiledPeriod.objects.create(business=self.bill.business, year=2026, month=10)
+        for file_id in ("missing", "src"):
+            result = self.owner.delete(self.url + file_id + "/")
+            self.assertEqual(result.status_code, 404, result.data)
+            self.assertEqual(result.data["detail"], "That file isn't attached to this bill.")

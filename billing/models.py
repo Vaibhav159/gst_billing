@@ -469,7 +469,9 @@ class Invoice(AbstractBaseModel):
                 self.firm_snapshot = None
                 fields.append("firm_snapshot")  # Ruling 1A-23: the one v3 column v2's paths write, and only to NULL
             if before is not None and before.type_of_invoice == "inward":
+                from billing.numbering import lock_firms
                 from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
+                lock_firms(before.business_id, int(self.business_id))
                 assert_inward_unlocked(before)
                 assert_period_unlocked(self.business_id, self.invoice_date, "edit")
                 changed_date = self._meta.get_field("invoice_date").to_python(self.invoice_date) != before.invoice_date

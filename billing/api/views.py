@@ -45,6 +45,7 @@ from billing.constants import (
     V2_LINE_SNAPSHOT_FIELDS,
 )
 from billing.models import AuditLog, BinnedInvoice, Business, Customer, FiledPeriod, Invoice, LineItem, Product
+from billing.numbering import lock_firms
 from billing.params import PICK_A_FIRM, date_param, id_param, text_param
 from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
 from billing.services import gstr1
@@ -2963,14 +2964,11 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                 if binned is not None:
                     # A sale v3 moved to the bin comes back from there, under its own id; the
                     # restore marks this entry used. A closed month is still v2's 400 here.
-                    assert_period_unlocked(binned.business_id, binned.invoice_date, "create")
                     if binned.type_of_invoice == INVOICE_TYPE_INWARD:
-                        from billing.services.bin import _fields
                         from billing.services.purchase_bin import restore_purchase
-                        stored = Invoice(**_fields(Invoice, binned.data["invoice"]))
-                        assert_inward_unlocked(stored)
-                        obj = restore_purchase(binned, request.user, check_month=False, via="audit_log")
+                        obj = restore_purchase(binned, request.user, via="audit_log")
                     else:
+                        assert_period_unlocked(binned.business_id, binned.invoice_date, "create")
                         obj = restore_from_bin(binned, request.user, via="audit_log")
                     return Response({"message": f"Restored {entry.entity}: {entry.entity_name}", "new_id": obj.pk})
                 if entry.action == "deleted" and entry.snapshot:
@@ -2990,6 +2988,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         else:
                             kwargs[k] = v
                     if model is Invoice:
+                        if kwargs.get("type_of_invoice") == INVOICE_TYPE_INWARD:
+                            lock_firms(kwargs["business_id"])
                         assert_period_unlocked(kwargs.get("business_id"), kwargs.get("invoice_date"), "create")
                         if kwargs.get("type_of_invoice") == INVOICE_TYPE_INWARD and kwargs.get("itc_month"):
                             assert_period_unlocked(kwargs.get("business_id"), kwargs["itc_month"], "create")
@@ -3033,6 +3033,9 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         if obj.status == BILL_CANCELLED:
                             return Response({"error": "cancelled", "code": "cancelled", "detail": CANCELLED_WORDS},
                                             status=status.HTTP_409_CONFLICT)
+                        if obj.type_of_invoice == INVOICE_TYPE_INWARD:
+                            target = _resolve_fk(Invoice._meta.get_field("business"), snap.get("business"))
+                            lock_firms(obj.business_id, target or obj.business_id)
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
                         if obj.type_of_invoice == INVOICE_TYPE_INWARD:
                             assert_inward_unlocked(obj)
@@ -3074,8 +3077,10 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                 elif entry.action == "created":
                     # Delete the created object
                     try:
-                        obj = model.objects.get(pk=entry.entity_id)
+                        obj = model.objects.select_for_update().get(pk=entry.entity_id)
                         if model is Invoice:
+                            if obj.type_of_invoice == INVOICE_TYPE_INWARD:
+                                lock_firms(obj.business_id)
                             assert_period_unlocked(obj.business_id, obj.invoice_date, "delete")
                             if obj.type_of_invoice == INVOICE_TYPE_INWARD:
                                 assert_inward_unlocked(obj)

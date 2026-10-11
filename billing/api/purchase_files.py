@@ -14,6 +14,7 @@ from billing.api.permissions import V3Permission
 from billing.cache import uncached
 from billing.credit import credit_month_of
 from billing.models import AuditLog
+from billing.numbering import lock_firms
 from billing.period_lock import assert_purchase_open
 from billing.roles import can, why_not
 from billing.services.capture_uploads import discard_files, validate_files, validate_request_size
@@ -42,6 +43,7 @@ class PurchaseFilesView(APIView):
         try:
             with transaction.atomic():
                 bill = self.get_bill(pk)
+                lock_firms(bill.business_id)
                 maker = uncached(AuditLog).filter(entity="invoice", entity_id=bill.pk, action__in=["created", "imported"]).order_by("timestamp", "pk").values_list("user_id", flat=True).first()
                 own_new = maker == request.user.pk and bill.created_at >= timezone.now() - timedelta(hours=24)
                 if not can(request.user, "purchase.edit") and not (own_new and can(request.user, "purchase.create")):
@@ -63,9 +65,10 @@ class PurchaseFilesView(APIView):
     @transaction.atomic
     def delete(self, request, pk, file_id=None):
         bill = self.get_bill(pk)
-        assert_purchase_open(bill.business, credit_month_of(bill), "files")
         if file_id != "src" or not bill.source_file:
             raise NotFound("That file isn't attached to this bill.")
+        lock_firms(bill.business_id)
+        assert_purchase_open(bill.business, credit_month_of(bill), "files")
         files = [(bill.source_file.storage, bill.source_file.name), (bill.source_preview.storage, bill.source_preview.name)]
         name = PurePosixPath(bill.source_file.name).name
         bill.source_file, bill.source_preview = "", ""

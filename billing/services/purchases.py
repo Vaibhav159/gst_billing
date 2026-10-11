@@ -58,10 +58,10 @@ def save_purchase(data, user, invoice=None):
         before = {field: getattr(old, field) for field in EDIT_FIELDS} if old else {}
         old_lines = lines_of([old])[old.pk] if old else []
         old_snapshot = v2_snapshot(old, old_lines) if old else None
+        # Filing and every purchase write share these locks, including both sides of a move.
+        lock_firms(*({business.pk, old.business_id} if old else {business.pk}))
         if old:
             assert_purchase_open(old.business_id, credit_month_of(old), "edit")
-        # The firm lock serializes v3 duplicate checks and inserts for this firm.
-        lock_firms(*({business.pk, old.business_id} if old else {business.pk}))
         if not 2000 <= day.year <= 2099:
             raise ValidationError({"invoice_date": ["Pick a date from 2000 to 2099."]})
         if day > timezone.localdate():
@@ -149,6 +149,7 @@ def save_purchase(data, user, invoice=None):
 def check_purchase(invoice, user):
     with transaction.atomic():
         bill = locked_purchase(invoice)
+        lock_firms(bill.business_id)
         assert_purchase_open(bill.business_id, credit_month_of(bill), "checked")
         if bill.needs_review:
             bill.needs_review = False
@@ -162,6 +163,7 @@ def move_credit(invoice, user, month):
 
     with transaction.atomic():
         bill = locked_purchase(invoice)
+        lock_firms(bill.business_id)
         previous = credit_month_of(bill)
         assert_purchase_open(bill.business_id, previous, "credit-month")
         value = bill.invoice_date.strftime("%Y-%m") if month is None and previous is not None else month
