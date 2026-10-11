@@ -21,6 +21,7 @@ from billing.models import AuditLog, Invoice, LineItem
 from billing.numbering import checked_number, format_number, refuse_taken
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
+from billing.services.drafts import became, claim
 from billing.tax_rules import (
     chosen_place,
     default_place_of_supply,
@@ -278,15 +279,19 @@ def save_bill(data, user, invoice=None):
     number is checked only when it, the firm or the FY changes, so an older bill whose number
     predates the rules can still be edited (and a date, only when it changes); a new firm freezes
     that firm on the bill. An edit that changes nothing writes nothing. The audit row is written
-    before the answer is read, so the answer shows it.
+    before the answer is read, so the answer shows it. A new bill made from an unfinished one
+    (draft_id) takes that draft with it (billing.services.drafts).
     """
     from billing.services.bill_reads import lines_of
     from billing.services.bin import v2_snapshot
     from billing.services.line_items import build_line_items
 
     business, customer, day, typed = data["business"], data["customer"], data["invoice_date"], data["invoice_number"]
+    draft = data.get("draft_id") if invoice is None else None  # POST only: an edit takes no draft
     with transaction.atomic():
         old = locked_bill(invoice) if invoice else None
+        if draft is not None:
+            claim(draft)  # first: a draft made a bill already makes no other (409 draft_saved), whatever else is wrong
         if old is not None:
             refuse_cancelled(old)
             assert_sales_open(old.business_id, old.invoice_date, "edit")
@@ -347,6 +352,8 @@ def save_bill(data, user, invoice=None):
         if old is None:
             paper = f" · From the paper bill book, dated {day_text(day)}" if bill.paper else ""
             log(bill, user, "created", f"{customer.name} · {inr(total)}{paper}", snapshot=v2_snapshot(bill))
+            if draft is not None:
+                became(draft, bill)  # the draft goes with the save, in its transaction
         else:
             log(bill, user, "updated", _changed_words(changed), changes=_changes(before, after, EDIT_FIELDS) or None)
     return Invoice.objects.sales().select_related("customer", "business").get(pk=bill.pk)

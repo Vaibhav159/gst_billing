@@ -41,6 +41,8 @@ from billing.models import (
     ITCReclaimLedger,
     LineItem,
     Product,
+    SaleDraft,
+    SavedDraft,
     UserPreference,
 )
 from billing.roles import GROUP_ACCOUNTANT, GROUP_STAFF
@@ -191,7 +193,9 @@ class Command(BaseCommand):
             raise CommandError(f"Refusing: unexpected database vendor {connection.vendor!r}.")
 
     def _reset(self):
-        BinnedInvoice.objects.all().delete()  # it protects the customers and firms below
+        BinnedInvoice.objects.all().delete()  # these two protect the customers and firms below
+        SaleDraft.objects.all().delete()
+        SavedDraft.objects.all().delete()  # the notes of drafts saved as the bills below
         LineItem.objects.all().delete()
         InwardCapture.objects.all().delete()
         Invoice.objects.all().delete()

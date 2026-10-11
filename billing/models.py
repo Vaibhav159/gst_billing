@@ -1034,6 +1034,46 @@ class BinnedInvoice(models.Model):
         return f"{self.invoice_number} (deleted)"
 
 
+class SaleDraft(models.Model):
+    """An unfinished sales bill, kept on the server so whoever makes bills can finish it: drafts
+    are shop-wide (the owner's answer, 10 Oct 2026), each showing who started it.
+
+    The id is a UUID the client makes, so a draft kept offline syncs once however often it's sent.
+    `data` is the form's own state; the server only keeps it. Nothing polls: the client syncs on
+    save and on reconnect, and saving the bill deletes its draft in the same transaction.
+    """
+
+    MAX_BYTES = 65536
+
+    id = models.UUIDField(primary_key=True)
+    business = models.ForeignKey(
+        Business, null=True, blank=True, on_delete=models.PROTECT, db_constraint=False, related_name="+",
+    )
+    started_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    data = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+
+class SavedDraft(models.Model):
+    """A draft a bill was made from (Rulings 1D-6 to 1D-8): its id, kept after the save deleted the draft, and the
+    bill it became. A later keep of that draft, or a later save of it, is refused (409 draft_saved): a keep that
+    arrives late never brings the draft back, and no draft makes two bills. Kept for good, one small row a saved
+    draft, read only by its own id."""
+
+    id = models.UUIDField(primary_key=True)  # the draft's
+    bill_id = models.BigIntegerField(
+        null=True, blank=True, help_text="The bill it became; no database constraint, as the bill may go to the bin.",
+    )
+    invoice_number = models.CharField(max_length=255, blank=True, default="", help_text="The number it was saved as.")
+    saved_at = models.DateTimeField(auto_now_add=True)
+
+
 DEFAULT_SHARE_MESSAGE = "Namaste {customer}, your bill {number} for {total} from {firm} is attached. Thank you!"
 
 

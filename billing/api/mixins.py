@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 
-from billing.models import AuditLog, BinnedInvoice, Business, Customer
+from billing.models import AuditLog, BinnedInvoice, Business, Customer, SaleDraft
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +149,15 @@ class ProtectedDeleteMixin:
         except ProtectedError as e:
             # Bills in the bin still need their customer and firm for a restore: say so (Task 3 review, M1).
             binned = sum(isinstance(o, BinnedInvoice) for o in e.protected_objects)
-            rest = [o for o in e.protected_objects if not isinstance(o, BinnedInvoice)]
+            # So does a firm's unfinished bill (v3's drafts), which is no invoice: it's finished or discarded first.
+            drafts = sum(isinstance(o, SaleDraft) for o in e.protected_objects)
+            rest = [o for o in e.protected_objects if not isinstance(o, BinnedInvoice | SaleDraft)]
             # Invoices, and since H6 invoice lines: count the invoices either way.
             n = len({getattr(o, "invoice_id", o.pk) for o in rest})
-            if not rest:
+            if not rest and not binned:
+                message = (f"Cannot delete: {drafts} unfinished bill(s) still name this firm. "
+                           "Finish or discard them first.")
+            elif not rest:
                 message = (f"Cannot delete: {binned} bill(s) in the bin still reference this record. "
                            "Restore and reassign them first.")
             elif all(hasattr(o, "invoice_id") for o in rest):
@@ -163,7 +168,9 @@ class ProtectedDeleteMixin:
                 message = f"Cannot delete: {n} invoice(s) still reference this record. Reassign or delete them first."
             if rest and binned:
                 message += f" {binned} bill(s) in the bin reference it too."
-            return Response({"error": message, "protected": n + binned}, status=status.HTTP_409_CONFLICT)
+            if drafts and (rest or binned):
+                message += f" {drafts} unfinished bill(s) name it too."
+            return Response({"error": message, "protected": n + binned + drafts}, status=status.HTTP_409_CONFLICT)
 
     def perform_destroy(self, instance):
         # Bin rows back in Sales already (restored, or brought back by v2's undo) protect nothing, so they

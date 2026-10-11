@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenVerifyView
 
 from .auth import ThrottledTokenObtainPairView, ThrottledTokenRefreshView
+from .drafts import DraftViewSet
 from .gstin_lookup import GstinLookupView
 from .inward_bills import (
     InwardBillDetailView,
@@ -46,6 +47,7 @@ router.register(r"audit-logs", AuditLogViewSet)
 router.register(r"filed-periods", FiledPeriodViewSet)
 router.register(r"sales", SalesViewSet, basename="sale")
 router.register(r"bin", BinViewSet, basename="bin")
+router.register(r"drafts", DraftViewSet, basename="draft")
 
 urlpatterns = [
     # Explicit paths BEFORE router to avoid router's <pk> catching them

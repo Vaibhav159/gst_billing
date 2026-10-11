@@ -19,7 +19,6 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from billing import numbering
-from billing.cache import uncached
 from billing.constants import (
     BILL_ACTIVE,
     BILL_CANCELLED,
@@ -50,7 +49,7 @@ from billing.services.sales import (
 from billing.tax_rules import GST_SLABS
 from billing.text import person, stamp
 
-from .body import valid
+from .body import UNSTORABLE, Picked, valid
 from .permissions import V3Permission
 
 SAY_WHY = "Say why in a few words. It goes into the audit log."
@@ -72,15 +71,11 @@ class Reason(serializers.CharField):
             raise serializers.ValidationError(self.long if "max_length" in refused.get_codes() else self.words) from None
 
 
-# What no column can store: a null character (psycopg refuses it) and a lone surrogate (no UTF-8 for it).
-_UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
-
-
 class Text(Reason):
     """Typed text (a name, a note): what no column can store is dropped, not refused, and null is no text ("")."""
 
     def run_validation(self, data=serializers.empty):
-        value = super().run_validation(_UNSTORABLE.sub("", data) if isinstance(data, str) else data)
+        value = super().run_validation(UNSTORABLE.sub("", data) if isinstance(data, str) else data)
         return "" if value is None else value
 
 
@@ -138,26 +133,6 @@ class RenumberSerializer(serializers.Serializer):
 
 
 PICK_THE_FIRM = "Pick the firm to move it to."
-
-
-class Picked(serializers.PrimaryKeyRelatedField):
-    """A firm or a customer by its id, read when the request comes, around cacheops (Ruling 1A-34): a bill freezes the
-    firm as it is now, and shows the customer as they are. Missing, null, blank, not plain digits (1.5, "٣", true)
-    or not on file: the one sentence, `words` (Ruling 1A-5)."""
-
-    def __init__(self, model, words, **kwargs):
-        self.model = model
-        super().__init__(error_messages=dict.fromkeys(("required", "null", "does_not_exist", "incorrect_type"), words),
-                         **kwargs)
-
-    def get_queryset(self):
-        return uncached(self.model)
-
-    def to_internal_value(self, data):
-        plain = isinstance(data, str) and data.isascii() and data.isdigit()
-        if not (plain or (isinstance(data, int) and not isinstance(data, bool))):
-            self.fail("incorrect_type", data_type=type(data).__name__)
-        return super().to_internal_value(data)
 
 
 class MoveSerializer(RenumberSerializer):
@@ -242,11 +217,25 @@ class LineSerializer(serializers.Serializer):
 
 
 CHOOSE_A_CUSTOMER = "Choose who this bill is for. Pick Walk-in customer for a counter sale."
+NOT_A_DRAFT = "That isn't an unfinished bill's id."
+
+
+class DraftId(serializers.UUIDField):
+    """The unfinished bill a new bill becomes (2.3): its id, the UUID the client made, as text; or null. Anything else
+    is refused in words (Ruling 1A-5), a number too, which DRF would read as a UUID."""
+
+    def __init__(self):
+        super().__init__(required=False, allow_null=True, default=None, error_messages={"invalid": NOT_A_DRAFT})
+
+    def to_internal_value(self, data):
+        if not isinstance(data, str):
+            self.fail("invalid", value=data)
+        return super().to_internal_value(data)
 
 
 class SaleSerializer(serializers.Serializer):
-    """What POST and PUT sales/ take (part 1 API contract, 2.3), each problem in the contract's words. draft_id is
-    Task 10's: left alone here."""
+    """What POST and PUT sales/ take (part 1 API contract, 2.3), each problem in the contract's words. draft_id is POST
+    only: an edit takes no draft."""
 
     business = Picked(Business, "Pick the firm.")
     customer = Picked(Customer, CHOOSE_A_CUSTOMER)
@@ -267,6 +256,7 @@ class SaleSerializer(serializers.Serializer):
         ("invalid", "null"), "Say whether the bill is from the paper bill book."))
     replaces = serializers.IntegerField(required=False, allow_null=True, default=None, error_messages=dict.fromkeys(
         ("invalid", "max_string_length"), "Only a cancelled bill can be made again."))
+    draft_id = DraftId()
     lines = LineSerializer(many=True, error_messages=dict.fromkeys(("required", "null"), ADD_ONE))
 
 

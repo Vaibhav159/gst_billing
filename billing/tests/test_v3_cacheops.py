@@ -11,6 +11,7 @@ still runs against the database. TransactionTestCase, not TestCase: inside TestC
 cacheops treats the data the test just wrote as uncommitted and caches nothing, which would hide a cached read.
 """
 
+import uuid
 from contextlib import contextmanager, suppress
 from unittest.mock import call, patch
 
@@ -184,6 +185,28 @@ class ReadsAroundTheCacheTest(TransactionTestCase):
         with cacheops_on() as touched:
             self.assertEqual(self.client.get(customers).status_code, 200)
         self.assertIn("billing_customer", {table for _op, tables in touched for table in tables})
+
+    def test_v3s_draft_reads_never_touch_the_cache(self):
+        # 1A Task 10: the drafts list; a keep, which reads its firm; a bill saved from the draft; a keep and a save of
+        # the saved draft, whose refusal names the bill; and a discard.
+        key, drafts = str(uuid.uuid4()), reverse("draft-list")
+        draft, keep = reverse("draft-detail", args=[key]), {"business": self.kgh.pk, "data": {"note": "Bangles"}}
+        bill = {"business": self.kgh.pk, "customer": self.anil.pk, "invoice_number": "KGH/2026-27/60",
+                "invoice_date": "2026-09-12", "lines": [{"product_name": "Gold Ring 22K", "hsn_code": "711319",
+                                                         "gst_percent": "3", "quantity": "1", "rate": "6500"}],
+                "draft_id": key}
+        with cacheops_on() as touched:
+            self.assertEqual(self.client.put(draft, keep, format="json").status_code, 201)
+            self.assertEqual(self.client.put(draft, keep, format="json").status_code, 200)
+            self.assertEqual(len(self.client.get(drafts, {"business_id": self.kgh.pk}).data["results"]), 1)
+            self.assertEqual(self.client.post(reverse("sale-list"), bill, format="json").status_code, 201)
+            for r in (self.client.put(draft, keep, format="json"),
+                      self.client.post(reverse("sale-list"), bill, format="json")):
+                self.assertEqual((r.status_code, r.data["code"], r.data["bill"]["invoice_number"]),
+                                 (409, "draft_saved", "KGH/2026-27/60"))
+            self.assertEqual(self.client.delete(draft).status_code, 204)
+            self.assertEqual(self.client.get(drafts).data["results"], [])
+        self.assertEqual(touched, [])
 
 
 class WritesInvalidateTest(TestCase):
