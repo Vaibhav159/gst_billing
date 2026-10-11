@@ -2,14 +2,13 @@ import { useCallback } from "react";
 import { queryClient } from "@/core/api/query";
 import { billQuery, shopSettingsQuery } from "@/core/api/sales";
 import { canShareFiles, saveFile } from "@/core/print/files";
-import { billFile, sendBankChoice, sendFile, type PdfFile } from "@/core/print/make";
-import { copiesWords } from "@/core/print/model";
-import { sharePdf, tellAboutPdf } from "@/core/print/ShareHost";
+import { billLog, useLogPrint } from "@/core/print/log";
+import { billFile, pdfCodeMissing, sendBankChoice, sendFile, type PdfFile } from "@/core/print/make";
+import { sharePdf, tell } from "@/core/print/ShareHost";
 import { waLink } from "@/core/sales/share";
 import type { BillDetail, Copies } from "@/core/sales/types";
-import { useToast } from "@/core/ui";
+import { useToast, type ToastInput } from "@/core/ui";
 import { useView } from "@/core/view";
-import { useLogPrint } from "../print/parts";
 
 export type DeliverInput = { billId: number; invoiceNumber: string; mobile: string; message: string; isPhone: boolean };
 /** How the bill went (the send's `via`) and the PDF's name when one was made; null when the person stopped (a share sheet closed). */
@@ -42,10 +41,20 @@ async function pdfFor(billId: number, purpose: "send" | "share"): Promise<Made> 
 function noPdf(e: unknown): { why: string; todo: string } {
   if (e instanceof Unmade && e.lack === "bill") return { why: "This bill was deleted.", todo: "" };
   if (navigator.onLine === false) return { why: "You're offline, so the PDF wasn't made.", todo: "Try again when the internet is back." };
+  // react-pdf's code that didn't come (the app changed since the page opened) comes only with a reload
+  if (pdfCodeMissing(e)) return { why: "The part of the app that makes PDFs didn't load.", todo: "Reload the page, then try again." };
   if (e instanceof Unmade) return { why: "The shop's settings didn't load, and the PDF needs them.", todo: "Try again in a minute." };
   return { why: "Something stopped the PDF part way.", todo: "Try again in a minute." };
 }
 const words = (...parts: string[]) => parts.filter(Boolean).join(" ");
+/** WhatsApp's tab, which the browser stopped (window.open answered null): nothing was sent. */
+const TAB_STOPPED: ToastInput = { tone: "neg", title: "WhatsApp didn't open", body: "The browser stopped the new tab, so nothing was marked as sent. Allow pop-ups for this app, then send it again." };
+/**
+ * While a PDF is made away from the print page (the first time, react-pdf's 1.2 MB comes first): the share sheet, the
+ * dialog asking for one more press, the download or why not takes its place. next: what comes once it's made.
+ */
+const makingPdf = (next: string): ToastInput => ({ tone: "brand", title: "Making the PDF…", body: next, duration: 120_000 });
+const SHEET_NEXT = "The share sheet opens as soon as it's ready.";
 
 /**
  * Hands a bill to WhatsApp with its PDF (PROTO core/common.jsx:57-62, sales/parts.jsx:177-184). On a computer the chat
@@ -64,58 +73,63 @@ export async function deliver(input: DeliverInput): Promise<Delivered> {
     // or not the tab opened, so one the browser stopped would count as sent
     const tab = window.open(waLink(input.mobile, input.message), "_blank");
     if (!tab) {
-      tellAboutPdf({ tone: "neg", title: "WhatsApp didn't open", body: "The browser stopped the new tab, so nothing was marked as sent. Allow pop-ups for this app, then send it again." });
+      tell(TAB_STOPPED);
       return null;
     }
     try { tab.opener = null; } catch { /* WhatsApp's own page already, which can't reach back */ }
     const made = ready ?? await pdfFor(input.billId, "send").then((m) => m.file, () => null);
     const without = "WhatsApp opened without it. Download it from Print and share, then attach it there.";
     if (!made) {
-      tellAboutPdf({ tone: "neg", title: "The PDF wasn't made", body: without });
+      tell({ tone: "neg", title: "The PDF wasn't made", body: without });
       return { via: "whatsapp", file: null };
     }
     try {
       saveFile(made.blob, made.name);
     } catch {
-      tellAboutPdf({ tone: "neg", title: "The PDF didn't download", body: without });
+      tell({ tone: "neg", title: "The PDF didn't download", body: without });
       return { via: "whatsapp", file: null };
     }
     return { via: "whatsapp", file: made.name };
   }
   let made = ready;
   if (!made) {
+    // made away from the print page, so it says so meanwhile (a second press of Send does nothing till then)
+    const away = tell(makingPdf(SHEET_NEXT));
     try {
       made = (await pdfFor(input.billId, "send")).file;
     } catch (e) {
       const { why, todo } = noPdf(e);
-      tellAboutPdf({ tone: "neg", title: "The bill wasn't sent", body: words(why, "Nothing was marked as sent.", todo) });
+      tell({ tone: "neg", title: "The bill wasn't sent", body: words(why, "Nothing was marked as sent.", todo) });
       return null;
+    } finally {
+      away();
     }
   }
   const r = await sharePdf(made, { title: input.invoiceNumber, text: input.message });
-  if (r === "unsupported") tellAboutPdf({ tone: "neg", title: "The share sheet didn't open", body: "Nothing was sent. Use Print and share to download the PDF, then send it on WhatsApp." });
+  if (r === "unsupported") tell({ tone: "neg", title: "The share sheet didn't open", body: "Nothing was sent. Use Print and share to download the PDF, then send it on WhatsApp." });
   return r === "shared" ? { via: "share", file: made.name } : null;
 }
 
 /**
  * "Share the PDF…" (email, Drive, a printer app), the shop's default copies: the share sheet on a phone, a download on a
- * computer, which goes into the audit log as the print page's PDF does. Not a send.
+ * computer, which goes into the audit log as the print page's PDF does. Not a send. "Making the PDF…" shows till then.
  */
 export function useShareBill(): (b: { id: number; invoice_number: string }) => void {
   const { isPhone } = useView();
-  const { show } = useToast();
+  const { show, dismiss } = useToast();
   const log = useLogPrint();
   return useCallback((b) => {
     const sheet = isPhone && canShareFiles();
     const download = ({ file, bill, copies }: Made) => {
       saveFile(file.blob, file.name);
-      log({ action: "exported", entity_id: bill.id, entity_name: `#${bill.invoice_number} - ${bill.customer.name}`, details: `PDF downloaded: ${copiesWords(copies).toLowerCase()}` });
+      log(billLog("exported", bill, copies));
       show({ tone: "brand", title: `${file.name} downloaded`, body: "Attach it to an email, or put it on Drive, from your Downloads folder." });
     };
+    const said = show(makingPdf(sheet ? SHEET_NEXT : "It downloads as soon as it's ready."));
     void pdfFor(b.id, "share")
-      .then(async (m) => { if (!sheet || (await sharePdf(m.file, { title: b.invoice_number })) === "unsupported") download(m); })
-      .catch((e: unknown) => { const { why, todo } = noPdf(e); show({ tone: "neg", title: "The PDF wasn't made", body: words(why, todo) }); });
-  }, [isPhone, show, log]);
+      .then(async (m) => { dismiss(said); if (!sheet || (await sharePdf(m.file, { title: b.invoice_number })) === "unsupported") download(m); })
+      .catch((e: unknown) => { dismiss(said); const { why, todo } = noPdf(e); show({ tone: "neg", title: "The PDF wasn't made", body: words(why, todo) }); });
+  }, [isPhone, show, dismiss, log]);
 }
 
 /** "Copy link": the bill's address, for anyone signed in (PROTO sales/parts.jsx:376); where copying is refused, the link is shown instead. */

@@ -2,7 +2,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "@/test/render";
 import { canShareFiles, shareFile } from "./files";
-import { sharePdf, ShareHost, tellAboutPdf } from "./ShareHost";
+import { sharePdf, ShareHost, tell } from "./ShareHost";
+import { pastTheGuard } from "./testing";
 
 const FILE = { blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "KGH_2026-27_31.pdf", sheets: 1 };
 /** A phone's share sheet that takes files; active: whether the press that asked still counts. */
@@ -50,16 +51,17 @@ test("a press that ran out while the PDF was made: the host asks for one more pr
   renderApp(<ShareHost />);
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   const first = sharePdf(FILE, { title: "KGH/2026-27/31" });
-  expect(await screen.findByRole("dialog", { name: "Your PDF is ready" })).toHaveTextContent("KGH_2026-27_31.pdf took a moment to make, so the phone asks once more");
+  const dialog = await screen.findByRole("dialog", { name: "Your PDF is ready" });
+  expect(dialog).toHaveTextContent("KGH_2026-27_31.pdf took a moment to make, so the phone asks once more");
   expect(share).not.toHaveBeenCalled();
-  act(() => { vi.advanceTimersByTime(400); }); // the dialog's guard against the press that opened it
+  await pastTheGuard(dialog); // the dialog's guard against the press that opened it
   pressesCountInTheClickOnly();
   await userEvent.click(screen.getByRole("button", { name: "Share" }));
   expect(await first).toBe("shared");
   expect(share).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   const second = sharePdf(FILE, { title: "KGH/2026-27/31" });
-  await screen.findByRole("dialog", { name: "Your PDF is ready" });
-  act(() => { vi.advanceTimersByTime(400); });
+  await pastTheGuard(await screen.findByRole("dialog", { name: "Your PDF is ready" }));
   await userEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(await second).toBe("cancelled");
   expect(share).toHaveBeenCalledTimes(1);
@@ -70,8 +72,7 @@ test("a share sheet that refuses the host's own press too can't share here: unsu
   renderApp(<ShareHost />);
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   const asked = sharePdf(FILE, { title: "KGH/2026-27/31" });
-  await screen.findByRole("dialog", { name: "Your PDF is ready" });
-  act(() => { vi.advanceTimersByTime(400); });
+  await pastTheGuard(await screen.findByRole("dialog", { name: "Your PDF is ready" }));
   pressesCountInTheClickOnly();
   share.mockRejectedValueOnce(Object.assign(new Error("not allowed here"), { name: "NotAllowedError" }));
   await userEvent.click(screen.getByRole("button", { name: "Share" }));
@@ -91,7 +92,7 @@ test("a newer ask takes the place of one still showing, which is cancelled; Shar
   await act(async () => { newer = sharePdf({ ...FILE, name: "KGH_2026-27_32.pdf" }, { title: "KGH/2026-27/32" }); });
   expect(await older).toBe("cancelled");
   await waitFor(() => expect(screen.getByRole("dialog", { name: "Your PDF is ready" })).toHaveTextContent("KGH_2026-27_32.pdf took a moment to make"));
-  act(() => { vi.advanceTimersByTime(400); });
+  await pastTheGuard(screen.getByRole("dialog", { name: "Your PDF is ready" }));
   pressesCountInTheClickOnly();
   const button = screen.getByRole("button", { name: "Share" });
   await userEvent.click(button);
@@ -114,8 +115,16 @@ test("a host that leaves the screen while it asks settles the ask as cancelled, 
   expect(await asked).toBe("cancelled");
 });
 
-test("code with no screen of its own can say what happened: the host shows it", async () => {
+test("code with no screen of its own can say what happened, and take back a word that no longer holds: the host shows it", async () => {
+  // with no host on screen there's no one to tell, and nothing to take back
+  expect(() => tell({ title: "Making the PDF…" })()).not.toThrow();
   renderApp(<ShareHost />);
-  act(() => tellAboutPdf({ tone: "neg", title: "The PDF wasn't made", body: "Try again in a minute." }));
+  act(() => { tell({ tone: "neg", title: "The PDF wasn't made", body: "Try again in a minute." }); });
   expect(await screen.findByText("The PDF wasn't made")).toBeInTheDocument();
+  let away = () => {};
+  act(() => { away = tell({ tone: "brand", title: "Making the PDF…" }); });
+  expect(screen.getByText("Making the PDF…")).toBeInTheDocument();
+  act(() => away());
+  await waitFor(() => expect(screen.queryByText("Making the PDF…")).not.toBeInTheDocument());
+  expect(screen.getByText("The PDF wasn't made")).toBeInTheDocument();
 });

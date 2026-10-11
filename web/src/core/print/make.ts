@@ -55,6 +55,15 @@ function dataUrl(blob: Blob): Promise<string> {
   });
 }
 
+/**
+ * react-pdf's code (or the bill's document) didn't come: each browser's words for a module that didn't load, or Vite's
+ * for a stylesheet one needs. After a deploy the files this page knows are gone, and a browser keeps a failed load, so
+ * only a reload brings them: Try again can't.
+ */
+export function pdfCodeMissing(e: unknown): boolean {
+  return e instanceof Error && /dynamically imported module|Importing a module script failed|Unable to preload CSS/i.test(e.message);
+}
+
 /** The PDF of these bills, and whether a firm's signature it went without may come next time (Signature's `again`). */
 async function draw(bills: PrintBill[], copies: Copies, meta: { title: string; subject?: string }): Promise<{ blob: Blob; again: boolean }> {
   const [{ pdf }, { BillDocument }, signs] = await Promise.all([

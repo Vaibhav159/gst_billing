@@ -5,7 +5,7 @@ import { renderHook } from "@testing-library/react";
 import { wireDetail } from "@/core/sales/fixtures";
 import { toBillDetail } from "@/core/sales/wire";
 import { serveWith } from "@/test/server";
-import { billFile, makeBillPdf, sendBankChoice, sendFile, signatureData, useSendBankChoice, useSendFile, type PdfFile } from "./make";
+import { billFile, makeBillPdf, pdfCodeMissing, sendBankChoice, sendFile, signatureData, useSendBankChoice, useSendFile, type PdfFile } from "./make";
 import { copyPages, printBill, type PrintBill } from "./model";
 
 const pdf = vi.hoisted(() => vi.fn());
@@ -138,4 +138,17 @@ test("the document maker is handed every bill, each with its copies, in one file
   const b = printBill(bill({ id: 413, invoice_number: "KGH/2026-27/32" }), { showBank: true });
   expect(await makeBillPdf([a, b], "all", { title: "Sales · 2 bills" })).toBeInstanceOf(Blob);
   expect(made()[0]).toMatchObject({ bills: [{ number: "KGH/2026-27/31" }, { number: "KGH/2026-27/32" }], copies: copyPages("all"), title: "Sales · 2 bills" });
+});
+
+test("react-pdf's code that didn't come (the app changed since the page opened) is told apart from a PDF that failed: each browser's words for a module that didn't load", () => {
+  // Chrome and Edge, Firefox, Safari, and Vite's own for a stylesheet a chunk needs
+  expect(pdfCodeMissing(new TypeError("Failed to fetch dynamically imported module: https://bills.example/assets/react-pdf.browser-Bx1c2.js"))).toBe(true);
+  expect(pdfCodeMissing(new TypeError("error loading dynamically imported module: https://bills.example/assets/BillDocument-9f8e.js"))).toBe(true);
+  expect(pdfCodeMissing(new TypeError("Importing a module script failed."))).toBe(true);
+  expect(pdfCodeMissing(new Error("Unable to preload CSS for /assets/print-3e1a.css"))).toBe(true);
+  // anything else is the PDF itself
+  expect(pdfCodeMissing(new Error("the font didn't load"))).toBe(false);
+  expect(pdfCodeMissing(new TypeError("Cannot read properties of undefined (reading 'firm')"))).toBe(false);
+  expect(pdfCodeMissing("Failed to fetch dynamically imported module")).toBe(false);
+  expect(pdfCodeMissing(undefined)).toBe(false);
 });

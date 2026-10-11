@@ -93,7 +93,7 @@ test("All three copies: three sheets, each marked and each full-size view named 
   await userEvent.click(screen.getByRole("button", { name: "Make these the default for every bill" }));
   await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ copies: "all", show_bank: false }));
   expect(await screen.findByText("Saved as the default")).toBeInTheDocument();
-});
+}, 15_000); // three papers and four presses: past 5 s on a busy 2-CPU machine (it passes alone)
 
 test("counter staff choose copies for this print; making them the default is the owner's", async () => {
   serve();
@@ -508,4 +508,55 @@ test("v2's Share PDF link (…/print?share=1) arrives with Share ready: it takes
   } finally {
     Object.assign(navigator, { share: undefined, canShare: undefined });
   }
+});
+
+/* ── Task 6's review leftovers (Task 7, commit A) ── */
+
+test("on a phone, the options sheet's Download PDF and Print show the PDF on its way, then hand it out once it's made", async () => {
+  serve();
+  phone(true);
+  let made: (f: PdfFile) => void = () => {};
+  vi.mocked(billFile).mockReturnValueOnce(new Promise<PdfFile>((resolve) => { made = resolve; }));
+  open();
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  await userEvent.click(await screen.findByRole("button", { name: "Options" }));
+  act(() => { vi.advanceTimersByTime(400); }); // past the sheet's guard against the press that opened it
+  const dialog = screen.getByRole("dialog", { name: "Print options" });
+  const buttons = [within(dialog).getByRole("button", { name: "Download PDF" }), within(dialog).getByRole("button", { name: "Print" })];
+  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(1));
+  for (const b of buttons) {
+    expect(b).toHaveAttribute("aria-busy", "true");
+    expect(b).toBeDisabled();
+    expect(b).toHaveAttribute("title", "Making the PDF…");
+  }
+  await act(async () => made({ blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "KGH_2026-27_31.pdf", sheets: 1 }));
+  for (const b of buttons) {
+    expect(b).not.toHaveAttribute("aria-busy");
+    expect(b).toBeEnabled();
+  }
+  await userEvent.click(buttons[0]);
+  expect(await screen.findByText("Downloaded KGH_2026-27_31.pdf")).toBeInTheDocument();
+});
+
+test("a quiet remake that fails keeps the unsigned PDF made before it, rather than saying the PDF wasn't made", async () => {
+  let detail = wireDetail({ firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=abc" }) });
+  salesServer([["GET", "sales/412/", () => detail], ["GET", "shop-settings/", () => SETTINGS], ["POST", "audit-logs/log/", () => ({ ok: true })]]);
+  const unsigned = new Blob(["%PDF-1.3 unsigned"], { type: "application/pdf" });
+  vi.mocked(billFile)
+    .mockImplementationOnce(async (d, o) => ({ blob: unsigned, name: printBill(d, o).file, sheets: 1, again: true }))
+    .mockRejectedValueOnce(new Error("the signature's server failed again"));
+  const qc = testQueryClient();
+  openWith(qc);
+  const pdf = await screen.findByRole("button", { name: "PDF" });
+  await waitFor(() => expect(pdf).toBeEnabled());
+  // the bill comes back with the signature's link signed afresh: made again quietly, and that fails
+  detail = { ...detail, firm: firmWith({ signature_url: "/api/media/signatures/3.png?s=def" }) };
+  await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
+  await waitFor(() => expect(billFile).toHaveBeenCalledTimes(2));
+  await act(async () => { await vi.mocked(billFile).mock.results[1].value.catch(() => {}); });
+  expect(screen.queryByText("The PDF wasn't made")).not.toBeInTheDocument();
+  expect(pdf).toBeEnabled();
+  await userEvent.click(pdf);
+  expect(URL.createObjectURL).toHaveBeenLastCalledWith(unsigned);
+  expect(await screen.findByText("Downloaded KGH_2026-27_31.pdf")).toBeInTheDocument();
 });

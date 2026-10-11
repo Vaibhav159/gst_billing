@@ -1,7 +1,22 @@
 // What printing's tests share (only tests import this file): a react-pdf document's element tree, a real PDF's plain
-// parts, and bills at the edges of the page plan, as overrides of the contract's example (core/sales/fixtures).
+// parts, bills at the edges of the page plan, as overrides of the contract's example (core/sales/fixtures), and the step
+// past ShareHost's dialog's guard.
 import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
+import { act, waitFor } from "@testing-library/react";
 import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
+
+/**
+ * Past a dialog's guard against the press that opened it (core/ui's useGhostGuard: 350 ms from when its effect runs), in
+ * a test that fakes Date. A dialog that opens outside a press, as ShareHost's does once a PDF is made, can run that effect
+ * a moment after it shows (on a busy machine, after the test has stepped the clock), and the guard then swallows the next
+ * press. The dialog's focus trap, run with that effect, gives it the focus 20 ms later, so once it has the focus the clock
+ * steps past the guard. For a dialog just opened: one opened again while it still closes may hold the focus from before,
+ * so a test waits for it to go first.
+ */
+export async function pastTheGuard(dialog: HTMLElement): Promise<void> {
+  await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+  act(() => { vi.advanceTimersByTime(400); });
+}
 
 /* ── A document's element tree ─────────────────────────── */
 export type PdfNode = { type: string; props: Record<string, unknown>; children: (PdfNode | string)[] };

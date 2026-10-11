@@ -1,9 +1,7 @@
 // What the print, batch print and bulk PDF pages share: a file made as soon as its choices are known, the bank-details
-// switch, the audit log's line for printing, and several bills in words.
-import { useCallback, useEffect, useState } from "react";
+// switch, and several bills in words. Their lines in the audit log are core/print/log.ts's.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { useMutation } from "@tanstack/react-query";
-import { api } from "@/core/api/client";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { hasBank } from "@/core/print/model";
 import type { FirmOnBill } from "@/core/sales/types";
@@ -14,31 +12,28 @@ import { Switch } from "@/core/ui";
  * What `make` makes for `key` (null: nothing to make yet), made again when the key changes, on retry or on remake. Only
  * the file of the key now showing is handed out, so a choice just changed never prints the one before it. retry: the
  * person's Try again, which clears the failure at once (retrying until that attempt ends); remake: made again quietly,
- * the one made still handed out meanwhile (a PDF that went without its signature).
+ * the one made still handed out meanwhile (a PDF that went without its signature), and kept if that attempt fails.
  */
 export function useMade<T>(key: string | null, make: () => Promise<T>): { value: T | null; failed: boolean; retrying: boolean; retry: () => void; remake: () => void } {
   const [tries, setTries] = useState(0);
   const [made, setMade] = useState<{ key: string; value: T | null; failed: boolean } | null>(null);
   // the key a Try again is making again
   const [retrying, setRetrying] = useState<string | null>(null);
+  // the key a quiet remake is making again: one that fails leaves the file made as it is
+  const quiet = useRef<string | null>(null);
   useEffect(() => {
     if (key === null) return undefined;
     let live = true;
+    const remaking = quiet.current === key;
+    quiet.current = null;
     const end = (m: { key: string; value: T | null; failed: boolean }) => { if (!live) return; setMade(m); setRetrying(null); };
-    make().then((value) => end({ key, value, failed: false }), () => end({ key, value: null, failed: true }));
+    make().then((value) => end({ key, value, failed: false }), () => { if (!remaking) end({ key, value: null, failed: true }); });
     return () => { live = false; };
   }, [key, tries]); // eslint-disable-line react-hooks/exhaustive-deps -- `make` changes with `key`
-  const retry = useCallback(() => { setMade(null); setRetrying(key); setTries((n) => n + 1); }, [key]);
-  const remake = useCallback(() => setTries((n) => n + 1), []);
+  const retry = useCallback(() => { quiet.current = null; setMade(null); setRetrying(key); setTries((n) => n + 1); }, [key]);
+  const remake = useCallback(() => { quiet.current = key; setTries((n) => n + 1); }, [key]);
   const now = made && made.key === key ? made : null;
   return { value: now?.value ?? null, failed: now?.failed ?? false, retrying: retrying !== null && retrying === key, retry, remake };
-}
-
-export type PrintLog = { action: "printed" | "exported"; entity_id: number; entity_name: string; details: string };
-/** A print or a PDF goes into the audit log as v2's bulk PDFs wrote it (contract §2.2). A log that fails stops nothing. */
-export function useLogPrint(): (entry: PrintLog) => void {
-  const { mutate } = useMutation({ mutationFn: (e: PrintLog) => api.post("audit-logs/log/", { ...e, entity: "invoice" }) });
-  return useCallback((e) => mutate(e), [mutate]);
 }
 
 /**

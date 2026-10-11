@@ -11,8 +11,9 @@ import { billQuery, useBill, useSaveShopSettings, useShopSettings } from "@/core
 import { useAuth } from "@/core/auth/AuthProvider";
 import { inr, plural } from "@/core/format";
 import { printFile, saveFile } from "@/core/print/files";
+import { billLog, useLogPrint } from "@/core/print/log";
 import { billFile, useSendBankChoice, useSendFile } from "@/core/print/make";
-import { COPY_OPTIONS, copiesWords, copyPages, hasBank, printBill } from "@/core/print/model";
+import { COPY_OPTIONS, copyPages, hasBank, printBill } from "@/core/print/model";
 import { Paper, PrintCopy, ScaledPaper } from "@/core/print/Paper";
 import { sharePdf } from "@/core/print/ShareHost";
 import { billMessage, mobileOf } from "@/core/sales/share";
@@ -24,7 +25,7 @@ import { DeletedBill } from "../bill/DeletedBill";
 import { MissingBill } from "../bill/MissingBill";
 import { useSendBill, useSendReady } from "../actions/useSendBill";
 import { WhatsAppDialog } from "../actions/WhatsAppDialog";
-import { BankSwitch, useLogPrint, useMade } from "./parts";
+import { BankSwitch, useMade } from "./parts";
 
 /** Until the bill comes: the paper's outline, or why it can't come, with Try again when asking again can help. */
 function Preparing({ phone, problem, retry }: { phone: boolean; problem: ApiProblem | null; retry?: () => void }) {
@@ -140,10 +141,9 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   const sendWait = ready ? undefined : "Getting the shop's WhatsApp message";
   // the bill's exact total, as the PDF prints it (Ruling 1B-12), and the firm's name as useSendBill sends it
   const message = billMessage(s?.share_message, { invoice_number: b.invoice_number, invoice_date: b.invoice_date, total: b.total_amount, firm: b.business_name, customer: c });
-  const entityName = `#${b.invoice_number} - ${c.name}`;
 
   // a PDF downloaded goes into the audit log, from PDF or from Share's download
-  const exported = () => log({ action: "exported", entity_id: b.id, entity_name: entityName, details: `PDF downloaded: ${copiesWords(copies).toLowerCase()}` });
+  const exported = () => log(billLog("exported", b, copies));
   const download = () => {
     if (!file) return;
     saveFile(file.blob, file.name);
@@ -153,7 +153,7 @@ function PrintScreen({ b, phone, note }: { b: BillDetail; phone: boolean; note: 
   const print = () => {
     if (!file) return;
     if (!printFile(file.blob)) { show({ tone: "brand", title: "The PDF didn't open", body: "The browser stopped the new tab. Allow pop-ups for this app to print from it, or use PDF." }); return; }
-    log({ action: "printed", entity_id: b.id, entity_name: entityName, details: `Printed: ${copiesWords(copies).toLowerCase()}` });
+    log(billLog("printed", b, copies));
   };
   const share = () => {
     if (!file) return;

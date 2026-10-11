@@ -3,14 +3,14 @@
 // sends and shares that run outside React (deliver) a way to say what happened. Mounted once, in the app's layout.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
-import { Button, Dialog, useToast, type ToastInput } from "@/core/ui";
+import { Button, Dialog, useToast, type ToastApi, type ToastInput } from "@/core/ui";
 import { shareFile } from "./files";
 import type { PdfFile } from "./make";
 
 type Shared = "shared" | "cancelled" | "unsupported";
 type Ask = { file: PdfFile; title: string; text?: string; done: (r: Shared) => void };
 let asker: ((a: Ask) => void) | null = null;
-let teller: ((t: ToastInput) => void) | null = null;
+let teller: Pick<ToastApi, "show" | "dismiss"> | null = null;
 
 /**
  * The share sheet with the PDF: at once while the press still counts, else after the host's own Share press.
@@ -25,13 +25,18 @@ export async function sharePdf(file: PdfFile, { title, text }: { title: string; 
   });
 }
 
-/** A word from code with no screen of its own (a send runs in deliver, outside React): about its PDF, or a tab the browser stopped. */
-export function tellAboutPdf(t: ToastInput): void {
-  teller?.(t);
+/**
+ * A word from code with no screen of its own (a send runs in deliver, outside React), shown by the host. Returns what
+ * takes it back once it no longer holds ("Making the PDF…" once the PDF is made); with no host on screen, nothing.
+ */
+export function tell(t: ToastInput): () => void {
+  const host = teller;
+  const id = host?.show(t);
+  return () => { if (host && id !== undefined) host.dismiss(id); };
 }
 
 export function ShareHost() {
-  const { show } = useToast();
+  const toasts = useToast();
   const [ask, setAsk] = useState<Ask | null>(null);
   // the ask whose share sheet is up: its Share waits for the sheet to close
   const [sharing, setSharing] = useState<Ask | null>(null);
@@ -52,15 +57,15 @@ export function ShareHost() {
       setAsk(a);
     };
     asker = take;
-    teller = show;
+    teller = toasts;
     return () => {
       if (asker === take) asker = null;
-      if (teller === show) teller = null;
+      if (teller === toasts) teller = null;
       const a = current.current;
       current.current = null;
       a?.done("cancelled");
     };
-  }, [show, settle]);
+  }, [toasts, settle]);
   const shareNow = () => {
     const a = current.current;
     if (!a || sharing === a) return;
