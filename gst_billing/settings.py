@@ -435,3 +435,5 @@ LOGGING = {
         },
     },
 }
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"

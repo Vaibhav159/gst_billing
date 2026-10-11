@@ -419,3 +419,5 @@ APPYFLOW_API_URL = os.getenv("APPYFLOW_API_URL", "https://appyflow.in/api/verify
 # How long a taxpayer lookup stays cached (default 180 days). Longer = fewer
 # metered requests; names/addresses rarely change.
 GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"

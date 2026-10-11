@@ -33,3 +33,4 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
 
 # PyJWT warns on HMAC keys under 32 bytes; tests sign with a long synthetic key.
 SIMPLE_JWT = {**SIMPLE_JWT, "SIGNING_KEY": "test-only-jwt-signing-key-not-a-secret-0123456789"}
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"

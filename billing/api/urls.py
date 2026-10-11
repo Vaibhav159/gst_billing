@@ -1,4 +1,4 @@
-from django.urls import include, path
+from django.urls import include, path, re_path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenVerifyView
 
@@ -35,6 +35,7 @@ from .purchase_files import PurchaseFilesView
 from .purchase_reader import AiReadsView, PurchaseReadView
 from .purchases import PurchaseBinViewSet, PurchasesViewSet
 from .reconciliation import ReconciliationView
+from .registry import RegistryView
 from .sales import BinViewSet, SalesViewSet
 from .search import QuickSearchView
 from .setup import SetupView
@@ -119,6 +120,7 @@ urlpatterns = [
     path("catalog/", CatalogList.as_view(), name="catalog"),
     path("catalog/<int:pk>/", CatalogDetail.as_view(), name="catalog-detail"),
     path("setup/", SetupView.as_view(), name="setup"),
+    re_path(r"^registry/(?P<gstin>[^/]{1,20})/$", RegistryView.as_view(), name="registry"),
     path("", include(router.urls)),
     path(
         "ai/invoice/process/",

@@ -20,6 +20,7 @@ must still be able to record).
 
 import logging
 import re
+from datetime import datetime
 
 import requests
 from django.conf import settings
@@ -130,6 +131,25 @@ def _fetch_tally(gstin: str) -> dict | None:
     }
 
 
+def registry_fields(data: dict) -> dict:
+    """Derive the extra registry fields from new or already-cached provider answers."""
+    address = data.get("address") or ""
+    pins = list(re.finditer(r"(?<![0-9])[0-9]{6}(?![0-9])", address))
+    pin = pins[-1] if pins else None
+    city = address[:pin.start()].rstrip(" ,-").rsplit(",", 1)[-1].strip() if pin else ""
+    registered = data.get("registered_on") or data.get("registration_date") or ""
+    day = ""
+    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            day = datetime.strptime(registered, pattern).date().isoformat()
+            break
+        except (TypeError, ValueError):
+            continue
+    status = data.get("status") or ""
+    return {**data, "pin_code": pin.group() if pin else "", "city": city, "registered_on": day,
+            "active": not any(word in status.lower() for word in ("cancelled", "suspended"))}
+
+
 def lookup(gstin: str) -> dict:
     """Validation + derivation always; provider details when possible.
     `source` tells the UI how much to trust: checksum | cache | provider.
@@ -143,13 +163,13 @@ def lookup(gstin: str) -> dict:
 
     cached = cache.get(_CACHE_PREFIX + g)
     if cached is not None:
-        return {**result, **cached, "source": "cache"}
+        return {**result, **registry_fields(cached), "source": "cache"}
 
     fetched = _fetch_tally(g)
     if fetched is not None:
         ttl = int(getattr(settings, "GSTIN_CACHE_SECONDS", _CACHE_TTL_DEFAULT))
         cache.set(_CACHE_PREFIX + g, fetched, ttl)
-        return {**result, **fetched, "source": "provider"}
+        return {**result, **registry_fields(fetched), "source": "provider"}
 
     result["hint"] = (
         "Registry lookup unreachable right now — state and PAN were derived "
