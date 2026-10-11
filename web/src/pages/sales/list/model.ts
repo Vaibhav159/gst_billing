@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
-import { rowsOf, salesKeys, useSalesFacets, useSalesList, type SalesOrdering, type SalesQuery } from "@/core/api/sales";
+import { rowsOf, salesKeys, useSalesFacets, useSalesList, useSalesPage, type SalesOrdering, type SalesQuery } from "@/core/api/sales";
 import { addMonths, date, dateShort, fyOf, monthLabel, rangeLabel, todayIST } from "@/core/format";
 import { SEGMENTS } from "@/core/sales/pos";
 import type { PaymentMode, Segment } from "@/core/sales/types";
@@ -117,7 +117,7 @@ const STATUS_QUERY: Record<StatusFilter, SalesQuery> = {
 
 /**
  * What the server is asked. A typed search looks through the whole FY, not just the picked month or today, unless
- * "only" narrows it back (PROTO SalesList.jsx:100-105); it also asks for the other years' matches (facets' elsewhere).
+ * "only" narrows it back (PROTO SalesList.jsx:100-105). Other years are asked about only after an empty answer.
  */
 export function queryOf(s: ListState, { today, fy, q }: { today: string; fy: string; q: string }): { query: SalesQuery; effMonth: Period; widened: boolean } {
   const searching = q.trim() !== "";
@@ -135,7 +135,7 @@ export function queryOf(s: ListState, { today, fy, q }: { today: string; fy: str
   if (s.quality) query[s.quality] = true;
   if (s.gstRate != null) query.gst_rate = s.gstRate;
   if (s.segment) query.segment = s.segment;
-  if (searching) { query.q = q.trim(); query.facets = true; }
+  if (searching) query.q = q.trim();
   return { query, effMonth, widened };
 }
 
@@ -166,8 +166,11 @@ export function useListModel() {
   // typing stays instant; the server is asked once it has rested (the database is Neon's free plan)
   const dq = useDebounced(state.q.trim(), 300);
   const { query, effMonth, widened } = queryOf(state, { today, fy, q: dq });
-  const list = useSalesList(firmId, query);
+  const list = useSalesList(firmId, query, fy);
   const facets = useSalesFacets(firmId, fy);
+  const first = list.data?.pages[0];
+  const emptySearch = Boolean(query.q) && state.month !== "years" && !list.isPlaceholderData && list.isSuccess && first?.results.length === 0;
+  const otherYears = useSalesPage(firmId, { ...query, facets: "elsewhere" }, 1, emptySearch);
   // the customer a link or a pick narrowed the list to, by name (1C's useCustomer: a row already loaded names them at once)
   const customerName = useCustomer(state.customer).data?.name || null;
 
@@ -201,9 +204,8 @@ export function useListModel() {
   }, [fy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => rowsOf(list.data), [list.data]);
-  const first = list.data?.pages[0];
   const summary = first?.summary ?? null;
-  const elsewhere = first?.facets?.elsewhere ?? [];
+  const elsewhere = emptySearch ? otherYears.data?.facets?.elsewhere ?? [] : [];
   // the months of the picked FY so far, with a short note (PROTO sales/lib.js:88-100)
   const months = useMemo(() => (facets.data?.months ?? []).map((x) => ({
     ...x, note: x.month === cur ? `1 to ${Number(today.slice(8))} ${monthLabel(cur, { year: false })}` : x.locked ? "" : `file by ${dateShort(`${addMonths(x.month, 1)}-11`)}`,

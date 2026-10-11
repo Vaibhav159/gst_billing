@@ -43,6 +43,6 @@ test("what the server is asked: the period, the filters as flags, and a search t
   expect(ask("month=2026-09&paid=none&customer=7&sort=-total").query).toEqual({ ordering: "-total", month: "2026-09", payment_mode: "none", customer_id: 7 });
   expect(ask("month=years&status=cancelled&no_hsn=1").query).toEqual({ ordering: "-date", status: "cancelled", no_hsn: true });
   expect(ask("start_date=2026-09-01").query).toEqual({ ordering: "-date", start_date: "2026-09-01" });
-  expect(ask("month=2026-09", "anil")).toMatchObject({ effMonth: "all", widened: true, query: { fy: "2026-27", q: "anil", facets: true } });
+  expect(ask("month=2026-09", "anil")).toEqual({ effMonth: "all", widened: true, query: { ordering: "-date", fy: "2026-27", q: "anil" } });
   expect(ask("month=2026-09&only=1", "anil")).toMatchObject({ effMonth: "2026-09", widened: false, query: { month: "2026-09", q: "anil" } });
 });

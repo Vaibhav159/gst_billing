@@ -110,7 +110,8 @@ test("a search looks through the whole year, not just the month picked, with its
   for (const typed of ["a", "an", "ani", "anil"]) fireEvent.change(box, { target: { value: typed } });
   await pass(300); // typing has paused: the search asks
   expect(screen.getByText(/Searching all of FY 2026-27, not just September 2026\./)).toBeInTheDocument();
-  expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", q: "anil", facets: 1, status: "cancelled" });
+  expect(lists(calls).at(-1)?.params).toMatchObject({ fy: "2026-27", q: "anil", status: "cancelled" });
+  expect(lists(calls).at(-1)?.params).not.toHaveProperty("facets");
   fireEvent.click(screen.getByRole("button", { name: "Only September" }));
   await pass(0);
   expect(lists(calls).at(-1)?.params).toMatchObject({ month: "2026-09", q: "anil" });
@@ -159,12 +160,15 @@ test("ticking bills says what's selected; the owner deletes them together, and U
 });
 
 test("a search that finds nothing here says where else it found bills, and offers every year", async () => {
-  salesServer([["GET", "sales/", (c) => ({ ...wirePage([]), facets: wireFacets(isFacets(c) ? {} : { elsewhere: [{ fy: "2025-26", bills: 2 }] }) })]]);
+  const { calls } = salesServer([["GET", "sales/", (c) => ({ ...wirePage([]), ...(isFacets(c) ? { facets: wireFacets() } : c.params.facets === "elsewhere" ? { facets: { elsewhere: [{ fy: "2025-26", bills: 2 }] } } : {}) })]]);
   mount("/sales?q=zzz");
   expect(await screen.findByText("No sales bills match “zzz”")).toBeInTheDocument();
-  expect(screen.getByText(/Found 2 bills in FY 2025-26\.$/)).toBeInTheDocument();
+  expect(await screen.findByText(/Found 2 bills in FY 2025-26\.$/)).toBeInTheDocument();
+  expect(calls.filter((c) => c.params.q === "zzz").map((c) => c.params.facets)).toEqual([undefined, "elsewhere"]);
   await userEvent.click(screen.getByRole("button", { name: "Search all years (2)" }));
   await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("month=years"));
+  await waitFor(() => expect(calls.filter((c) => c.params.q === "zzz")).toHaveLength(3));
+  expect(calls.filter((c) => c.params.facets === "elsewhere")).toHaveLength(1);
 });
 
 test("a viewer is told what they can do, and making bills isn't offered", async () => {

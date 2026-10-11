@@ -23,7 +23,7 @@ export type SalesQuery = {
   payment_mode?: "cash" | "bank" | "credit" | "mixed" | "none"; status?: BillStatus;
   unsent?: boolean; credit?: boolean; cash?: boolean; itax?: boolean; check?: boolean; paper?: boolean;
   gst_rate?: string; segment?: Segment; empty?: boolean; no_hsn?: boolean; dups?: boolean;
-  number?: string; q?: string; ordering?: SalesOrdering; facets?: boolean;
+  number?: string; q?: string; ordering?: SalesOrdering; facets?: boolean | "months" | "elsewhere"; summary?: 0;
 };
 
 /** A list query as the API's params: one firm (or none for all), a true flag as 1, paper as 1 or 0, nothing for what isn't set. */
@@ -47,8 +47,8 @@ export function salesParams(firmId: FirmId, query: SalesQuery, page?: number, pa
  */
 export const salesKeys = {
   all: ["sales"] as const,
-  list: (firmId: FirmId | null, query: SalesQuery) => ["sales", "list", firmId, query] as const,
-  facets: (firmId: FirmId | null, fy: string) => ["sales", "facets", firmId, fy] as const,
+  list: (firmId: FirmId | null, query: SalesQuery, scopeFy = query.fy) => ["sales", "list", firmId, query, scopeFy] as const,
+  facets: (firmId: FirmId | null, fy: string) => ["sales", "facets", firmId, fy, todayIST()] as const,
   page: (firmId: FirmId | null, query: SalesQuery, pageSize: number) => ["sales", "page", firmId, query, pageSize] as const,
   today: (day: string) => ["sales", "today", day] as const,
   one: (id: number | null) => ["sales", "bill", id] as const,
@@ -69,16 +69,16 @@ export const salesKeys = {
  * facets when asked for. While another filter is asked for, the last list stays on screen until the new one comes; a
  * new firm or year doesn't keep it, so one firm's bills and money never show under another's name.
  */
-export function useSalesList(firmId: FirmId | null, query: SalesQuery) {
+export function useSalesList(firmId: FirmId | null, query: SalesQuery, scopeFy = query.fy) {
   return useInfiniteQuery({
-    queryKey: salesKeys.list(firmId, query),
+    queryKey: salesKeys.list(firmId, query, scopeFy),
     initialPageParam: 1,
     queryFn: firmId === null ? skipToken : async ({ pageParam, signal }) => toSalesPage((await api.get("sales/", {
-      params: salesParams(firmId, pageParam === 1 ? query : { ...query, facets: false }, pageParam, SALES_PAGE_SIZE), signal,
+      params: salesParams(firmId, pageParam === 1 ? query : { ...query, facets: false, summary: 0 }, pageParam, SALES_PAGE_SIZE), signal,
     })).data),
     getNextPageParam: (last, all) => (last.next ? all.length + 1 : undefined),
     // (after queryFn: TypeScript reads the page's type from it before it types this function's arguments)
-    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === firmId && prevQuery.queryKey[3].fy === query.fy ? prev : undefined),
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === firmId && prevQuery.queryKey[4] === scopeFy ? prev : undefined),
   });
 }
 
@@ -94,6 +94,7 @@ export function rowsOf(data: InfiniteData<SalesPage> | undefined): BillRow[] {
 export function useSalesFacets(firmId: FirmId | null, fy: string) {
   return useQuery({
     queryKey: salesKeys.facets(firmId, fy),
+    staleTime: 5 * 60_000,
     queryFn: firmId === null ? skipToken : async ({ signal }) => toFacets((await api.get("sales/", { params: salesParams(firmId, { fy, facets: true }, 1, 1), signal })).data?.facets),
   });
 }
@@ -230,7 +231,14 @@ export function useCancelBill() {
 /** To the bin: the answer is the bin row, whose id Undo and Restore use. */
 export function useDeleteBill() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, reason }: { id: number; reason: string }) => toBinRow((await api.delete(`sales/${id}/`, { data: { reason } })).data), onSuccess: () => invalidateSales(qc) });
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason: string }) => toBinRow((await api.delete(`sales/${id}/`, { data: { reason } })).data),
+    onSuccess: (binned, { id }) => {
+      const outcome: BillOutcome = { kind: "deleted", binned };
+      qc.setQueryData(salesKeys.one(id), outcome);
+      invalidateSales(qc, id);
+    },
+  });
 }
 /** Back from the bin under the bill's own id (binId is the bin row's id). */
 export function useRestoreBill() {
