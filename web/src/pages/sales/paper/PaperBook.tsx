@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, BookOpenText, CheckCircle2, FileText, Info, Lock } from "lucide-react";
+import { problemOf } from "@/core/api/errors";
 import { salesKeys, usePaperBook } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
@@ -79,8 +80,10 @@ function PaperBookScreen({ firms, firmId, month: ym, months, today, onPick }: Sc
   const view: typeof book = { ...book, refetch: () => qc.refetchQueries({ queryKey: key }).then(() => book) };
   // A bill saved since the book last answered told it to ask again (invalidateSales), and a refresh that fails leaves it
   // so (TanStack keeps the query invalidated): until a fresh answer comes, its next number may be the bill just saved, so
-  // Enter bill waits, as the saved panel's Next does. The stale note's Try again asks again
+  // Enter bill names none and waits, as the saved panel's Next does: busy while the book asks; after a refresh that
+  // failed, for the stale note's Try again (offline, TanStack asks again by itself once the device is back)
   const waits = Boolean(qc.getQueryState(key)?.isInvalidated);
+  const failed = waits && book.isError && !book.isFetching && problemOf(book.error).kind !== "offline";
   const pb = book.data;
   const firm = firms.find((f) => f.id === firmId) as Firm;
   const month = monthLabel(ym, { long: true, year: false });
@@ -89,12 +92,13 @@ function PaperBookScreen({ firms, firmId, month: ym, months, today, onPick }: Sc
   // the date it most likely has: this session's last paper bill in the month, else the server's (the bill before it)
   const remembered = lastPaperDate(firmId);
   const nextDate = pb ? (remembered.startsWith(ym) ? remembered : pb.next.invoice_date) : "";
-  const blocked = pb?.locked ? `${monthLabel(ym, { long: true })} is filed for ${firm.name}, so no bill can be added until the owner unlocks it in GST returns.`
-    : !can("bill.create") ? whyNot("bill.create") : waits ? "Enter bill waits for the paper book's fresh answer." : "";
+  const cant = pb?.locked ? `${monthLabel(ym, { long: true })} is filed for ${firm.name}, so no bill can be added until the owner unlocks it in GST returns.`
+    : !can("bill.create") ? whyNot("bill.create") : "";
+  const blocked = cant || (failed ? "Try again to get the paper book's next number." : waits ? "Getting the paper book's next number" : "");
   const enterButton = pb ? (
-    <Button variant="primary" size="lg" icon={ArrowRight} full={isPhone} disabled={Boolean(blocked)} title={blocked || undefined}
+    <Button variant="primary" size="lg" icon={ArrowRight} full={isPhone} disabled={Boolean(blocked)} loading={!cant && waits && book.isFetching} title={blocked || undefined}
       onClick={() => navigate(paperLink(firmId, nextDate, pb.next.counter))}>
-      {`Enter bill ${pb.next.counter}`}
+      {waits ? "Enter bill" : `Enter bill ${pb.next.counter}`}
     </Button>
   ) : null;
   const pickers = (

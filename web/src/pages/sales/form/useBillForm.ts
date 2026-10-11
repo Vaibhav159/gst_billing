@@ -6,12 +6,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useCustomer, type Customer } from "@/core/api/customers";
 import { draftSettled, forgetDraft } from "@/core/api/drafts";
 import { lineErrors, linesErrors, problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
-import { useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesFacets, useSalesPage, useUpdateBill } from "@/core/api/sales";
+import { invalidateSales, salesKeys, useCheckNumber, useCreateBill, useNextNumber, usePaperBook, useSalesFacets, useSalesPage, useUpdateBill } from "@/core/api/sales";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { addMonths, fyOf, monthLabel, monthOf, todayIST } from "@/core/format";
 import { GST_STATES } from "@/core/ids";
@@ -173,24 +173,41 @@ export function useBillForm(start: Start) {
   /* ── the number: the paper bill's, typed, or the next one confirmed ── */
   const moved = Boolean(edit && bill && (f.firmId !== bill.business || fyOf(f.date || bill.invoice_date) !== bill.fy));
   const keep = Boolean(edit && bill && !moved && !f.numberTyped);
-  const next = useNextNumber(keep ? null : f.firmId, keep ? "" : f.date);
-  const book = usePaperBook(f.paper && !edit ? f.firmId : null, f.paper && !edit ? monthOf(f.date || today) : null);
-  const suggestion = f.paper && !edit ? (book.data && !book.data.locked ? String(book.data.next.counter) : "") : next.data ? String(next.data.counter) : "";
+  const nextFor = [keep ? null : f.firmId, keep ? "" : f.date] as const;
+  const next = useNextNumber(...nextFor);
+  const bookFor = [f.paper && !edit ? f.firmId : null, f.paper && !edit ? monthOf(f.date || today) : null] as const;
+  const book = usePaperBook(...bookFor);
+  // An answer cached before this form opened that a write has marked since (invalidateSales; a refresh that fails leaves
+  // it so) may be older than a bill just saved: its next number may be that bill's, and a check may call that number free.
+  // It's no answer until a fresh one comes, as the paper book's Enter bill waits (T7 re-review). One asked while the form
+  // is open can't be older than a bill this tab saved, so a customer saved from the form (which marks every bill query)
+  // leaves its answers be, and the number never empties under the cursor or the review
+  const [openedAt] = useState(() => Date.now());
+  const current = (key: QueryKey) => { const s = qc.getQueryState(key); return !s?.isInvalidated || s.dataUpdatedAt >= openedAt; };
+  const nextNow = next.data && current(salesKeys.nextNumber(...nextFor)) ? next.data : undefined;
+  const bookNow = book.data && current(salesKeys.paperBook(...bookFor)) ? book.data : undefined;
+  const suggestion = f.paper && !edit ? (bookNow && !bookNow.locked ? String(bookNow.next.counter) : "") : nextNow ? String(nextNow.counter) : "";
   const numberText = keep && bill ? bill.invoice_number : f.numberTyped ? f.number : suggestion;
+  // (a firm's format doesn't change with a save: an older answer gives it as well as a fresh one)
   const stored = keep && bill ? bill.invoice_number : storedFor(next.data, numberText);
   const typedNow = useDebounced(f.numberTyped && !keep ? f.number.trim() : "", 300);
-  const check = useCheckNumber(typedNow && f.firmId !== null && f.date ? { business: f.firmId, invoice_date: f.date, invoice_number: typedNow, ...(edit && bill ? { exclude_id: bill.id } : {}) } : null);
-  // the server's answer for what's typed now; one that checked nothing is no answer either way (contract §2.12)
-  const answer = f.numberTyped && typedNow === f.number.trim() ? check.data ?? null : null;
+  const checkFor = typedNow && f.firmId !== null && f.date ? { business: f.firmId, invoice_date: f.date, invoice_number: typedNow, ...(edit && bill ? { exclude_id: bill.id } : {}) } : null;
+  const check = useCheckNumber(checkFor);
+  // the server's answer for what's typed now; one that checked nothing is no answer either way (contract §2.12), nor is
+  // one from before a save
+  const answer = f.numberTyped && typedNow === f.number.trim() && current(salesKeys.checkNumber(checkFor)) ? check.data ?? null : null;
   const known = checkedNumber(answer);
-  const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline" && (f.paper && !edit ? book.isPending : next.isPending);
-  const numberError = keep ? "" : numberProblem(numberText, next.data?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
+  // the next number on its way: the first answer, or a fresh one in place of an answer from before a save
+  const waitingForNext = !keep && !f.numberTyped && !suggestion && net !== "offline"
+    && (f.paper && !edit ? book.isPending || (book.isFetching && !bookNow) : next.isPending || (next.isFetching && !nextNow));
+  const numberError = keep ? "" : numberProblem(numberText, nextNow?.invoice_number ?? "", stored) || (known?.code ? known.problem : "");
   const numberNote = !numberError && known?.note ? known.note : "";
-  // "checking" only while a check is coming: typing hasn't paused yet, or the server hasn't answered. One that failed (a
-  // 500, the network) or can't be sent (no firm, or no date it could read) is no answer, like an unchecked one: the
-  // number is checked when the bill saves, never "Checking…" for ever (T4 re-review)
+  // "checking" only while a check is coming: typing hasn't paused yet, the server hasn't answered, or a fresh answer is on
+  // its way in place of one from before a save. One that failed (a 500, the network) or can't be sent (no firm, or no
+  // date it could read) is no answer, like an unchecked one: the number is checked when the bill saves, never "Checking…"
+  // for ever (T4 re-review)
   const asking = f.numberTyped && !keep && f.firmId !== null && Boolean(f.date) && Boolean(f.number.trim()) && net !== "offline"
-    && (typedNow !== f.number.trim() || check.isPending);
+    && (typedNow !== f.number.trim() || check.isPending || (check.isFetching && !answer));
   const numberState: NumberState = keep || (!f.numberTyped && suggestion) || known?.code === "" ? "free" : asking && !answer ? "checking" : "unknown";
   const setNumber = useCallback((text: string) => set({ number: text, numberTyped: true }), [set]);
   const takeSuggestion = useCallback(() => set({ number: "", numberTyped: false }), [set]);
@@ -204,7 +221,7 @@ export function useBillForm(start: Start) {
   const locked: Locked = useCallback((ym) => months.some((m) => m.month === ym && m.locked), [months]);
   const lockKnown = useCallback((ym: string) => months.some((m) => m.month === ym), [months]);
   const dateError = edit && bill && f.date === bill.invoice_date ? "" : dateProblem({ iso: f.date, today, firmName, locked, known: lockKnown, paper: f.paper && !edit });
-  const dateWarn = dateError ? "" : dateWarning(f.date, today, next.data?.invoice_number ?? "");
+  const dateWarn = dateError ? "" : dateWarning(f.date, today, nextNow?.invoice_number ?? "");
   /** A day the calendar can't take, and why (PROTO parts.jsx:851-856). */
   const offReason = useCallback((iso: string) => {
     if (iso > today) return "after today";
@@ -267,7 +284,7 @@ export function useBillForm(start: Start) {
   const twin = twinRow ? { invoice_number: twinRow.invoice_number, total: twinRow.total_amount } : null;
   const checks = checksOf({
     mode: start.mode, paper: f.paper && !edit, f, customer: cust, today, stored, numberError, numberState, saved: bill?.invoice_number ?? "", moved,
-    dateError, dateWarn, nextNumber: next.data?.invoice_number ?? "", locked, pos, taxShort: tt.short, taxWhy: tt.why, itax,
+    dateError, dateWarn, nextNumber: nextNow?.invoice_number ?? "", locked, pos, taxShort: tt.short, taxWhy: tt.why, itax,
     gstinNote: cust && cust.type !== "walkin" ? gstinNote(cust.gst_number) : "", twin, total: figs.total,
   });
   const canMove = can("bill.edit");
@@ -330,8 +347,13 @@ export function useBillForm(start: Start) {
       const p = problemOf(e);
       // a bill was made from this draft already (on another counter, or by a save whose answer was lost): the server made
       // none now, and the draft is let go everywhere, whatever has happened to this page meanwhile. The form keeps its
-      // draft_id, so trying again can never make a second bill (Ruling 1D-8)
-      if (p.code === "draft_saved" && draft) forgetDraft(qc, draft);
+      // draft_id, so trying again can never make a second bill (Ruling 1D-8). That bill is new to this tab, which heard
+      // nothing of it (a lost answer marks nothing): every bill query asks again, so neither the paper book nor the next
+      // number offers its number (T7 re-review)
+      if (p.code === "draft_saved") {
+        if (draft) forgetDraft(qc, draft);
+        invalidateSales(qc);
+      }
       ended(p.code === "draft_saved" ? "draft_saved" : "failed");
       if (!mounted.current) return none;
       const month = f.date ? monthLabel(monthOf(f.date), { long: true }) : "The month";

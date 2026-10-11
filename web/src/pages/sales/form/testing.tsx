@@ -3,8 +3,9 @@
 // contract's way. Today is 08 Oct 2026, as in the prototype's sample data.
 import { act, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, type RouteObject } from "react-router";
+import { invalidateSales } from "@/core/api/sales";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
 import { RoleContext } from "@/core/auth/role";
 import { salesServer, wireDetail, wireFacets, wirePage, type Call, type Route } from "@/core/sales/fixtures";
@@ -99,6 +100,15 @@ export function formServer(routes: Route[] = []) {
       return wireDetail({ id: 501, business: b.business, invoice_number: stored(b.business, b.invoice_number), invoice_date: b.invoice_date, paper: Boolean(b.paper) });
     }],
   ]);
+}
+
+/**
+ * Somewhere else in the app where a bill is saved (a route a test adds): its button tells every bill query to ask
+ * again, as a save does (invalidateSales).
+ */
+export function SavedElsewhere() {
+  const qc = useQueryClient();
+  return <button type="button" onClick={() => invalidateSales(qc)}>Save a bill</button>;
 }
 
 /** Where the app is: shown by the stand-in pages beside the form. */

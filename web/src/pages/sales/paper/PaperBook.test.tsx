@@ -1,9 +1,8 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
-import { invalidateSales } from "@/core/api/sales";
+import { QueryClient } from "@tanstack/react-query";
 import { refuse } from "@/core/sales/fixtures";
 import { markFresh } from "@/core/sales/fresh";
-import { ACCOUNTANT, fakeToday, formServer, mountForm, wireBook } from "../form/testing";
+import { ACCOUNTANT, fakeToday, formServer, mountForm, SavedElsewhere, wireBook } from "../form/testing";
 import { rememberPaperDate } from "../form/paperDates";
 import PaperBookPage from "./PaperBook";
 
@@ -35,12 +34,10 @@ const SEPTEMBER = wireBook({
 });
 /** The paper book in the app's routes, with the real form beside it (mountForm's stand-in for /sales/paper comes after it). */
 const mountBook = (path: string, opts: Parameters<typeof mountForm>[1] = {}) => mountForm(path, { ...opts, routes: [{ path: "/sales/paper", element: <PaperBookPage /> }, ...(opts.routes ?? [])] });
-/** Somewhere else in the app where a bill is saved: the save tells every bill query to ask again, as the form's does (invalidateSales). */
-function SavedElsewhere() {
-  const qc = useQueryClient();
-  return <button type="button" onClick={() => invalidateSales(qc)}>Save a bill</button>;
-}
-const WAITS = "Enter bill waits for the paper book's fresh answer.";
+/** Enter bill's reason while the book asks again, worded as the app's other waits are ("Getting the shop's WhatsApp message"). */
+const GETTING = "Getting the paper book's next number";
+/** Its reason once that refresh has failed: the stale note's Try again brings the number. */
+const TRY_AGAIN = "Try again to get the paper book's next number.";
 
 test("last month's run for the firm: what's entered, why numbers are missing, what's not entered yet, GSTR-1, and each bill's state in words", async () => {
   fakeToday();
@@ -155,28 +152,59 @@ test("after a bill is saved, Enter bill waits for the book's fresh answer and ne
   // bill 34 is saved on the form: every bill query is told to ask again
   await act(async () => { await router.navigate("/elsewhere"); });
   await user.click(screen.getByRole("button", { name: "Save a bill" }));
-  // back on the book with its fresh answer on its way: the last answer shows, but its next number isn't offered
+  // back on the book with its fresh answer on its way: the last answer shows, but Enter bill names no number until it
+  // comes, nor in its name, and says it's getting one (T7 re-review)
   let land = () => {};
   held = new Promise<void>((r) => { land = r; });
   answer = () => wireBook({ runs: [[17, 29], [34, 34]], entered: 14, next: { counter: 35, invoice_number: "KGH/2026-27/35", invoice_date: "2026-09-30" } });
   await act(async () => { await router.navigate("/sales/paper?firm=3&month=2026-09"); });
-  const waiting = await screen.findByRole("button", { name: "Enter bill 34" });
+  const waiting = await screen.findByRole("button", { name: "Enter bill" });
   expect(waiting).toBeDisabled();
-  expect(waiting).toHaveAttribute("title", WAITS);
-  expect(screen.getByText(WAITS)).toBeInTheDocument();
+  expect(waiting).toHaveAttribute("aria-busy", "true");
+  expect(waiting).toHaveTextContent(/^Enter bill$/);
+  expect(waiting).toHaveAttribute("title", GETTING);
+  expect(screen.getByText(GETTING)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Enter bill \d/ })).not.toBeInTheDocument();
   await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
   expect(await screen.findByRole("button", { name: "Enter bill 35" })).toBeEnabled();
-  // another bill saved, and the book's answer fails: what it last said stays, said so, and its next number still waits
+  // another bill saved, and the book's answer fails: what it last said stays, said so; Enter bill still names no number,
+  // and its reason points at the note's Try again rather than saying it waits
   await act(async () => { await router.navigate("/elsewhere"); });
   await user.click(screen.getByRole("button", { name: "Save a bill" }));
   held = null;
   answer = () => refuse(500, {});
   await act(async () => { await router.navigate("/sales/paper?firm=3&month=2026-09"); });
   expect(await screen.findByText("Couldn't refresh the month's bills")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Enter bill 35" })).toBeDisabled();
+  const failed = screen.getByRole("button", { name: "Enter bill" });
+  expect(failed).toBeDisabled();
+  expect(failed).not.toHaveAttribute("aria-busy");
+  expect(failed).toHaveAttribute("title", TRY_AGAIN);
+  expect(screen.getByText(TRY_AGAIN)).toBeInTheDocument();
+  expect(screen.queryByText(GETTING)).not.toBeInTheDocument();
   answer = () => wireBook({ runs: [[17, 29], [34, 35]], entered: 15, next: { counter: 36, invoice_number: "KGH/2026-27/36", invoice_date: "2026-09-30" } });
   await user.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByRole("button", { name: "Enter bill 36" })).toBeEnabled();
+});
+
+test("on a phone, Enter bill waits in the action bar the same way, its reason under the card (T7 re-review)", async () => {
+  const user = fakeToday();
+  (window as unknown as { __phone?: boolean }).__phone = true;
+  let held: Promise<void> | null = null;
+  formServer([["GET", "sales/paper-book/", async () => { await held; return wireBook({ next: { counter: 35, invoice_number: "KGH/2026-27/35", invoice_date: "2026-09-30" } }); }]]);
+  const { router } = mountBook("/sales/paper?firm=3&month=2026-09", { routes: [{ path: "/elsewhere", element: <SavedElsewhere /> }] });
+  expect(await screen.findByRole("button", { name: "Enter bill 35" })).toBeEnabled();
+  await act(async () => { await router.navigate("/elsewhere"); });
+  await user.click(screen.getByRole("button", { name: "Save a bill" }));
+  let land = () => {};
+  held = new Promise<void>((r) => { land = r; });
+  await act(async () => { await router.navigate("/sales/paper?firm=3&month=2026-09"); });
+  const waiting = await screen.findByRole("button", { name: "Enter bill" });
+  expect(waiting).toBeDisabled();
+  expect(waiting).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByText(GETTING)).toBeInTheDocument();
+  await act(async () => { land(); await vi.advanceTimersByTimeAsync(50); });
+  expect(await screen.findByRole("button", { name: "Enter bill 35" })).toBeEnabled();
+  expect(screen.queryByText(GETTING)).not.toBeInTheDocument();
 });
 
 test("on a phone, Enter bill is the action bar's and the bills are a list", async () => {
