@@ -3,6 +3,7 @@ import re
 from datetime import date
 
 from django.db import transaction
+from django.db.models import Q, Subquery
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -29,10 +30,19 @@ class RatesView(APIView):
             except ValueError:
                 raise ValidationError({"date": ["Give the date like 2026-09-30."]}) from None
         today, board = timezone.localdate(), rates.latest()
+        prior = rates.previous(board) if day is None else None
+        force = None
+        if day is not None and board is not None:
+            previous_id = rates.boards().filter(on__lt=board.on).values("pk")[:1]
+            in_force_id = rates.boards().filter(on__lte=day).values("pk")[:1]
+            # One result query for both historical pointers, plus latest: four queries with JWT and groups.
+            history = list(rates.boards().filter(Q(pk=Subquery(previous_id)) | Q(pk=Subquery(in_force_id))))
+            prior = next((r for r in history if r.on < board.on), None)
+            force = next((r for r in history if r.on <= day), None)
         out = {"today": today.isoformat(), "rows": rates.RATE_ROWS, "latest": rates.board_row(board),
-               "set_today": bool(board and board.on == today), "previous": rates.board_row(rates.previous(board))}
+               "set_today": bool(board and board.on == today), "previous": rates.board_row(prior)}
         if day is not None:
-            out["in_force"] = rates.board_row(rates.in_force(day))
+            out["in_force"] = rates.board_row(force)
         return Response(out)
 
     def post(self, request):

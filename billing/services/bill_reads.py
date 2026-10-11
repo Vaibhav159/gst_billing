@@ -200,6 +200,11 @@ def _by_number(invoices, reads=None, narrow=False):
             for part in parts - {""}:
                 matches |= Q(invoice_number__icontains=part)
             found = found.filter(matches)
+            names = {(inv.invoice_number or "").strip() for inv in invoices} - {""}
+            # Short suffixes like 1 or 2 otherwise fetch most of the FY. Exact escaped names
+            # bound the rows; _number_key remains the final comparison in Python.
+            pattern = r"^\s*(?:" + "|".join(re.escape(name) for name in sorted(names)) + r")\s*$"
+            found = found.filter(invoice_number__iregex=pattern) if names else found.none()
         for row in found.values_list("pk", "business_id", "invoice_date", "invoice_number"):
             known[row[1], fy_of(row[2])].append(row)
     groups = defaultdict(list)
