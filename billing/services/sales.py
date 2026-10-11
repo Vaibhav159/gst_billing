@@ -239,9 +239,10 @@ def _changed_words(changed):
 
 def _too_big(lines):
     """The 400's words, by position, for each built line whose amount or tax its columns can't hold: the builder's
-    own figures, so the line maths has one copy. The words follow the unit, as the quantity's do."""
+    own figures, so the line maths has one copy. The whole tax must fit one head, as IGST holds it: a move, a new
+    state or fix-heads can put it all there. The words follow the unit, as the quantity's do."""
     return {n: {"rate": [f"This item comes to more than one bill can hold. Check {_counted(li.unit)} and the rate."]}
-            for n, li in enumerate(lines) if li.amount > MOST or max(li.cgst, li.sgst, li.igst) > LINE_MOST}
+            for n, li in enumerate(lines) if li.amount > MOST or li.cgst + li.sgst + li.igst > LINE_MOST}
 
 
 def _counted(unit):

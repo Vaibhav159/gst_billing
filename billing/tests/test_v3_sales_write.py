@@ -5,6 +5,7 @@ import json
 import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from cacheops.conf import prepare_profiles
@@ -203,6 +204,12 @@ class CreateTest(TestCase):
         self.assertEqual(self.make(lines=[RING, {**CHAIN, "quantity": "9999999", "rate": "999999999"}]).json()["lines"],
                          {"1": {"rate": [("This item comes to more than one bill can hold. Check the number of pieces "
                                           "and the rate.")]}})
+        # A tax that fits CGST and SGST but not one head is too big as well: a move, a new state for the customer or
+        # fix-heads would put all of it on IGST (review fix 2). 1 piece at ₹40 crore and 3% is ₹1.2 crore of tax; one
+        # head holds ₹99,99,999.999.
+        self.assertEqual(self.make(lines=[{**CHAIN, "quantity": "1", "rate": "400000000"}]).json()["lines"]["0"],
+                         {"rate": [("This item comes to more than one bill can hold. Check the number of pieces "
+                                    "and the rate.")]})
         big = {**RING, "quantity": "1", "rate": "300000000"}  # ₹30.9 crore a line: its amount and its tax fit
         self.assertEqual(self.make(lines=[big] * 4).data,
                          {"lines": ["These items come to more than one bill can hold. Split them into two bills."]})
@@ -378,6 +385,7 @@ class UpdateTest(TestCase):
                           if q["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))], [])
         # A line as stored but typed again, the number and spaces as stored: still nothing.
         r = self.put(invoice_number=" INV 7/old ", lines=[{**RING, "quantity": 12.345, "gst_percent": "3.0"}])
+        self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual(AuditLog.objects.filter(action="updated", entity_id=self.bill.pk).count(), 1)
 
     def test_an_edits_words_say_what_changed(self):
@@ -400,6 +408,12 @@ class UpdateTest(TestCase):
                 self.assertEqual(said(notes="Hallmarked", lines=[line]), ("Changed the items", []))
                 stored = LineItem.objects.get(invoice=self.bill)
                 self.assertEqual(getattr(stored, next(iter(change))), next(iter(change.values())))
+        # The weight and the rate changed together, the taxable the same (12.345 g × ₹6,512.50 is 24.690 g × ₹3,256.25):
+        # still a change of the items, saved (review fix 2).
+        line = {**line, "quantity": "24.690", "rate": "3256.25"}
+        self.assertEqual(said(notes="Hallmarked", lines=[line]), ("Changed the items", []))
+        stored = LineItem.objects.get(invoice=self.bill)
+        self.assertEqual((stored.quantity, stored.rate), (Decimal("24.690"), Decimal("3256.25")))
         mo = firm("MEERA ORNAMENTS", gstin="08AAAAA0000A1Z5", invoice_prefix="MO", paper_full_number_from=date(2026, 4, 1))
         hemant = buyer("Hemant Dave")
         self.assertEqual(said(business=mo.pk, customer=hemant.pk, invoice_number="9", invoice_date="2026-10-01",
