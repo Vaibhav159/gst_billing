@@ -332,12 +332,20 @@ def test_pending_amendments_use_the_given_day_for_the_30_november_deadline(shop)
         assert pending_amendments(firm, 2026, 11, today=date(2026, 11, 28)) == change
 
 
-@patch("billing.services.filing.timezone.localdate", return_value=date(2026, 11, 2))
+@patch("billing.services.filing.timezone.localdate", return_value=date(2026, 12, 5))
 def test_changing_a_gstr3b_date_refreshes_late_costs_and_16_4_credit(_today, shop):
-    # R3A-7: Sep 2026 GSTR-3B moved from 20 Oct to 30 Oct (10 days late, turnover under 1.5 Cr).
-    from billing.services.gst_amounts import heads
+    # R3A-7 on real purchase SQL: a 2025-26 bill (IGST 30) claimed in October 2026. Its GSTR-3B
+    # (due 20 Nov) moves from 20 Nov to 2 Dec 2026, past Sec 16(4)'s 30 November: the 30 moves
+    # to 4(D)(2), cash 1000 + 30 = 1030, 12 days x 50 = 600 fee (under 1.5 Cr) and
+    # 18% on 1030 for 12 days = 6.095... -> 6.10.
+    from billing.models import LineItem
+    from billing.tests.v3_helpers import buyer, line, sale
 
     firm, user = shop
+    october = date(2026, 10, 1)
+    bill = sale(firm, buyer(gst_number="27ABCDE1234A1Z5"), "P1", date(2026, 3, 10), line(rate="1000"),
+                kind="inward", itc_month=october)
+    LineItem.objects.filter(invoice=bill).update(igst=Decimal(30), cgst=0, sgst=0)
     figures = {"cash": {"igst": "1000.00", "cgst": "0.00", "sgst": "0.00", "total": "1000.00"},
                "setoff_output": {"igst": "1100.00", "cgst": "0.00", "sgst": "0.00", "total": "1100.00"},
                "output": {"igst": "1100.00", "cgst": "0.00", "sgst": "0.00", "total": "1100.00"},
@@ -347,22 +355,18 @@ def test_changing_a_gstr3b_date_refreshes_late_costs_and_16_4_credit(_today, sho
                "carry_on": {"igst": "0.00", "cgst": "0.00", "sgst": "0.00", "total": "0.00"}, "amendments": [],
                "tables": {"late": None, "t31a": {"taxable": "1100.00", "igst": "1100.00"}, "t31c": {"taxable": "0.00"},
                           "t4a5": {"heads": {"igst": "100.00"}}, "t4b1": {"heads": {}}, "t4d2": {"heads": {}, "list": []}}}
-    mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})
+    mark_filed(firm, october, user, {"kind": "gstr1", "filed_on": "2026-11-08"})
     with patch("billing.services.filing._snapshot", return_value=(figures, {}, {})):
-        record = mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-20"})[0]
+        record = mark_filed(firm, october, user, {"kind": "gstr3b", "filed_on": "2026-11-20"})[0]
     assert (record.late_fee, record.interest) == (Decimal(0), Decimal(0))
-    lapsed = {date(2026, 10, 20): {"heads": heads(), "list": []},
-              date(2026, 10, 30): {"heads": heads({"igst": "40"}), "list": [{"id": 1, "bill_no": "P1"}]}}
-    with patch("billing.services.ledger._lapsed", side_effect=lambda business, day, filed_on: lapsed[filed_on]), \
-            patch("billing.services.ledger._turnover", return_value=Decimal(0)):
-        edit_filing(record, user, {"filed_on": "2026-10-30"})
+    edit_filing(record, user, {"filed_on": "2026-12-02"})
     record.refresh_from_db()
     late = record.figures["tables"]["late"]
-    assert (late["gstr3b"]["days"], late["gstr3b"]["fee"]) == (10, "500.00")
-    assert record.figures["credit"]["igst"] == record.figures["base_credit"]["igst"] == "60.00"
-    assert record.figures["cash"]["igst"] == "1040.00"
-    assert record.figures["tables"]["t4d2"]["heads"]["igst"] == "40.00"
-    assert record.figures["tables"]["t4a5"]["heads"]["igst"] == "60.00"
-    # 18% on ₹1,040 for 10 days = ₹5.128… → ₹5.13.
-    assert late["interest"] == "5.13"
-    assert (record.late_fee, record.interest) == (Decimal("500.00"), Decimal("5.13"))
+    assert (late["gstr3b"]["days"], late["gstr3b"]["fee"]) == (12, "600.00")
+    assert record.figures["credit"]["igst"] == record.figures["base_credit"]["igst"] == "70.00"
+    assert record.figures["cash"]["igst"] == "1030.00"
+    assert record.figures["tables"]["t4d2"]["heads"]["igst"] == "30.00"
+    assert [entry["bill_no"] for entry in record.figures["tables"]["t4d2"]["list"]] == ["P1"]
+    assert record.figures["tables"]["t4a5"]["heads"]["igst"] == "70.00"
+    assert late["interest"] == "6.10"
+    assert (record.late_fee, record.interest) == (Decimal("600.00"), Decimal("6.10"))

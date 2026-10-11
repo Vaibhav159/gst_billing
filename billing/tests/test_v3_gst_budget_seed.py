@@ -22,7 +22,6 @@ class GstSeedTest(TestCase):
 
     def test_synthetic_seed_has_corrections_stale_download_and_duplicate(self):
         from billing.models import FilingMonth
-        from billing.services.filing import _snapshot
         from billing.services.gst_checks import month_checks
         from billing.services.gst_downloads import download_state
         from billing.services.gst_seed import seed_gst
@@ -31,15 +30,10 @@ class GstSeedTest(TestCase):
         firms = [firm("AARAV JEWELLERS"), firm("MEERA ORNAMENTS"), firm("KIRAN GOLD HOUSE")]
         buyer("Walk-in", customer_type="walkin")
         owner = person("owner", "admin")
-        zero = {"igst": "0.00", "cgst": "0.00", "sgst": "0.00", "total": "0.00"}
-        def snapshot(business, month, kind, **kwargs):
-            if kind == "gstr3b":
-                return {"cash": zero, "carry_on": zero, "output": zero, "credit": zero}, {}, {}
-            return _snapshot(business, month, kind)
-        with patch("billing.services.ledger._purchase_lines"), patch("billing.services.filing._snapshot", side_effect=snapshot):
-            seed_gst(firms, owner, date(2026, 10, 8))
+        seed_gst(firms, owner, date(2026, 10, 8))  # the real ledger, on 2A's purchase fields
         self.assertTrue(FilingMonth.objects.filter(business=firms[0], unlocked_at__isnull=False).exists())
-        self.assertTrue(FilingRecord.objects.filter(business=firms[2], kind="gstr1", year=2026, month=9).exists())
+        self.assertEqual(set(FilingRecord.objects.filter(business=firms[2], year=2026, month=9).values_list("kind", flat=True)),
+                         {"gstr1", "gstr3b"})
         self.assertIn("duplicate", {check["kind"] for check in month_checks(firms[1], 2026, 9)["blockers"]})
         self.assertTrue(download_state(firms[1], date(2026, 9, 1), build_gstr1(firms[1], 2026, 9)["file"])["stale"])
 

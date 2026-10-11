@@ -234,11 +234,7 @@ def test_frozen_3b_working_exposes_interest_note_without_rewriting_snapshot():
     assert "interest_note" not in stored
 
 
-PART2 = {"itc_month", "itc_eligible", "needs_review"} <= {field.name for field in Invoice._meta.fields}
-
-
 @pytest.mark.django_db
-@pytest.mark.skipif(not PART2, reason="X-40: real purchase SQL waits for 2A")
 def test_recorded_late_claim_and_grouped_ledger_budget(django_assert_num_queries):
     from billing.services.ledger import _book_groups, _purchase_lines
 

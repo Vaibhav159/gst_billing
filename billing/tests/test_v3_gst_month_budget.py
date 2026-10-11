@@ -80,8 +80,6 @@ def fixtures(firms):
 ])
 @pytest.mark.parametrize("integrated", [False, True])
 def test_month_requests_build_each_firm_once_with_bounded_reads(firms, route, query_budget, transfer_budget, response_budget, integrated):
-    if integrated and not {"itc_month", "itc_eligible", "needs_review"} <= {field.name for field in Invoice._meta.fields}:
-        pytest.skip("X-40 integration gate: real ledger runs after part 2A's purchase fields land.")
     businesses, client = fixtures(firms)
     params = {"month": "2026-09", "business_id": businesses[0].pk}
     with ExitStack() as stack, patch("django.utils.timezone.localdate", return_value=TODAY), \

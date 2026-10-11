@@ -3,7 +3,6 @@ from decimal import Decimal
 
 import pytest
 
-from billing.models import Invoice
 from billing.services.gst_amounts import heads
 from billing.services.ledger import build_gstr3b_json, calculate_ledger, gstr3b_tables, month_position, opening_effect
 from billing.tests.v3_helpers import buyer, firm, line, sale
@@ -174,23 +173,16 @@ def test_tax_heads_round_each_historical_line_before_aggregation():
         igst="0.06", cgst="0.06", sgst="0.06")
 
 
-def test_purchase_query_excludes_bills_before_opening_credit(monkeypatch):
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
+@pytest.mark.django_db
+def test_purchase_query_excludes_bills_before_opening_credit():
+    # Real purchase SQL on 2A's fields: a 31 Mar 2025 bill sits in the opening credit.
     from billing.services.ledger import START, _purchase_lines
 
-    # Query-construction seam only: the real purchase SQL test waits for 2A.
-    query = MagicMock()
-    query.filter.return_value = query
-    query.annotate.return_value = query
-    monkeypatch.setattr("billing.services.ledger.uncached", lambda model: query)
-    monkeypatch.setattr("billing.services.ledger._credit_lapse", lambda lines, **kwargs: lines)
-    monkeypatch.setattr("billing.services.ledger.Invoice", SimpleNamespace(_meta=SimpleNamespace(
-        fields=[SimpleNamespace(name=name) for name in ("itc_month", "itc_eligible", "needs_review")])))
-    _purchase_lines(SimpleNamespace(pk=17))
-    query.filter.assert_called_once_with(invoice__business_id=17, invoice__type_of_invoice="inward",
-                                         invoice__invoice_date__gte=START)
+    business, supplier = firm(), buyer(gst_number="08ABCDE1234A1Z5")
+    sale(business, supplier, "OLD", date(2025, 3, 31), kind="inward")
+    new = sale(business, supplier, "NEW", START, kind="inward")
+    sale(firm("OTHER FIRM", gstin="08AAECD1234K1Z2"), supplier, "OTHER", START, kind="inward")
+    assert list(_purchase_lines(business).values_list("invoice_id", flat=True)) == [new.pk]
 
 
 def test_credit_risk_before_first_supported_fy_has_no_query(monkeypatch):
@@ -205,12 +197,7 @@ def test_credit_risk_before_first_supported_fy_has_no_query(monkeypatch):
         "lapsed": {"count": 0, "tax": Decimal("0.00")}}
 
 
-PART2 = {"itc_month", "itc_eligible", "needs_review"} <= {f.name for f in Invoice._meta.fields}
-requires_part2 = pytest.mark.skipif(not PART2, reason="3A Task 5 waits for part 2A purchase columns and helpers")
-
-
 @pytest.mark.django_db
-@requires_part2
 def test_circular170_tables_and_credit_month(django_assert_num_queries):
     business, customer = firm(), buyer(gst_number="08ABCDE1234A1Z5")
     sale(business, customer, "S1", "2026-11-01", line(rate="1000"), line(rate="200", gst="0"))
@@ -235,7 +222,6 @@ def test_circular170_tables_and_credit_month(django_assert_num_queries):
 
 
 @pytest.mark.django_db
-@requires_part2
 def test_pre_april_purchase_never_enters_credit_tables_or_risk():
     from billing.services.ledger import _purchase_lines, credit_at_risk_summary
 
@@ -254,7 +240,6 @@ def test_pre_april_purchase_never_enters_credit_tables_or_risk():
 
 
 @pytest.mark.django_db
-@requires_part2
 def test_opening_effect_stops_before_first_filed_carry():
     from billing.models import FilingRecord
     business, customer = firm(), buyer()
