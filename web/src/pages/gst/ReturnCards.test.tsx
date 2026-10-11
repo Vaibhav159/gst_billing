@@ -2,10 +2,12 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render";
 import { monthFixture } from "@/core/gst/fixtures";
-import type { Check, Gstr1, Month } from "@/core/gst/types";
+import type { Check, Gstr1, Gstr3b, Month } from "@/core/gst/types";
 import { Checks } from "./Checks";
 import { Gstr1Card } from "./Gstr1Card";
+import { Gstr3bCard } from "./Gstr3bCard";
 
+const heads = (igst = 0, cgst = 0, sgst = 0) => ({ igst, cgst, sgst, total: igst + cgst + sgst });
 const duplicate = {
   kind: "duplicate", blocks: true, text: "Bill number KGH/2026-27/17 is used twice", detail: "", more_bills: 1, customer: null, suggested: 391,
   bills: [
@@ -28,6 +30,11 @@ const sections = {
 } satisfies Gstr1;
 function month(overrides: Partial<Month> = {}): Month {
   return { business: 3, firm: { id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "08VRHFA2322D1ZI", state_code: "08" }, month: "2026-09", fy: "2026-27", stage: "blocked", running: { from: "2026-09-01", to: "2026-09-30" }, due: { gstr1: "2026-10-11", gstr3b: "2026-10-20", file_from: "2026-10-01" }, record: { gstr1: null, gstr1a: null, gstr3b: null, legacy: false, unlocked: null, relocked: null, locked_by: null, locked_on: null }, checks: { blockers: [duplicate], notes: [], passes: ["Every line has an HSN code and a GST rate"] }, gstr1: null, gstr3b: null, late: null, since_filing: null, amendments: null, amended_in: null, download: null, prev_gstr3b_missing: null, ...overrides };
+}
+// Output 300; opening 120; 4(A)(5) 100 − 4(B)(1) 20 = 4(C) 80.
+// Available 200, used 200, cash 100, carry 0. Lapsed 30 stays outside 4(A).
+function ledger(overrides: Partial<Gstr3b> = {}): Gstr3b {
+  return { month: "2026-09", filed: false, as_filed_at: null, t31a: { bills: 2, taxable: 1000000, igst: 0, cgst: 15000, sgst: 15000, total: 30000 }, t31c: { taxable: 120000 }, amendments: null, t32: [], carry_in: { heads: heads(0, 6000, 6000), from: "2026-08", as_filed: true, opening: false }, t4a5: { bills: 2, heads: heads(0, 5000, 5000), late: [{ id: 77, bill_no: "JGE/1098", bill_date: "2026-02-18", entered_on: "2026-10-05", heads: heads(0, 4000, 4000) }] }, t4b1: { bills: 1, heads: heads(0, 1000, 1000), list: [{ id: 78, bill_no: "JGE/1099", supplier_name: "Jaipur Gem Exports", heads: heads(0, 1000, 1000) }] }, t4c: heads(0, 4000, 4000), t4d2: { bills: 1, heads: heads(0, 1500, 1500), list: [{ id: 79, bill_no: "JGE/1000", supplier_name: "Jaipur Gem Exports", heads: heads(0, 1500, 1500) }] }, t5: { inter: 0, intra: 120000 }, available: heads(0, 10000, 10000), steps: [{ from: "cgst", to: "cgst", amount: 10000 }, { from: "sgst", to: "sgst", amount: 10000 }], used: heads(0, 10000, 10000), cash: heads(0, 5000, 5000), cash_paid: null, carry_on: heads(), to_confirm: [], cross_head: null, late: null, opening_missing: false, ...overrides };
 }
 afterEach(() => { (window as unknown as { __phone: boolean }).__phone = false; vi.useRealTimers(); });
 
@@ -91,6 +98,38 @@ it("shows a phone HSN sheet with label/value lists and no wide table", () => {
   expect(within(sheet).queryByRole("table")).not.toBeInTheDocument();
 });
 
+it("uses Circular 170's corrected rows and hand-worked ledger totals", () => {
+  renderApp(<Gstr3bCard month={month()} data={ledger()} />);
+  const rows = screen.getAllByRole("row");
+  const row = (label: string) => rows.find((r) => r.textContent?.includes(label))!;
+  expect(row("Credit not allowed")).toHaveTextContent("4(B)(1)");
+  expect(row("Credit too late to claim")).toHaveTextContent("4(D)(2)");
+  expect(row("Net credit")).toHaveTextContent("₹80.00");
+  expect(row("Credit available")).toHaveTextContent("₹200.00");
+  expect(row("Tax to pay in cash")).toHaveTextContent("₹100.00");
+  expect(screen.getByText(/Output tax ₹300.00 − credit used ₹200.00/)).toHaveTextContent("₹100.00");
+  expect(screen.getByText(/JGE\/1098, 18 Feb 2026/)).toBeVisible();
+  expect(screen.getByText("3.1(c)")).toBeVisible();
+  expect(screen.getByText("5")).toBeVisible();
+});
+
+it("shows as-filed cash separately without replacing its working, and empty/null states", () => {
+  const { unmount } = renderApp(<Gstr3bCard month={month()} data={ledger({ filed: true, as_filed_at: "2026-10-19T17:02:11+05:30", cash_paid: heads(0, 5500, 5500) })} />);
+  expect(screen.getByRole("heading", { name: "GSTR-3B · as filed" })).toBeVisible();
+  expect(screen.getByText(/₹110.00 recorded as paid/)).toBeVisible();
+  unmount();
+  renderApp(<Gstr1Card data={{ ...sections, b2b: [] }} month={month()} section="b2b" onSection={vi.fn()} />);
+  expect(screen.getByText("No bills to registered buyers in September")).toBeVisible();
+});
+
+it("keeps the complete ledger readable on a phone without a wide table", () => {
+  (window as unknown as { __phone: boolean }).__phone = true;
+  renderApp(<Gstr3bCard month={month()} data={ledger()} phone />);
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  expect(screen.getByText("4(B)(1)")).toBeVisible();
+  expect(screen.getAllByText("₹50.00").length).toBeGreaterThan(1);
+});
+
 it("shows mixed-rate B2CL once per bill and keeps each slab's taxable value and IGST", () => {
   const mixed = { ...sections, b2cl: [{ ...sections.b2cl[0], total: 20650125, rates: [{ rate: "3", taxable: 20000000, igst: 600000 }, { rate: "0.25", taxable: 50000, igst: 125 }] }] };
   renderApp(<Gstr1Card data={mixed} month={month()} section="b2cl" onSection={vi.fn()} />);
@@ -123,6 +162,24 @@ it("keeps as-filed controls optional and emits the choice without recalculating 
   renderApp(<Gstr1Card data={sections} month={recorded} section="b2b" onSection={vi.fn()} onAsFiled={onAsFiled} />);
   fireEvent.click(screen.getByRole("radio", { name: "As filed" }));
   expect(onAsFiled).toHaveBeenCalledWith(true);
+});
+
+it("shows zero credit, opening-credit link and hand-worked late fees without inventing figures", () => {
+  const data = ledger({ steps: [], opening_missing: true, late: { gstr1: { days: 3, per_day: 5000, fee: 15000, cap: 500000, capped: false }, gstr3b: { days: 0, per_day: 5000, fee: 0, cap: 500000, capped: false }, interest: 0, interest_on: 10000, interest_from: "2026-10-21", turnover_band: "1.5cr_5cr", nil: { gstr1: false, gstr3b: false }, total: 15000 } });
+  renderApp(<Gstr3bCard month={month()} data={data} />);
+  expect(screen.getByText("No credit to use this month.")).toBeVisible();
+  expect(screen.getByRole("link", { name: "See or change it under Credit and deadlines." })).toHaveAttribute("href", "/gst?tab=credit&firm=3");
+  expect(screen.getByText(/GSTR-1: 3 days at ₹50.00 a day, capped at ₹5,000.00/)).toBeVisible();
+  expect(screen.getAllByText("₹150.00").length).toBeGreaterThan(0);
+});
+
+it("keeps amendment head movements visible even when their total is zero", () => {
+  renderApp(<Gstr3bCard month={month()} data={ledger({ amendments: { months: ["2026-08"], output: heads(10000, -5000, -5000), credit: heads(-2000, 1000, 1000) } })} />);
+  const rows = screen.getAllByRole("row");
+  const output = rows.find((row) => row.textContent?.includes("of which amendments to August"));
+  expect(output).toHaveTextContent("₹100.00−₹50.00−₹50.00₹0.00");
+  const credit = rows.find((row) => row.textContent?.includes("Amendments to August"));
+  expect(credit).toHaveTextContent("−₹20.00₹10.00₹10.00₹0.00");
 });
 
 it("uses the selected as-filed bill count in the rate total instead of live books", () => {
