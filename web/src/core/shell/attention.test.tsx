@@ -53,12 +53,14 @@ test("stale rich cache refreshes its own key only on opening", async () => {
   expect(h.reads()[0].params).toEqual({ business_id: 3, returns: 1 });
 });
 test("cached answer changes and clears reach the bell without a request", async () => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
   const h = setup({ cached: answer }); await pass();
   act(() => h.qc.setQueryData(dueNextKeys.one(3, false), { ...answer, items: [] })); await pass();
   expect(screen.getByRole("button", { name: "Nothing needs attention" })).toBeInTheDocument();
   act(() => h.qc.removeQueries({ queryKey: ["due-next"] })); await pass();
   expect(screen.getByRole("button", { name: "Needs attention" })).toBeInTheDocument();
   expect(h.reads()).toHaveLength(0);
+  expect(errors).not.toHaveBeenCalled();
 });
 test("FY has no effect; another firm's cached answer never leaks", async () => {
   const h = setup({ cached: answer }); await pass();
@@ -102,4 +104,11 @@ test("following a row closes the sheet and navigates; an empty answer uses the p
   const dialog = screen.getByRole("dialog", { name: "Needs attention" });
   expect(within(dialog).getByText("All clear")).toBeInTheDocument();
   expect(within(dialog).getByText("New captured bills, filing problems and deadlines show up here.")).toBeInTheDocument();
+});
+
+test.each([false, true])("the last answer stays visible after ten closed minutes (rich=%s)", async rich => {
+  const h = setup({ cached: answer, rich }); await pass();
+  await pass(600_000);
+  expect(screen.getByRole("button", { name: "Needs attention: 1" })).toBeInTheDocument();
+  expect(h.reads()).toHaveLength(0);
 });
