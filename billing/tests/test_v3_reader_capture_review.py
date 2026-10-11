@@ -101,8 +101,12 @@ class ReaderCaptureReviewTests(TestCase):
         self.assertEqual(response.data["counts"]["ready"], 101)
 
     def test_complete_multipart_size_includes_overhead(self):
-        for endpoint in ("/api/captures/", "/api/purchases/read/"):
-            response = self.client.post(endpoint, {"files": [upload()]}, format="multipart", CONTENT_LENGTH=str(24 * 1024 * 1024 + 1))
+        # Captures parse the body to find a repeated upload id first (X-60): a real file just under 24 MB,
+        # whose multipart overhead takes the request over.
+        under = SimpleUploadedFile("under.pdf", b"%PDF-1.4\n" + bytes(24 * 1024 * 1024 - 20), "application/pdf")
+        for endpoint, data, length in (("/api/captures/", {"files": [under]}, {}),
+                                       ("/api/purchases/read/", {"files": [upload()]}, {"CONTENT_LENGTH": str(24 * 1024 * 1024 + 1)})):
+            response = self.client.post(endpoint, data, format="multipart", **length)
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.data, {"files": ["These pages come to 24 MB. One bill can send at most 24 MB; take fewer or smaller pages."]})
         self.assertFalse(InwardCapture.objects.exists())

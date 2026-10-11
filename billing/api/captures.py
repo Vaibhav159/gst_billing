@@ -143,6 +143,15 @@ class CapturesView(APIView):
         return Response({"results": results, "count": scope.count(), "counts": counts})
 
     def post(self, request):
+        try:
+            client_id = UUID(str(request.data["client_id"])) if request.data.get("client_id") else None
+        except ValueError:
+            raise ValidationError({"client_id": ["Send the upload id as a UUID."]}) from None
+        if client_id:
+            # A repeat returns the first capture even if its body would no longer pass (X-60).
+            earlier = uncached(InwardCapture).filter(captured_by=request.user, client_id=client_id).values_list("pk", flat=True).first()
+            if earlier:
+                return Response(shown(get_capture(earlier)), status=200)
         validate_request_size(request)
         files = validate_files(request.FILES.getlist("files"))
         business = business_from(request.data.get("business_id"))
@@ -152,10 +161,6 @@ class CapturesView(APIView):
             if not isinstance(value, str) or len(value.strip()) > maximum or "\x00" in value:
                 raise ValidationError({key: [f"Keep the {key} to {maximum} characters."]})
             values[key] = value.strip()
-        try:
-            client_id = UUID(str(request.data["client_id"])) if request.data.get("client_id") else None
-        except ValueError:
-            raise ValidationError({"client_id": ["Send the upload id as a UUID."]}) from None
         written = []
         try:
             with transaction.atomic():

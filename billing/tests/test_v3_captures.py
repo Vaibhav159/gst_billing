@@ -50,6 +50,20 @@ class CaptureTest(TestCase):
         self.assertEqual((first.status_code, second.status_code, first.data["id"]), (201, 200, second.data["id"]))
         self.assertEqual((InwardCapture.objects.count(), CapturePage.objects.count()), (1, 1))
 
+    def test_repeat_upload_id_returns_the_first_capture_before_checking_the_body(self):
+        key = str(uuid4())
+        first = self.make(client_id=key, business_id=self.business.pk)
+        gone = firm("CLOSED FIRM", "08ABCDE1234A2Z4")
+        gone_id = gone.pk
+        gone.delete()
+        no_files = self.make(client_id=key, files=[])
+        deleted_firm = self.make(client_id=key, business_id=gone_id, hint="x" * 200)
+        self.assertEqual((first.status_code, no_files.status_code, deleted_firm.status_code), (201, 200, 200))
+        self.assertEqual({no_files.data["id"], deleted_firm.data["id"]}, {first.data["id"]})
+        self.assertEqual((InwardCapture.objects.count(), CapturePage.objects.count()), (1, 1))
+        bad = self.make(client_id="not-a-uuid")
+        self.assertEqual((bad.status_code, bad.data), (400, {"client_id": ["Send the upload id as a UUID."]}))
+
     def test_bad_uploads_are_words_and_write_nothing(self):
         for files, words in [([], "Choose a photo (JPEG, PNG or HEIC) or a PDF."),
                              ([upload()] * 9, "A bill can have at most 8 pages here."),
@@ -197,8 +211,11 @@ class CaptureTest(TestCase):
         with self.assertRaises(ValidationError) as caught:
             validate_files(files)
         self.assertEqual(caught.exception.detail, {"files": ["These pages come to 26 MB. One bill can send at most 24 MB; take fewer or smaller pages."]})
-        for endpoint in ("/api/captures/", "/api/purchases/read/"):
-            response = self.client.post(endpoint, {"files": [upload()]}, format="multipart", CONTENT_LENGTH=str(24 * 1024 * 1024 + 1))
+        # Captures parse the body to find a repeated upload id first (X-60), so send a real oversized body there.
+        big = SimpleUploadedFile("big.pdf", b"%PDF-1.4\n" + bytes(24 * 1024 * 1024), "application/pdf")
+        for endpoint, data, length in (("/api/captures/", {"files": [big], "client_id": str(uuid4())}, {}),
+                                       ("/api/purchases/read/", {"files": [upload()]}, {"CONTENT_LENGTH": str(24 * 1024 * 1024 + 1)})):
+            response = self.client.post(endpoint, data, format="multipart", **length)
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.data, {"files": ["These pages come to 24 MB. One bill can send at most 24 MB; take fewer or smaller pages."]})
 
