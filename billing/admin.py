@@ -1,13 +1,14 @@
 from django.contrib import admin, messages
-from django.contrib.admin.utils import unquote
+from django.contrib.admin.utils import NestedObjects, unquote
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import router, transaction
 from django.http import HttpResponseRedirect
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from rest_framework.exceptions import APIException
 from simple_history.admin import SimpleHistoryAdmin
 
+from billing.api.mixins import drop_settled_party_rows, settled_party_rows
 from billing.constants import INVOICE_TYPE_OUTWARD
 from billing.period_lock import assert_period_unlocked
 from billing.services.bin import bin_bill
@@ -74,8 +75,33 @@ def _undoable_delete(bill_id):
     return entries.exclude(snapshot__has_key="_undo").exists() and not before.exists()
 
 
+class SettledPartyDeleteAdminMixin:
+    """Use the API's cleanup, including the admin's read-only delete confirmation."""
+
+    def get_deleted_objects(self, objs, request):
+        objs = list(objs)
+        deleted, counts, permissions, protected = super().get_deleted_objects(objs, request)
+        if protected:
+            collector = NestedObjects(using=router.db_for_write(self.model), origin=objs)
+            collector.collect(objs)
+            settled = {row for obj in objs for rows in settled_party_rows(obj) for row in rows}
+            if not collector.protected - settled:
+                protected = []
+        return deleted, counts, permissions, protected
+
+    def delete_model(self, request, obj):
+        with transaction.atomic():
+            drop_settled_party_rows(obj)
+            super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        with transaction.atomic():
+            for obj in queryset:
+                self.delete_model(request, obj)
+
+
 @admin.register(Business)
-class BusinessAdmin(admin.ModelAdmin):
+class BusinessAdmin(SettledPartyDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("name", "address", "gst_number")
     list_filter = ("name", "address", "gst_number")
     search_fields = ("name", "address", "gst_number")
@@ -83,7 +109,7 @@ class BusinessAdmin(admin.ModelAdmin):
 
 
 @admin.register(Customer)
-class CustomerAdmin(admin.ModelAdmin):
+class CustomerAdmin(SettledPartyDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("name", "address", "gst_number", "businesses_linked")
     list_filter = ("name", "address", "gst_number", "businesses")
     search_fields = ("name", "address", "gst_number", "businesses__name")

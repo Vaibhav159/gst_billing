@@ -32,7 +32,7 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from billing.cache import invalidate
-from billing.constants import B2CL_THRESHOLD, BILL_CANCELLED, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
+from billing.constants import B2CL_THRESHOLD, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.fy import fy_of
 from billing.gstin import check_digit
 from billing.models import (
@@ -54,6 +54,7 @@ from billing.numbering import format_number, next_counter
 from billing.roles import GROUP_ACCOUNTANT, GROUP_STAFF
 from billing.services.bin import bin_bill
 from billing.services.line_items import build_line_items
+from billing.services.sales import cancel_bill
 
 D = Decimal
 
@@ -131,6 +132,9 @@ PRODUCTS = {
 # Wedding season and Akshaya Tritiya in spring, Diwali in autumn.
 SEASON = {4: 1.3, 5: 1.2, 6: 0.7, 7: 0.6, 8: 0.8, 9: 0.9, 10: 1.5, 11: 1.6, 12: 1.1, 1: 0.9, 2: 1.1, 3: 1.0}
 PAYMENT_MODES = ["cash"] * 7 + ["bank"] * 9 + ["credit"] * 2 + ["mixed", ""]
+PAPER_BUYERS = ("Rohit Verma", "Sunita Jain", "Vikram Singh", "Neha Agarwal", "Kavita Joshi", "Manoj Saini")
+PAPER_GAPS_BEFORE = (2, 4)
+PAPER_BLOCK_SIZE = len(PAPER_BUYERS) + len(PAPER_GAPS_BEFORE)
 
 ROLES = [
     ("owner", "sandbox_owner", ("admin",), True),
@@ -374,7 +378,7 @@ class Command(BaseCommand):
         last_month = month_add(this_month, -1)
         # Keep the original RNG draws, so omitting KIRAN's paper sales leaves the other books unchanged.
         specs = [(*s, self.rng.choice(PAYMENT_MODES)) for s in sorted(specs, key=lambda s: s[1])]
-        # The later KIRAN sales are still in the paper book, including a planted 31 March.
+        # The later KIRAN sales are still in the paper book; in April, this includes the planted 31 March.
         specs = [s for s in specs if not (s[0] == kiran and last_month.replace(day=15) <= s[1] < this_month)]
         if not any(f == kiran and when >= this_month for f, when, *_ in specs):
             # Even a sparse seed on the first of the month shows the bills entered before the paper run.
@@ -386,7 +390,7 @@ class Command(BaseCommand):
             if self.paper_counter is None and when >= this_month:
                 # Reserve six paper bills and two not entered yet before this month's numbers are taken.
                 self.paper_counter = next_counter(kiran.pk, fy_of(last_month))
-                counters[(kiran.pk, fy_start(last_month))] = self.paper_counter + 7
+                counters[(kiran.pk, fy_start(last_month))] = self.paper_counter + PAPER_BLOCK_SIZE - 1
             key = (firm.pk, fy_start(when))
             counters[key] = counters.get(key, 0) + 1
             number = format_number(firm, when, str(counters[key]))
@@ -431,19 +435,15 @@ class Command(BaseCommand):
 
         # Typed in after this month's bills (higher ids), under the numbers kept free in _outward.
         n = self.paper_counter
-        names = ("Rohit Verma", "Sunita Jain", "Vikram Singh", "Neha Agarwal", "Kavita Joshi", "Manoj Saini")
-        for step, name in enumerate(names):
-            if step in (2, 4):
+        for step, name in enumerate(PAPER_BUYERS):
+            if step in PAPER_GAPS_BEFORE:
                 n += 1  # a paper bill not entered yet: its number is a gap
             when = last_month + timedelta(days=14 + 2 * step)
             bill = self._invoice(kiran, by_name[name], when, format_number(kiran, when, str(n)), INVOICE_TYPE_OUTWARD,
                                  [self._line("gold22", qty=4 + step, rate=9850)], "cash", paper=True)
             if step == 1:
-                # cancel_bill needs a user; the seed has none (dispatch Ruling 1A-12).
-                Invoice.objects.filter(pk=bill.pk).update(
-                    status=BILL_CANCELLED, cancel_reason="Customer returned the piece the same day",
-                    cancelled_at=timezone.now())
-                invalidate(Invoice)
+                # Ruling 1A-12: the paper book includes a cancellation; the seed has no person to name in its audit.
+                cancel_bill(bill, None, "Customer returned the piece the same day")
             if step == 3:
                 bin_bill(bill, None, "Entered twice by mistake")
             n += 1
@@ -466,7 +466,7 @@ class Command(BaseCommand):
         Invoice.objects.filter(customer=walkin, invoice_date__gte=this_month).update(
             sent_at=now, last_sent_at=now, sent_count=2, sent_via="whatsapp", sent_to="9829041122")
         invalidate(Invoice)
-        return len(names) + 2
+        return len(PAPER_BUYERS) + 2
 
     def _invoice(self, firm, party, when, number, kind, items, payment_mode, paper=False):
         invoice = Invoice.objects.create(

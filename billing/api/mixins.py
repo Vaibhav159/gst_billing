@@ -127,17 +127,62 @@ class AuditLogMixin:
         user = self.request.user
         super().perform_destroy(instance)
         try:
-            AuditLog.objects.create(
-                action="deleted",
-                entity=self.audit_entity,
-                entity_id=entity_id,
-                entity_name=entity_name,
-                user=user if user and user.is_authenticated else None,
-                details=f"Deleted {self.audit_entity}: {entity_name}",
-                snapshot=full_snapshot,
-            )
+            with transaction.atomic():
+                AuditLog.objects.create(
+                    action="deleted",
+                    entity=self.audit_entity,
+                    entity_id=entity_id,
+                    entity_name=entity_name,
+                    user=user if user and user.is_authenticated else None,
+                    details=f"Deleted {self.audit_entity}: {entity_name}",
+                    snapshot=full_snapshot,
+                )
         except Exception:
             logger.exception("Failed to write audit log entry for delete")
+
+
+def protected_delete_response(error):
+    """Keep the same v2 refusal for API deletes and Undo."""
+    # Bills in the bin still need their customer and firm for a restore: say so (Task 3 review, M1).
+    binned = sum(isinstance(o, BinnedInvoice) for o in error.protected_objects)
+    # So does a firm's unfinished bill (v3's drafts), which is no invoice: it's finished or discarded first.
+    drafts = sum(isinstance(o, SaleDraft) for o in error.protected_objects)
+    rest = [o for o in error.protected_objects if not isinstance(o, BinnedInvoice | SaleDraft)]
+    # Invoices, and since H6 invoice lines: count the invoices either way.
+    n = len({getattr(o, "invoice_id", o.pk) for o in rest})
+    if not rest and not binned:
+        message = (f"Cannot delete: {drafts} unfinished bill(s) still name this firm. "
+                   "Finish or discard them first.")
+    elif not rest:
+        message = (f"Cannot delete: {binned} bill(s) in the bin still reference this record. "
+                   "Restore and reassign them first.")
+    elif all(hasattr(o, "invoice_id") for o in rest):
+        # Only lines: their invoices belong to someone else now.
+        message = (f"Cannot delete: lines on {n} invoice(s) of other parties still name this record. "
+                   "An administrator re-points them with manage.py fix_line_customers.")
+    else:
+        message = f"Cannot delete: {n} invoice(s) still reference this record. Reassign or delete them first."
+    if rest and binned:
+        message += f" {binned} bill(s) in the bin reference it too."
+    if drafts and (rest or binned):
+        message += f" {drafts} unfinished bill(s) name it too."
+    return Response({"error": message, "protected": n + binned + drafts}, status=status.HTTP_409_CONFLICT)
+
+
+def settled_party_rows(instance):
+    """Rows whose saved/restored records no longer depend on this customer or firm."""
+    key = {Customer: "customer", Business: "business"}.get(type(instance))
+    if key:
+        yield BinnedInvoice.objects.settled().filter(**{key: instance})
+    if key == "business":
+        yield SaleDraft.objects.filter(business=instance).filter(
+            Exists(SavedDraft.objects.filter(pk=OuterRef("pk"))))
+
+
+def drop_settled_party_rows(instance):
+    # Call inside the delete's transaction: a real protection refusal must keep these rows too.
+    for rows in settled_party_rows(instance):
+        rows.delete()
 
 
 class ProtectedDeleteMixin:
@@ -147,41 +192,9 @@ class ProtectedDeleteMixin:
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError as e:
-            # Bills in the bin still need their customer and firm for a restore: say so (Task 3 review, M1).
-            binned = sum(isinstance(o, BinnedInvoice) for o in e.protected_objects)
-            # So does a firm's unfinished bill (v3's drafts), which is no invoice: it's finished or discarded first.
-            drafts = sum(isinstance(o, SaleDraft) for o in e.protected_objects)
-            rest = [o for o in e.protected_objects if not isinstance(o, BinnedInvoice | SaleDraft)]
-            # Invoices, and since H6 invoice lines: count the invoices either way.
-            n = len({getattr(o, "invoice_id", o.pk) for o in rest})
-            if not rest and not binned:
-                message = (f"Cannot delete: {drafts} unfinished bill(s) still name this firm. "
-                           "Finish or discard them first.")
-            elif not rest:
-                message = (f"Cannot delete: {binned} bill(s) in the bin still reference this record. "
-                           "Restore and reassign them first.")
-            elif all(hasattr(o, "invoice_id") for o in rest):
-                # Only lines: their invoices belong to someone else now.
-                message = (f"Cannot delete: lines on {n} invoice(s) of other parties still name this record. "
-                           "An administrator re-points them with manage.py fix_line_customers.")
-            else:
-                message = f"Cannot delete: {n} invoice(s) still reference this record. Reassign or delete them first."
-            if rest and binned:
-                message += f" {binned} bill(s) in the bin reference it too."
-            if drafts and (rest or binned):
-                message += f" {drafts} unfinished bill(s) name it too."
-            return Response({"error": message, "protected": n + binned + drafts}, status=status.HTTP_409_CONFLICT)
+            return protected_delete_response(e)
 
     def perform_destroy(self, instance):
-        # Bin rows back in Sales already (restored, or brought back by v2's undo) protect nothing, so they
-        # go with the customer or firm; one transaction, so a delete still refused keeps them (review M1).
-        key = {Customer: "customer", Business: "business"}.get(type(instance))
         with transaction.atomic():
-            if key:
-                BinnedInvoice.objects.settled().filter(**{key: instance}).delete()
-            if key == "business":
-                # So does a firm's draft that outlived its save (a keep that raced it): it is listed nowhere, so nobody
-                # could discard it, and a save of it is refused anyway (Task 10's review, minor 1).
-                SaleDraft.objects.filter(business=instance).filter(
-                    Exists(SavedDraft.objects.filter(pk=OuterRef("pk")))).delete()
+            drop_settled_party_rows(instance)
             super().perform_destroy(instance)

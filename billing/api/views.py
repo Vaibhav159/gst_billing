@@ -15,6 +15,7 @@ from django.db.models import (
     IntegerField,
     OuterRef,
     Prefetch,
+    ProtectedError,
     Q,
     Subquery,
     Sum,
@@ -70,7 +71,7 @@ from billing.utils import (
     process_product_csv,
 )
 
-from .mixins import AuditLogMixin, ProtectedDeleteMixin, mark_undone
+from .mixins import AuditLogMixin, ProtectedDeleteMixin, drop_settled_party_rows, mark_undone, protected_delete_response
 from .permissions import (
     AdminOnlyPermission,
     RoleBasedPermission,
@@ -3005,7 +3006,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     snap = entry.snapshot
                     if model is Invoice:
                         if obj.status == BILL_CANCELLED:
-                            return Response({"error": "cancelled", "detail": CANCELLED_WORDS},
+                            return Response({"error": "cancelled", "code": "cancelled", "detail": CANCELLED_WORDS},
                                             status=status.HTTP_409_CONFLICT)
                         assert_period_unlocked(obj.business_id, obj.invoice_date, "edit")
                         assert_period_unlocked(snap.get("business"), snap.get("invoice_date"), "edit")
@@ -3051,6 +3052,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                         if model is Invoice and obj.type_of_invoice == INVOICE_TYPE_OUTWARD:
                             _binned, log = bin_bill(obj, request.user, details=details)  # a sale goes to the bin
                         else:
+                            drop_settled_party_rows(obj)
                             obj.delete()
                             log = AuditLog.objects.create(
                                 action="deleted",
@@ -3067,6 +3069,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                 else:
                     return Response({"error": "Cannot undo this action (no snapshot available)"}, status=400)
 
+        except ProtectedError as error:
+            return protected_delete_response(error)
         except APIException:
             raise  # a filed-period refusal is a 4xx, not an undo failure
         except Exception as e:
