@@ -36,8 +36,8 @@ export function groupBills(read: ReadSheet, fallback: BillKind): ParsedBill[] {
     let bill = bills.get(key);
     if (!bill) { bill = { key, sheet: read.name, kind, number: row.number, date: row.date, party: row.party, gstin: row.gstin, payment: row.payment, rows: [], lines: [], dates: new Set(), parties: new Set(), payments: new Set() }; bills.set(key, bill); }
     bill.rows.push(row.n); bill.dates.add(row.date); bill.parties.add(row.party.trim().toLowerCase()); if (row.payment) bill.payments.add(row.payment.toLowerCase());
-    const { n, item, hsn, slab, slabShown, qty, unit, price, making, taxable, cgst, sgst, igst, total } = row;
-    bill.lines.push({ n, item, hsn, slab, slabShown, qty, unit, price, making, taxable, cgst, sgst, igst, total });
+    const { n, item, hsn, slab, slabShown, qty, unit, price, taxable, cgst, sgst, igst, total } = row;
+    bill.lines.push({ n, item, hsn, slab, slabShown, qty, unit, price, taxable, cgst, sgst, igst, total });
   }
   return [...bills.values()];
 }
@@ -63,6 +63,7 @@ const payment = (raw: string): PaymentMode => {
 };
 // The existing slab allowlist resolves both forms: 0.25 stays 0.25%; 0.03 is 3%.
 const importSlab = (raw: string | null): string => raw == null || raw.trim() === "" ? "" : slabOf(raw) || SLABS.find(slab => Math.abs(Number(slab) - Number(raw) * 100) < 1e-9) || "";
+const decimal3 = (value: number): string => Number.isFinite(value) && value > 0 ? String(Number(value.toFixed(3))) : "";
 const decimalOK = (raw: string): boolean => /^\d+(?:\.\d{1,3})?$/.test(raw) && Number(raw) > 0;
 
 /** Local checks explain file mistakes; the batch dry run owns locks, duplicates and credit decisions. */
@@ -95,11 +96,10 @@ export function checkBill(bill: ParsedBill, context: CheckContext) {
     if (hsn && !/^\d{4,8}$/.test(hsn)) problem(`${prefix}.hsn_code`, "Type the HSN code from the bill: 4 to 8 digits.");
     if (!gst) problem(`${prefix}.gst_percent`, "Choose the slab printed on the bill (0% if it charges no GST).");
     if (!knownUnit(unit)) problem(`${prefix}.unit`, "Pick a unit from the list.");
-    if (line.making) problem(`${prefix}.making`, "This file has separate making charges. Put the full taxable value in Taxable value and leave Quantity and Rate blank.", { label: "Use the taxable value", patch: { line: i, qty: "", price: "", making: 0 } });
     const fileTax = line.dropHeads ? 0 : line.cgst + line.sgst + line.igst;
     let taxable = line.taxable, quantity = line.qty, rate = line.price;
-    const amountOnly = bill.zero || !quantity || !rate;
-    if (amountOnly && (bill.kind === "sale" || context.requireQuantityRate)) problem(`${prefix}.quantity`, quantityRateRequired);
+    const amountOnly = bill.zero || !quantity || !rate, needsRate = bill.kind === "sale" || Boolean(context.requireQuantityRate);
+    if (amountOnly && needsRate) problem(`${prefix}.quantity`, quantityRateRequired);
     if (bill.zero) taxable = (taxable || lineFigures({ quantity, rate, gst_percent: "0" }, false)?.taxable || Math.max(0, line.total - fileTax)) + fileTax;
     if (amountOnly && !taxable && bill.lines.length === 1 && line.total && gst) {
       const bp = scaled(gst, 2)!;
@@ -116,7 +116,13 @@ export function checkBill(bill: ParsedBill, context: CheckContext) {
       lines.push({ product_name: line.item, hsn_code: hsn, gst_percent: gst, unit, note: "", quantity, rate });
     }
     const figure = lineFigures({ quantity, rate, gst_percent: gst }, Boolean(context.interstate));
-    if (figure && !amountOnly && taxable > 0 && Math.abs(figure.taxable - taxable) > 1) problem(`${prefix}.taxable`, `quantity × rate (${inr(figure.taxable)}) isn't its taxable value (${inr(taxable)}). Check the Qty and Rate columns.`, { label: `Use the taxable value, ${inr(taxable)}`, patch: { line: i, qty: "", price: "", making: 0 } });
+    if (figure && !amountOnly && taxable > 0 && Math.abs(figure.taxable - taxable) > 1) {
+      // X-58: a sale or a pair keeps its quantity and rate, so its fix is the rate that gives the taxable value, offered only when it does.
+      const netRate = needsRate ? decimal3(taxable / 100 / Number(quantity)) : "";
+      const exact = netRate && Math.abs((lineFigures({ quantity, rate: netRate, gst_percent: gst }, false)?.taxable ?? 0) - taxable) <= 1;
+      problem(`${prefix}.taxable`, `quantity × rate (${inr(figure.taxable)}) isn't its taxable value (${inr(taxable)}). Check the Qty and Rate columns.`,
+        needsRate ? exact ? { label: `Use the rate ${inr(toPaise(netRate) ?? 0)}/${unit}`, patch: { line: i, price: netRate } } : undefined : { label: `Use the taxable value, ${inr(taxable)}`, patch: { line: i, qty: "", price: "" } });
+    }
     if (figure && fileTax && !bill.zero && Math.abs(figure.tax - fileTax) > 1) problem(`${prefix}.tax`, `the file's tax (${inr(fileTax)}) isn't ${gst}% of its taxable value (${inr(figure.tax)}).`, { label: `Use ${gst}% of the taxable value`, patch: { line: i, dropHeads: true } });
     if (bill.kind === "purchase" && !hasGstin(gstin) && Number(gst) > 0) problem(`${prefix}.gst_percent`, `Line ${i + 1}: the supplier has no GSTIN, so this purchase carries no input tax credit. Add the supplier's GSTIN to claim GST, or set the line to 0%.`, { label: "Book it at 0%", patch: { zero: true } });
     const usual = context.usualRates?.[`${line.item}|${unit}`], price = toPaise(rate) ?? 0;
@@ -128,8 +134,10 @@ export function checkBill(bill: ParsedBill, context: CheckContext) {
       }
     }
     if (Number(quantity) >= 10000000 || Number(rate) >= 1000000000 || figure && figure.amount >= 100000000000) {
-      const milligrams = Number(quantity) >= 10000000 && ["g", "gms"].includes(unit) && Number(quantity) / 1000 < 10000000 && Number(rate) > 0;
-      const correctedQuantity = Number(quantity) / 1000, correctedRate = Number(rate) * 1000;
+      // Whole milligrams give grams to 3 decimals; the rate's thousandths give the rate per gram.
+      const mg = scaled(quantity, 0), perGram = scaled(rate, 3);
+      const milligrams = Number(quantity) >= 10000000 && ["g", "gms"].includes(unit) && Number(quantity) / 1000 < 10000000 && Number(rate) > 0 && mg !== null && perGram !== null;
+      const correctedQuantity = mg === null ? 0 : Number(mg) / 1000, correctedRate = perGram === null ? 0 : Number(perGram);
       problem(`${prefix}.quantity`, `${line.item}: this is more than a bill can hold.${milligrams ? ` It looks like milligrams in a grams column: ${qty(correctedQuantity, unit)} at ${inr(correctedRate * 100)}/${unit} is the same ${inr(figure?.taxable ?? taxable)}.` : " Check the Qty and Rate columns."}`,
         milligrams ? { label: `Use ${qty(correctedQuantity, unit)} at ${inr(correctedRate * 100)}/${unit}`, patch: { line: i, qty: String(correctedQuantity), price: String(correctedRate) } } : undefined);
     }
@@ -137,7 +145,9 @@ export function checkBill(bill: ParsedBill, context: CheckContext) {
   });
   const totals = billFigures(lines.map(l => "amount_only" in l ? { quantity: "1", rate: l.taxable, gst_percent: l.gst_percent } : l), Boolean(context.interstate));
   const printedTotals = bill.lines.map(line => line.total).filter(Boolean), distinctTotals = new Set(printedTotals);
-  const printedTotal = distinctTotals.size === 1 ? printedTotals[0] : printedTotals.reduce((total, value) => total + value, 0);
+  // A file may print the bill total on every row, or each line's own total: either reading that matches is fine.
+  const summed = printedTotals.reduce((total, value) => total + value, 0), repeated = printedTotals.length > 1 && distinctTotals.size === 1 ? printedTotals[0] : 0;
+  const printedTotal = repeated && Math.abs(summed - totals.total) > 1 ? repeated : summed;
   if (printedTotal && Math.abs(printedTotal - totals.total) > 1) notes.push(`The file's total ${inr(printedTotal)} differs from its lines (${inr(totals.total)}) by ${inr(Math.abs(printedTotal - totals.total))}; the lines are what's saved.`);
   const recognizedPayment = payment(bill.payment);
   if (bill.payment && !recognizedPayment) notes.push(`“${bill.payment}” isn't a way of paying the app knows; it's saved as Not recorded.`);

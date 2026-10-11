@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fieldOf, readSheet, sheetFirm, sheetKindHint } from "./columns";
+import { BILL_FIELDS, fieldOf, readSheet, sheetFirm, sheetKindHint } from "./columns";
 import { addPatch, checkBill, groupBills, withEdits, importUnit, quantityRateRequired } from "./model";
 import type { Sheet } from "./parse";
 
@@ -116,9 +116,50 @@ describe("register layouts and editable bill checks", () => {
     expect(checkBill(conflict, context).problems.some(p => p.field === "payment_mode")).toBe(true);
     expect(checkBill(withEdits(conflict, { payment: "bank" }), context).state).toBe("ready");
   });
-  it("blocks file making charges instead of silently changing the server's line maths", () => {
-    const bill = withEdits(parsed()[1], { lines: { 0: { making: 200 } } });
-    expect(checkBill(bill, context).problems.some(p => p.detail.includes("making charges"))).toBe(true);
+  it("has no making charges anywhere: no field, no column, no problem", () => {
+    expect(fieldOf("Making charges")).not.toBe("making"); expect("making" in BILL_FIELDS).toBe(false);
+    const read = readSheet({ name: "S", rows: [["Bill No.", "Date", "Party", "Item", "Quantity", "Rate", "Making charges", "Taxable Value"], ["1", "01/04/2026", "B", "Gold", 1, 100, 50, 100]] });
+    expect(read.tables[0].columns.find(c => c.heading === "Making charges")?.field).toBeNull();
+    expect("making" in read.rows[0]).toBe(false);
+    const checked = checkBill(parsed()[1], context);
+    expect([...checked.problems, ...checked.warnings].some(p => /making/i.test(p.detail + (p.fix?.label ?? "")) || p.field.endsWith(".making"))).toBe(false);
+  });
+  it("never offers a sale a fix that blanks quantity and rate; a fix never leads into a refusal", () => {
+    const sale = withEdits(parsed()[0], { lines: { 1: { taxable: 12000, total: 0, cgst: 0, sgst: 0 } } });
+    const checked = checkBill(sale, context), mismatch = checked.problems.find(p => p.field === "lines.1.taxable");
+    expect(mismatch).toBeDefined();
+    for (const p of checked.problems) expect(p.fix?.patch.qty === "" || p.fix?.patch.price === "").toBe(false);
+    expect(mismatch!.fix?.patch).toMatchObject({ line: 1, price: "120" });
+    const fixed = checkBill(withEdits(sale, addPatch({}, mismatch!.fix!.patch)), context);
+    expect(fixed.problems.some(p => p.detail === quantityRateRequired)).toBe(false); expect(fixed.problems.some(p => p.field === "lines.1.taxable")).toBe(false);
+    const paired = withEdits(parsed()[1], { lines: { 0: { taxable: 12000, cgst: 0, sgst: 0, total: 0 } } });
+    const pair = checkBill(paired, { ...context, requireQuantityRate: true }).problems.find(p => p.field === "lines.0.taxable");
+    expect(pair?.fix?.patch.qty).not.toBe(""); expect(pair?.fix?.patch.price).toBe("120");
+    const odd = withEdits(sale, { lines: { 1: { qty: "1000", price: "0.1", taxable: 10050 } } });
+    expect(checkBill(odd, context).problems.find(p => p.field === "lines.1.taxable")?.fix).toBeUndefined();
+    const purchase = checkBill(paired, context).problems.find(p => p.field === "lines.0.taxable");
+    expect(purchase?.fix?.patch).toMatchObject({ qty: "", price: "" });
+  });
+  it("joins a row that repeats the bill number with a blank party to that bill (X-63)", () => {
+    const rows = [["Bill No.", "Date", "Party", "Item", "Quantity", "Rate", "Taxable Value"],
+      ["7", "01/04/2026", "B", "Gold", 1, 100, 100], ["8", "01/04/2026", "C", "Silver", 1, 10, 10], ["7", "", "", "Ring", 2, 50, 100], ["9", "", "", "Coin", 1, 5, 5]];
+    const read = readSheet({ name: "S", rows });
+    expect(read.rows.map(r => [r.n, r.number, r.party])).toEqual([[2, "7", "B"], [3, "8", "C"], [4, "7", "B"]]);
+    expect(read.skipped).toEqual([{ n: 5, text: "9", bill: true, why: "No party name, and no earlier bill 9 to join" }]);
+    const bills = groupBills(read, "purchase");
+    expect(bills[0].rows).toEqual([2, 4]); expect(bills[0].lines.map(l => l.item)).toEqual(["Gold", "Ring"]); expect(bills[0].dates).toEqual(new Set(["01/04/2026"]));
+  });
+  it("reads equal line totals as line totals, not as a repeated bill total", () => {
+    const one = withEdits(parsed()[1], { lines: { 0: { cgst: 0, sgst: 0, slab: "0", total: 10000 } } });
+    expect(checkBill({ ...one, lines: [one.lines[0], one.lines[0]] }, context).notes.some(n => n.includes("differs"))).toBe(false);
+    const repeated = { ...one, lines: [one.lines[0], { ...one.lines[0], total: 10000, price: "50", taxable: 5000 }].map(l => ({ ...l, total: 15000 })) };
+    expect(checkBill(repeated, context).notes.some(n => n.includes("differs"))).toBe(false);
+  });
+  it("keeps the milligram fix to 3 decimals so the fix itself passes", () => {
+    const bill = withEdits(parsed()[1], { lines: { 0: { qty: "12345678.5", price: "0.002", unit: "g", taxable: 0, cgst: 0, sgst: 0, total: 0 } } });
+    const fix = checkBill(bill, context).problems.find(p => p.field === "lines.0.quantity")?.fix;
+    expect(fix?.patch).toMatchObject({ qty: "12345.679", price: "2" });
+    expect(checkBill(withEdits(bill, addPatch({}, fix?.patch)), context).problems.some(p => p.field === "lines.0.quantity")).toBe(false);
   });
 });
 

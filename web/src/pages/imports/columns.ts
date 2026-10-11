@@ -4,9 +4,9 @@ export type BillKind = "sale" | "purchase";
 export type Field = keyof typeof BILL_FIELDS;
 export type Column = { i: number; heading: string; field: Field | null; sure: "sure" | "check" | "none" | "you" };
 export type Table = { n: number; kind: BillKind | null; columns: Column[]; map: Partial<Record<Field, number>> };
-export type ParsedLine = { n: number; item: string; hsn: string; slab: Cell; slabShown: string; qty: string; unit: string; price: string; making: number; taxable: number; cgst: number; sgst: number; igst: number; total: number; dropHeads?: boolean };
+export type ParsedLine = { n: number; item: string; hsn: string; slab: Cell; slabShown: string; qty: string; unit: string; price: string; taxable: number; cgst: number; sgst: number; igst: number; total: number; dropHeads?: boolean };
 export type ParsedRow = ParsedLine & { number: string; date: string; party: string; gstin: string; payment: string; kind: BillKind | null; table: number; cont: boolean };
-export type ReadSheet = { name: string; title: string; gstin: string; month: string; tables: Table[]; rows: ParsedRow[]; skipped: { n: number; text: string; why: string }[]; markers: boolean; summary: boolean };
+export type ReadSheet = { name: string; title: string; gstin: string; month: string; tables: Table[]; rows: ParsedRow[]; skipped: { n: number; text: string; why: string; bill?: boolean }[]; markers: boolean; summary: boolean };
 export type ColumnOverrides = Record<number, Record<number, Field | "">>;
 export const str = (value: Cell | undefined): string => value == null ? "" : value instanceof Date ? `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}` : String(value).trim();
 const decimal = (value: Cell | undefined): string => str(value).replace(/[₹,\s]/g, "").replace(/^rs\.?/i, "").replace(/^-$/, "");
@@ -20,13 +20,13 @@ function dateCell(value: Cell | undefined): string {
 }
 export const BILL_FIELDS = {
   sno: "Serial number", number: "Bill number", date: "Bill date", party: "Party (customer or supplier)", gstin: "Party's GSTIN",
-  item: "Item", hsn: "HSN code", slab: "GST rate", qty: "Quantity (weight)", unit: "Unit", price: "Rate per unit", making: "Making charges",
+  item: "Item", hsn: "HSN code", slab: "GST rate", qty: "Quantity (weight)", unit: "Unit", price: "Rate per unit",
   taxable: "Taxable value", cgst: "CGST", sgst: "SGST", igst: "IGST", total: "Bill total", payment: "Paid by",
 };
 const SURE = new Set(["s.no.", "s.no", "sr. no.", "bill no.", "bill no", "invoice no", "invoice no.", "invoice number", "voucher no.", "supplier bill no", "invoice date", "date", "bill date",
   "party name", "customer", "customer name", "supplier", "supplier name", "particulars", "gst number", "gstin", "gstin/uin", "party gstin", "customer gstin", "supplier gstin",
   "commodity", "item", "item name", "product", "description", "hsn code", "hsn", "hsn/sac", "gst rate", "gst %", "gst rate (%)", "tax rate", "qty", "quantity", "qty (gm)", "weight (g)",
-  "uom", "unit", "rate", "rate (₹/gm)", "rate/g", "making", "making charges", "taxable value", "taxable value (₹)", "value", "cgst", "sgst", "igst", "cgst (₹)", "sgst (₹)", "igst (₹)",
+  "uom", "unit", "rate", "rate (₹/gm)", "rate/g", "taxable value", "taxable value (₹)", "value", "cgst", "sgst", "igst", "cgst (₹)", "sgst (₹)", "igst (₹)",
   "central tax", "state tax", "state/ut tax", "integrated tax", "total", "total invoice value", "total invoice value (₹)", "gross total", "bill amount", "invoice amount", "payment", "paid by", "mode", "payment mode"]);
 /** Which field a heading is, as today's importer reads it (with more spellings), or null. */
 export function fieldOf(heading: Cell): Field | null {
@@ -40,7 +40,8 @@ export function fieldOf(heading: Cell): Field | null {
   if (/(bill|invoice|inv|voucher|vch|doc(ument)?|ref)\.? ?(no|number|#)\b|^bill$|^invoice$|^voucher$/.test(v)) return "number";
   if (/date/.test(v)) return "date";
   if (/hsn|sac/.test(v)) return "hsn";
-  if (/making|labour|wastage/.test(v)) return percent ? null : "making";
+  // There are no making charges: a making, labour or wastage column is never read as an amount.
+  if (/making|labour|wastage/.test(v)) return null;
   if (/taxable|assessable|^value$|^net value|^amount before tax/.test(v)) return "taxable";
   if (!percent && !/\brate/.test(v) && /cgst|central tax/.test(v)) return "cgst";
   if (!percent && !/\brate/.test(v) && /sgst|utgst|state tax|state\/ut/.test(v)) return "sgst";
@@ -79,7 +80,9 @@ export function readSheet(sheet: Sheet, cols: ColumnOverrides = {}): ReadSheet {
   const rows = sheet.rows || [];
   const out: ReadSheet = { name: sheet.name, title: "", gstin: "", month: "", tables: [], rows: [], skipped: [], markers: false, summary: false };
   if (/^summary$/i.test(sheet.name.trim())) { out.summary = true; return out; }
-  let kind: BillKind | null = null, table: Table | null = null, last: Omit<ParsedRow, "n" | "kind" | "table" | "cont"> | null = null;
+  type Head = Omit<ParsedRow, "n" | "kind" | "table" | "cont">;
+  let kind: BillKind | null = null, table: Table | null = null, last: Head | null = null;
+  const earlier = new Map<string, Head>();
   for (let i = 0; i < rows.length; i++) {
     const n = i + 1;
     const cells = (rows[i] || []).map((c) => (c instanceof Date ? str(c) : c));
@@ -114,17 +117,20 @@ export function readSheet(sheet: Sheet, cols: ColumnOverrides = {}): ReadSheet {
     const v = {
       number: str(at("number")), date: dateCell(at("date")), party: str(at("party")), gstin: str(at("gstin")).toUpperCase(), payment: str(at("payment")),
       item: str(at("item")), hsn: str(at("hsn")).replace(/\.0+$/, ""), slab: at("slab"), slabShown: "slab" in table.map ? (sheet.shown?.[i]?.[table.map.slab!] ?? "") : "",
-      qty: decimal(at("qty")), unit: str(at("unit")), price: decimal(at("price")), making: paise(at("making")),
+      qty: decimal(at("qty")), unit: str(at("unit")), price: decimal(at("price")),
       taxable: paise(at("taxable")), cgst: paise(at("cgst")), sgst: paise(at("sgst")), igst: paise(at("igst")), total: paise(at("total")),
     };
     const cont = !v.number && !v.party && Boolean(v.item);
     if (cont) {
-      if (!last) { out.skipped.push({ n, text: v.item, why: "An item with no bill above it" }); continue; }
+      if (!last) { out.skipped.push({ n, text: v.item, bill: true, why: "An item with no bill above it" }); continue; }
       Object.assign(v, { number: last.number, date: last.date, party: last.party, gstin: last.gstin, payment: v.payment || last.payment });
     }
-    if (!v.number || !v.party) { out.skipped.push({ n, text: first, why: !v.number && !v.party ? "No bill number or party" : !v.number ? "No bill number" : "No party name" }); continue; }
-    if (!(Number(v.qty) && Number(v.price)) && !v.total && !v.taxable) { out.skipped.push({ n, text: first, why: "No amounts on this row" }); continue; }
-    last = v;
+    // X-63: a row repeating an earlier bill's number with the party blank is that bill's next item.
+    const joins = !cont && v.number && !v.party ? earlier.get(`${kind}|${v.number.toUpperCase()}`) : undefined;
+    if (joins) Object.assign(v, { date: v.date || joins.date, party: joins.party, gstin: v.gstin || joins.gstin, payment: v.payment || joins.payment });
+    if (!v.number || !v.party) { out.skipped.push({ n, text: first, bill: true, why: !v.number && !v.party ? "No bill number or party" : !v.number ? "No bill number" : `No party name, and no earlier bill ${v.number} to join` }); continue; }
+    if (!(Number(v.qty) && Number(v.price)) && !v.total && !v.taxable) { out.skipped.push({ n, text: first, bill: true, why: `No amounts on this row of bill ${v.number}` }); continue; }
+    last = v; if (!earlier.has(`${kind}|${v.number.toUpperCase()}`)) earlier.set(`${kind}|${v.number.toUpperCase()}`, v);
     out.rows.push({ n, kind, table: table.n, cont, ...v });
   }
   return out;

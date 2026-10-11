@@ -61,7 +61,7 @@ function parsedPhoto(row: PhotoRow): ParsedBill {
   return { key: row.id, sheet: row.file.name, kind: row.kind === 'sale' ? 'sale' : 'purchase', number: read.invoice_number, date: read.invoice_date ?? '',
     party: party.name, gstin: party.gst_number, payment: read.payment_mode, rows: [], dates: new Set(read.invoice_date ? [read.invoice_date] : []), parties: new Set([party.name.trim().toLowerCase()]), payments: new Set(read.payment_mode ? [read.payment_mode] : []),
     lines: read.lines.map((line, i) => ({ n: i + 1, item: line.product_name, hsn: line.hsn_code, slab: line.gst_percent ?? '', slabShown: '', qty: line.amount_only ? '' : line.quantity ?? '',
-      unit: line.unit, price: line.amount_only ? '' : line.rate ?? '', making: 0, taxable: toPaise(line.taxable) ?? 0, cgst: 0, sgst: 0, igst: 0, total: 0 })) };
+      unit: line.unit, price: line.amount_only ? '' : line.rate ?? '', taxable: toPaise(line.taxable) ?? 0, cgst: 0, sgst: 0, igst: 0, total: 0 })) };
 }
 function OtherPhotoEditor({ row, onApply, onClose }: PhotoEditorProps) {
   const bill = useMemo(() => parsedPhoto(row), [row]);
