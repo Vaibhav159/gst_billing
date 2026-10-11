@@ -5,7 +5,7 @@
 // reach the server in turn, so none overtakes another still on its way. Easy (part 6) keeps its unfinished bills
 // through the same calls, in the same DraftData.
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, skipToken, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invalidateDashboard } from "@/core/due/fresh";
 import axios from "axios";
 import { useAuth } from "@/core/auth/AuthProvider";
@@ -34,7 +34,7 @@ export function newDraftId(): string {
 type Raw = Record<string, unknown>;
 const obj = (v: unknown): Raw => (v && typeof v === "object" && !Array.isArray(v) ? (v as Raw) : {});
 
-export const draftKeys = { all: ["drafts"] as const, list: () => ["drafts", "list"] as const };
+export const draftKeys = { all: ["drafts"] as const, list: (business?: number | null) => ["drafts", "list", ...(business === undefined ? [] : [business])] as const };
 
 /**
  * Drafts saved as bills in this visit, here (forgetDraft) or on another counter (a PUT answered 409 draft_saved): a list
@@ -47,9 +47,9 @@ const savedAs = new Map<string, string>();
 /** The most the server lists (contract §4): a list that long may leave some out. */
 const DRAFTS_CAP = 500;
 
-async function fetchDrafts(signal?: AbortSignal): Promise<DraftList> {
+async function fetchDrafts(signal?: AbortSignal, business?: number): Promise<DraftList> {
   const askedAt = Date.now();
-  const d = obj((await api.get("drafts/", { signal })).data);
+  const d = obj((await api.get("drafts/", { signal, ...(business === undefined ? {} : { params: { business_id: business } }) })).data);
   const results = Array.isArray(d.results) ? d.results : [];
   return { askedAt, complete: results.length < DRAFTS_CAP, drafts: results.map(toDraft).filter((x) => !finished.has(x.id)) };
 }
@@ -69,15 +69,23 @@ export async function deleteDraft(id: string): Promise<void> {
  * Every unfinished bill the shop has (newest change first). Asked for once as a bill form opens, never on a timer.
  * fresh: asked for again as it mounts, whatever the cache holds.
  */
-export function useDrafts(enabled = true, fresh = false) {
-  return useQuery({ ...listQuery, enabled, ...(fresh ? { refetchOnMount: "always" as const } : {}) });
+export function useDrafts(enabled = true, fresh = false, business?: number | null) {
+  return useQuery({
+    ...listQuery, queryKey: draftKeys.list(business),
+    queryFn: business === null ? skipToken : ({ signal }) => fetchDrafts(signal, business),
+    enabled, ...(fresh ? { refetchOnMount: "always" as const } : {}),
+  });
 }
 
 function upsert(qc: QueryClient, row: Draft) {
-  qc.setQueryData<DraftList>(draftKeys.list(), (l) => l && { ...l, drafts: [row, ...l.drafts.filter((x) => x.id !== row.id)] });
+  for (const [key] of qc.getQueriesData<DraftList>({ queryKey: draftKeys.list() })) {
+    qc.setQueryData<DraftList>(key, (l) => l && { ...l, drafts: [
+      ...(key[2] === undefined || key[2] === row.business ? [row] : []), ...l.drafts.filter((x) => x.id !== row.id),
+    ] });
+  }
 }
 function drop(qc: QueryClient, id: string) {
-  qc.setQueryData<DraftList>(draftKeys.list(), (l) => l && { ...l, drafts: l.drafts.filter((x) => x.id !== id) });
+  qc.setQueriesData<DraftList>({ queryKey: draftKeys.list() }, (l) => l && { ...l, drafts: l.drafts.filter((x) => x.id !== id) });
 }
 
 /** Each draft's writes to the server, one after another: one that overtook another still on its way would be undone by it. */
@@ -178,7 +186,7 @@ function deleteGone(qc: QueryClient, id: string): Promise<void> {
   });
 }
 /** The shop's copy of a draft, from the list this page last read. */
-const shopCopy = (qc: QueryClient, id: string) => qc.getQueryData<DraftList>(draftKeys.list())?.drafts.find((x) => x.id === id);
+const shopCopy = (qc: QueryClient, id: string) => qc.getQueriesData<DraftList>({ queryKey: draftKeys.list() }).flatMap(([, list]) => list?.drafts ?? []).find((x) => x.id === id);
 /** Off every list here at once, then deleted on the server. Offline, this device keeps it as gone and the next sync deletes it there. */
 async function discard(qc: QueryClient, id: string): Promise<void> {
   // one only the shop's list had is kept here as gone, so an offline discard still reaches the server
@@ -254,15 +262,15 @@ export function forgetDraft(qc: QueryClient, id: string): void {
  * draft was made doesn't have it. answered: the shop's list answered (since this mounted, when fresh); false while it's
  * coming, when it failed, and while it waits for the network: only an answer can say a draft isn't there any more.
  */
-export function useUnfinishedBills(enabled = true, { fresh = false }: { fresh?: boolean } = {}): { bills: UnfinishedBill[]; loading: boolean; answered: boolean } {
-  const server = useDrafts(enabled, fresh);
+export function useUnfinishedBills(enabled = true, { fresh = false, businessId }: { fresh?: boolean; businessId?: number | null } = {}): { bills: UnfinishedBill[]; loading: boolean; answered: boolean } {
+  const server = useDrafts(enabled, fresh, businessId);
   const kept = useKeptDrafts();
   const list = server.data;
   const firstAsk = !list && server.fetchStatus === "fetching";
   // its last ask failed, or waits for the network: what the cache holds may be older than a copy here
   const unread = server.isError || server.fetchStatus === "paused";
   const bills = useMemo(() => {
-    const live = kept.filter((d) => !d.gone);
+    const live = kept.filter((d) => !d.gone && (businessId === undefined || d.business === businessId));
     const gone = new Set(kept.filter((d) => d.gone).map((d) => d.id));
     const fromServer = (list?.drafts ?? []).filter((d) => !gone.has(d.id));
     const listed = new Set(fromServer.map((d) => d.id));
@@ -276,8 +284,8 @@ export function useUnfinishedBills(enabled = true, { fresh = false }: { fresh?: 
       const mine = changed.get(d.id);
       return mine ? { ...d, business: mine.business, data: mine.data, updated_at: mine.updated_at, onDevice: true } : { ...d, onDevice: false };
     });
-    return [...here, ...merged].sort(newestFirst);
-  }, [list, kept, firstAsk, unread]);
+    return businessId === null ? [] : [...here, ...merged].sort(newestFirst);
+  }, [list, kept, firstAsk, unread, businessId]);
   const asking = fresh ? server.fetchStatus === "fetching" && !server.isFetchedAfterMount : firstAsk;
   const answered = server.isSuccess && server.fetchStatus !== "paused" && (!fresh || server.isFetchedAfterMount);
   return { bills, loading: enabled && asking, answered: enabled && answered };

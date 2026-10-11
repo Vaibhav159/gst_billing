@@ -152,8 +152,8 @@ export const customerKeys = {
   one: (id: number) => ["customers", "one", id] as const,
   statement: (id: number, params: StatementParams | null) => ["customers", "statement", id, params] as const,
   itax: (id: number) => ["customers", "itax", id] as const,
-  search: (term: string, size: number, figures = true) => ["customers", "search", searchTerm(term), size, figures] as const,
-  recent: (firm: FirmId | null) => ["customers", "recent", firm] as const,
+  search: (term: string, size: number, figures = true, scope?: CustomerFiguresScope) => ["customers", "search", searchTerm(term), size, figures, ...(scope ? [scope] : [])] as const,
+  recent: (firm: FirmId | null, options?: RecentCustomerOptions) => ["customers", "recent", firm, ...(options ? [options] : [])] as const,
   walkin: () => ["customers", "walkin"] as const,
   walkinFigures: (id: number | null, name: string, firm: FirmId | null) => ["customers", "walkin", id, name, firm] as const,
 };
@@ -174,7 +174,7 @@ export type CustomerSort = "recent" | "name" | "sales";
 export type CustomerListFilters = {
   /** The firm the figures count (null: not known yet, so nothing is asked); from and to: the figures' period. */
   firmId: FirmId | null; from: string; to: string;
-  q: string; gst: "any" | "yes" | "no"; state: string; usualFirm: number | null; sort: CustomerSort;
+  q: string; gst: "any" | "yes" | "no"; state: string; usualFirm: number | null; sort: CustomerSort; pageSize?: number;
 };
 export const LIST_PAGE = 20;
 const ORDERING: Record<CustomerSort, string> = { recent: "-last_bill", name: "name", sales: "-sales" };
@@ -195,7 +195,7 @@ export async function fetchAllCustomers(params: Record<string, string | number>)
 }
 /** customers/'s parameters for the list (contract §6.1). */
 export function customerListParams(f: CustomerListFilters): Record<string, string | number> {
-  const p: Record<string, string | number> = { role: "customers", figures: 1, page_size: LIST_PAGE, start_date: f.from, end_date: f.to, ordering: ORDERING[f.sort] };
+  const p: Record<string, string | number> = { role: "customers", figures: 1, page_size: f.pageSize ?? LIST_PAGE, start_date: f.from, end_date: f.to, ordering: ORDERING[f.sort] };
   if (typeof f.firmId === "number") p.figures_business_id = f.firmId;
   if (f.q.trim()) p.search = searchTerm(f.q);
   if (f.gst !== "any") p.has_gstin = f.gst === "yes" ? 1 : 0;
@@ -256,21 +256,29 @@ export function useItaxBills(customerId: number | null) {
   return { ...q, data: q.data?.rows, count: q.data?.count };
 }
 /** Customers whose name, phone or GSTIN has `term` in it (from 2 characters), with their last bill in any firm. */
-export function useCustomerSearch(term: string, { size = 8, enabled = true, figures = true }: { size?: number; enabled?: boolean; figures?: boolean } = {}) {
+export type CustomerFiguresScope = { firmId: FirmId | null; from: string; to: string };
+export type RecentCustomerOptions = { from?: string; to?: string; size?: number };
+export function useCustomerSearch(term: string, { size = 8, enabled = true, figures = true, scope }: { size?: number; enabled?: boolean; figures?: boolean; scope?: CustomerFiguresScope } = {}) {
   const t = searchTerm(term);
   return useQuery({
-    queryKey: customerKeys.search(t, size, figures), enabled: enabled && t.length >= 2, staleTime: 30_000,
-    queryFn: async ({ signal }) => toCustomerPage((await api.get("customers/", { params: { role: "customers", search: t, ...(figures ? { figures: 1 } : {}), page_size: size }, signal })).data).rows,
+    queryKey: customerKeys.search(t, size, figures, scope), enabled: enabled && t.length >= 2, staleTime: 30_000,
+    queryFn: scope?.firmId === null ? skipToken : async ({ signal }) => toCustomerPage((await api.get("customers/", { params: {
+      role: "customers", search: t, ...(figures ? { figures: 1 } : {}), page_size: size,
+      ...(scope ? { start_date: scope.from, end_date: scope.to, ...(typeof scope.firmId === "number" ? { figures_business_id: scope.firmId } : {}) } : {}),
+    }, signal })).data).rows,
   });
 }
 /** The five customers a firm billed last (never the walk-in record). Waits for the firm. */
-export function useRecentCustomers(firmId: FirmId | null, enabled = true) {
+export function useRecentCustomers(firmId: FirmId | null, enabled = true, options?: RecentCustomerOptions) {
+  const size = options?.size ?? 5;
   return useQuery({
-    queryKey: customerKeys.recent(firmId), enabled, staleTime: 30_000,
+    queryKey: customerKeys.recent(firmId, options), enabled, staleTime: 30_000,
     queryFn: firmId === null ? skipToken : async ({ signal }) => {
-      const params: Record<string, string | number> = { role: "customers", figures: 1, ordering: "-last_bill", page_size: 6 };
+      const params: Record<string, string | number> = { role: "customers", figures: 1, ordering: "-last_bill", page_size: size + 1 };
       if (typeof firmId === "number") params.figures_business_id = firmId;
-      return toCustomerPage((await api.get("customers/", { params, signal })).data).rows.filter((r) => r.type !== "walkin" && r.figures?.last_bill).slice(0, 5);
+      if (options?.from) params.start_date = options.from;
+      if (options?.to) params.end_date = options.to;
+      return toCustomerPage((await api.get("customers/", { params, signal })).data).rows.filter((r) => r.type !== "walkin" && r.figures?.last_bill).slice(0, size);
     },
   });
 }

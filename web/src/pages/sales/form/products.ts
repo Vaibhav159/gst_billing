@@ -2,7 +2,7 @@
 // for 30 minutes and searched here as a person types, so a product picked by Enter straight after typing is never one
 // the server hasn't answered for yet. Making charges are inside the rate (part 1 design §2), so a product brings its
 // name, HSN code, GST rate and unit; the rate is typed as written on the paper bill.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
 import { invalidateCatalog, productTraits, type ProductTraits, type ProductKind } from "@/core/api/catalog";
 import { pct, UNITS } from "@/core/format";
@@ -37,7 +37,7 @@ export const productKeys = { all: ["products"] as const, forSale: () => ["produc
 export function useSaleProducts(enabled = true, { forSale = true }: { forSale?: boolean } = {}) {
   return useQuery({
     queryKey: forSale ? productKeys.forSale() : [...productKeys.all, "for-purchase"], staleTime: 30 * 60_000, enabled,
-    queryFn: async ({ signal }) => {
+    queryFn: !enabled ? skipToken : async ({ signal }) => {
       const rows = new Map<number, SaleProduct>();
       // 100 pages of 1,000 is far past any shop; a server that keeps naming a next page fails here instead of looping
       for (let page = 1; page <= 100; page++) {
