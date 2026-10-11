@@ -54,8 +54,8 @@ def import_bills(data, user, *, sales=False):
     from billing.services.purchase_reads import credit_block
     from billing.services.purchases import save_purchase
 
-    paired = any(isinstance(row, dict) and row.get("pair") is not None for row in data["bills"])
-    if (sales or paired) and not can(user, "bill.create"):
+    has_pairs = any(isinstance(row, dict) and row.get("pair") is not None for row in data["bills"])
+    if (sales or has_pairs) and not can(user, "bill.create"):
         raise PermissionDenied({"detail": why_not(user, "bill.create"), "needs": "bill.create"})
 
     party_key = "customers" if sales else "suppliers"
@@ -79,19 +79,29 @@ def import_bills(data, user, *, sales=False):
         if firm_ids:
             lock_firms(*firm_ids)
         parties = {}
-        for row in data[party_key]:
-            payload = {key: value for key, value in row.items() if key != "ref"}
-            party_data = valid(SupplierSerializer, payload)
-            if sales:
-                # Sales imports use the same party fields but never mark their customers as suppliers.
-                from billing.services.suppliers import name_problem
+        for index, row in enumerate(data[party_key]):
+            try:
+                payload = {key: value for key, value in row.items() if key != "ref"}
+                party_data = valid(SupplierSerializer, payload)
+                if sales:
+                    # Sales imports use the same party fields but never mark their customers as suppliers.
+                    from billing.services.suppliers import name_problem
 
-                name_problem(party_data["name"])
-                customer = Customer.objects.create(**party_data)
-                AuditLog.objects.create(action="created", entity="customer", entity_id=customer.pk,
-                                        entity_name=customer.name, user=user, details="New customer")
-            else:
-                customer = save_supplier(party_data, user)
+                    name_problem(party_data["name"])
+                    customer = Customer.objects.create(**party_data)
+                    AuditLog.objects.create(action="created", entity="customer", entity_id=customer.pk,
+                                            entity_name=customer.name, user=user, details="New customer")
+                else:
+                    customer = save_supplier(party_data, user)
+            except APIException as refused:
+                detail = refused.detail
+                if isinstance(detail, dict) and "code" in detail:
+                    field = "gst_number" if detail["code"] == "gstin_taken" else "non_field_errors"
+                    detail = {field: [detail["detail"]]}
+                errors = {}
+                for problem in problems(detail, f"{party_key}.{index}"):
+                    errors.setdefault(problem["field"], []).append(problem["detail"])
+                raise ValidationError(errors) from None
             parties[row["ref"]] = customer.pk
             result[party_key].append({"ref": row["ref"], "id": customer.pk})
         for index, row in enumerate(data["bills"]):
@@ -108,8 +118,9 @@ def import_bills(data, user, *, sales=False):
                     payload = dict(row)
                     relation = "customer" if sales else "supplier"
                     party = payload.get(relation)
-                    if isinstance(party, str) and party in parties:
-                        payload[relation] = parties[party]
+                    if isinstance(party, str):
+                        # JSON ids are numbers; every string is a declared batch reference.
+                        payload[relation] = parties.get(party)
                     if sales:
                         payload["paper"] = True
                         bill = save_bill(valid(SaleSerializer, payload), user)
@@ -130,9 +141,9 @@ def import_bills(data, user, *, sales=False):
                             sale_data = {"business": seller.pk, "customer": customer.pk, "paper": True,
                                          "invoice_number": pair["invoice_number"], "invoice_date": payload.get("invoice_date"),
                                          "payment_mode": payload.get("payment_mode", ""), "lines": payload.get("lines")}
-                            paired = save_bill(valid(SaleSerializer, sale_data), user)
-                            purchase_data["linked_sale"] = paired.pk
-                            created_ids.add(paired.pk)
+                            paired_sale = save_bill(valid(SaleSerializer, sale_data), user)
+                            purchase_data["linked_sale"] = paired_sale.pk
+                            created_ids.add(paired_sale.pk)
                         bill = save_purchase(purchase_data, user)
                         answer["credit"] = credit_block(bill)
                         claimed = Decimal(answer["credit"]["claimed"])
@@ -141,7 +152,7 @@ def import_bills(data, user, *, sales=False):
                     result["totals"]["bills"] += 1
                     total += bill.total_amount
                     credit += claimed
-                    ids = [bill.pk] + ([paired.pk] if not sales and row.get("pair") is not None else [])
+                    ids = [bill.pk] + ([paired_sale.pk] if not sales and row.get("pair") is not None else [])
                     for entry in AuditLog.objects.filter(action="created", entity="invoice", entity_id__in=ids).only("pk", "details"):
                         entry.details += f" · from {file_name or 'bill photos'}, {ref}"
                         entry.save(update_fields=["details"])
