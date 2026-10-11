@@ -77,3 +77,21 @@ test("the established shop reuses the slim firm list without another setup reque
   expect(calls.filter((call) => call.url === "firms/")).toHaveLength(1);
 });
 
+test("skips wait for this person's preferences, so a skip never replaces choices that haven't loaded", async () => {
+  const calls = serve({ "GET firms/": { results: [] }, "GET shop-settings/": { default_business: null }, "GET setup/": { ...full, products: empty.products }, "GET preferences/": () => new Promise<never>(() => {}) });
+  mount(routes, ["/setup"]);
+  expect(await screen.findByRole("button", { name: "Skip: add a product" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled();
+  expect(calls.some((call) => call.method === "PATCH")).toBe(false);
+});
+test("preferences that failed to load say so with a retry, and skipping stays off", async () => {
+  let fail = true;
+  serve({ "GET firms/": { results: [] }, "GET shop-settings/": { default_business: null }, "GET setup/": { ...full, products: empty.products, bills: empty.bills }, "GET preferences/": () => fail ? { status: 0 } : { status: 200, data: { data: { setup: { dismissed: false, skipped: ["bill"] } } } } });
+  mount(routes, ["/setup"]);
+  expect(await screen.findByText(/Your preferences didn't load/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Skip: add a product" })).toBeDisabled();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Skip: add a product" })).toBeEnabled());
+  expect(screen.getByText("Skipped")).toBeInTheDocument();
+});

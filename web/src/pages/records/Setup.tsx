@@ -8,12 +8,14 @@ import { usePrefs, type SetupPrefs } from "@/core/prefs";
 import { useView } from "@/core/view";
 import { cn } from "@/core/cn";
 import { cancelledNote } from "./words";
-import { AppMark, Badge, Button, ButtonLink, Card, Page, QueryView, SuccessMark, useToast } from "@/core/ui";
+import { AppMark, Badge, Banner, Button, ButtonLink, Card, Page, QueryView, SuccessMark, useToast } from "@/core/ui";
 import { SaveError } from "@/pages/customers/parts";
 
 function SetupBody({ data }: { data: SetupSummary }) {
   const { can, whyNot } = useAuth();
-  const { prefs, setPrefs } = usePrefs();
+  const { prefs, setPrefs, loading: prefsLoading, unavailable, retry } = usePrefs();
+  // the server merges a PATCH at the top level: writing setup before this person's choices are read would replace them
+  const prefsOff = prefsLoading || unavailable !== null;
   const { isPhone } = useView();
   const navigate = useNavigate();
   const { show } = useToast();
@@ -40,7 +42,7 @@ function SetupBody({ data }: { data: SetupSummary }) {
   const settled = doneCount + skipCount;
   const current = steps.find((step) => !step.done && !skipped.includes(step.id));
   const save = async (patch: Partial<SetupPrefs>, id: string, leave = false) => {
-    if (active.current) return;
+    if (active.current || prefsOff) return;
     active.current = true; setBusyId(id);
     try {
       await setPrefs({ setup: { dismissed: Boolean(setup.dismissed), skipped, ...patch } });
@@ -49,10 +51,11 @@ function SetupBody({ data }: { data: SetupSummary }) {
     } catch (error) { setFailure({ problem: problemOf(error), patch, id, leave }); }
     finally { active.current = false; setBusyId(null); }
   };
-  const leave = <Button variant="ghost" icon={SkipForward} loading={busyId === "all"} onClick={() => void save({ dismissed: true }, "all", true)}>Skip setup</Button>;
+  const leave = <Button variant="ghost" icon={SkipForward} loading={busyId === "all"} disabled={prefsOff} onClick={() => void save({ dismissed: true }, "all", true)}>Skip setup</Button>;
   return <Page icon={Sparkles} title="Set up GST Billing" back="/settings" context={newShop ? "A new shop · four steps, about ten minutes in all" : doneCount + " of 4 done" + (skipCount ? " · " + skipCount + " skipped" : "") + " · each step ticks itself when it's done"}
     phoneSubtitle={newShop ? "A new shop · four steps" : doneCount + " of 4 done"} actions={newShop ? null : settled < 4 ? leave : <ButtonLink to="/" variant="primary" icon={LayoutDashboard}>Go to the dashboard</ButtonLink>} phoneActions={!newShop && settled < 4 ? leave : null}>
     {newShop ? <Card><div className={cn("flex gap-4", isPhone ? "flex-col" : "items-center")}><AppMark size={56} /><div className="flex-1 min-w-0"><h2 className="text-xl font-semibold">Welcome to GST Billing</h2><p className="text-fg2 mt-1">There's no business here yet. Start with yours: its GSTIN, address and bill numbers. It takes about two minutes, and everything else (customers, products, bills, GST returns) follows from it.</p>{!can("firm.edit") ? <p className="mt-2">Ask the owner to add the business first</p> : null}</div></div></Card> : null}
+    {unavailable ? <Banner tone="neg" role="presentation" title="Your preferences didn't load" actions={<Button size="sm" onClick={() => void retry()}>Try again</Button>}>Skipping steps waits for them, so the steps you skipped before aren't lost.</Banner> : null}
     <SaveError problem={failure?.problem ?? null} onRetry={failure ? () => void save(failure.patch, failure.id, failure.leave) : undefined} />
     <div className="flex flex-col gap-2" aria-hidden="true"><div className="flex gap-1.5">{steps.map((step) => <span key={step.id} className={cn("h-1.5 flex-1 rounded-full transition-colors duration-300", step.done ? "bg-sale" : skipped.includes(step.id) ? "bg-muted/50" : step === current ? "bg-brand" : "bg-line")} />)}</div></div>
     {!newShop && settled === 4 ? <Card><div className="flex flex-col items-center text-center gap-2 py-4 anim-rise" role="status"><SuccessMark size={64} /><p className="text-lg font-semibold mt-1">{doneCount === 4 ? "You're set up" : "Setup is done for now"}</p><p className="text-fg2 max-w-[52ch]">{doneCount === 4 ? "Your business, customers, products and bills are all in. Everything below can be changed any time." : "The skipped steps stay here; come back from Settings → Data whenever you like."}</p><ButtonLink to="/" variant="primary" icon={LayoutDashboard} className="mt-2">Go to the dashboard</ButtonLink></div></Card> : null}
@@ -70,11 +73,11 @@ function SetupBody({ data }: { data: SetupSummary }) {
         </div>
         <div className={cn("flex gap-2 shrink-0", isPhone ? "flex-col" : "items-center")}>
           {step.done ? step.id === "firm" && allowed ? <ButtonLink to={step.to} variant="ghost" size="sm">{step.cta}</ButtonLink> : null : isSkipped ? <>
-            <Button variant="ghost" size="sm" icon={Undo2} loading={busyId === step.id} disabled={busyId !== null && busyId !== step.id} onClick={() => void save({ skipped: skipped.filter((id) => id !== step.id) }, step.id)}>Undo skip</Button>
+            <Button variant="ghost" size="sm" icon={Undo2} loading={busyId === step.id} disabled={prefsOff || (busyId !== null && busyId !== step.id)} onClick={() => void save({ skipped: skipped.filter((id) => id !== step.id) }, step.id)}>Undo skip</Button>
             {!blocked && allowed ? <ButtonLink to={step.to} size="sm" iconRight={ArrowRight}>Do it now</ButtonLink> : null}
           </> : <>
             {blocked || !allowed ? <Button variant={step === current ? "primary" : "secondary"} disabled iconRight={ArrowRight}>{step.cta}</Button> : <ButtonLink to={step.to} variant={step === current ? "primary" : "secondary"} iconRight={ArrowRight}>{step.cta}</ButtonLink>}
-            {!newShop || step.id !== "firm" ? <Button variant="ghost" aria-label={"Skip: " + step.title.toLowerCase()} loading={busyId === step.id} disabled={busyId !== null && busyId !== step.id} onClick={() => void save({ skipped: [...new Set([...skipped, step.id])] }, step.id)}>Skip</Button> : null}
+            {!newShop || step.id !== "firm" ? <Button variant="ghost" aria-label={"Skip: " + step.title.toLowerCase()} loading={busyId === step.id} disabled={prefsOff || (busyId !== null && busyId !== step.id)} onClick={() => void save({ skipped: [...new Set([...skipped, step.id])] }, step.id)}>Skip</Button> : null}
           </>}
         </div>
       </div></Card></li>;
