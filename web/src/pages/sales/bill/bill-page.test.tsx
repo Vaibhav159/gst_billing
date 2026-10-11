@@ -1,14 +1,15 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { salesKeys } from "@/core/api/sales";
+import { billQuery, salesKeys } from "@/core/api/sales";
 import { AuthContext, type Me } from "@/core/auth/AuthProvider";
+import { RoleContext } from "@/core/auth/role";
 import { refuse, salesServer, wireBin, wireDetail, wirePage, wireRow } from "@/core/sales/fixtures";
-import { toSalesPage } from "@/core/sales/wire";
+import { toPaperBook, toSalesPage } from "@/core/sales/wire";
 import { LOCKED_REASON } from "@/core/sales/words";
 import { ToastProvider } from "@/core/ui";
-import { renderApp, stubAuth } from "@/test/render";
+import { renderApp, stubAuth, testQueryClient } from "@/test/render";
 import BillPage from "../BillPage";
 
 const STAFF: Partial<Me> = { role: "staff", permissions: ["view", "bill.create", "bill.send", "customer.edit"] };
@@ -225,11 +226,11 @@ test("an unsent paper bill never asks to be sent: it's On paper, its copy goes f
   expect(within(panel).queryByRole("button")).not.toBeInTheDocument();
 });
 
-test("in a filed month the e-way bill and Renumber are locked with the reason, as the menu has them; an open month's e-way bill can be changed, its number in fours", async () => {
+test("in a filed month the e-way bill, Renumber and the tax heads' fix are locked with the reason, as the menu has them; an open month's e-way bill can be changed, its number in fours", async () => {
   const dup = { id: 388, invoice_number: "KGH/2026-27/31", invoice_date: "2026-09-10", customer_name: "Hemant Dave", status: "active" };
   const EWAY = { eway_bill_number: "", transporter_name: "Shree Transport", transporter_gstin: "", vehicle_number: "RJ14AB1234", vehicle_type: "Regular", transport_mode: "Road", distance_km: 120, may_be_needed: true };
   salesServer([
-    ["GET", "sales/412/", () => wireDetail({ locked: true, checks: ["duplicate"], duplicates: [dup], eway: EWAY,
+    ["GET", "sales/412/", () => wireDetail({ locked: true, checks: ["duplicate", "heads_mismatch"], duplicates: [dup], eway: EWAY, igst: "2536.40", cgst: "0.00", sgst: "0.00",
       // v2's Excel import made it: its history says so, and no made-up "Made the bill" goes under it
       history: { created_by: { id: 1, name: "Kailash Mehta" }, activity: [{ at: "2026-10-09T11:20:00+05:30", by: "Kailash Mehta", action: "imported", details: "Imported from Excel (2 items, total: 87083.21)" }] } })],
     ["GET", "sales/414/", () => wireDetail({ id: 414, invoice_number: "KGH/2026-27/35", eway: { ...EWAY, eway_bill_number: "123456789012", may_be_needed: false } })],
@@ -245,6 +246,9 @@ test("in a filed month the e-way bill and Renumber are locked with the reason, a
   const renumber = within(status("Bill number KGH/2026-27/31 is used twice in KIRAN GOLD HOUSE")).getByRole("button", { name: "Renumber this one" });
   expect(renumber).toBeDisabled();
   expect(renumber).toHaveAttribute("title", LOCKED_REASON);
+  const heads = within(status("Tax is under IGST, but this is a local sale")).getByRole("button", { name: "Fix the tax heads" });
+  expect(heads).toBeDisabled();
+  expect(heads).toHaveAttribute("title", LOCKED_REASON);
   const activity = screen.getByRole("list", { name: "What happened to this bill" });
   expect(activity).toHaveTextContent("Imported from Excel by Kailash Mehta");
   expect(activity).not.toHaveTextContent("Made the bill");
@@ -279,4 +283,192 @@ test("the customer's other bills that don't load say so, and Try again asks for 
   await userEvent.click(within(card).getByRole("button", { name: "Try again" }));
   expect(await within(card).findByRole("link", { name: /^KGH\/2026-27\/12/ })).toHaveAttribute("href", "/sales/300");
   expect(calls.filter((c) => c.url === "sales/")).toHaveLength(2);
+});
+
+/* ── Fix round 1 (the review) ── */
+
+/** As mount, with a cache the test holds: to seed it before the page opens, or to ask again from outside. */
+const mountWith = (qc: QueryClient, path: string) => render(
+  <QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><RoleContext.Provider value="owner">
+    <MemoryRouter initialEntries={[path]}><ToastProvider><Routes>
+      <Route path="/sales/new" element={<Where />} />
+      <Route path="/sales/:id" element={<><BillPage /><Where /></>} />
+    </Routes></ToastProvider></MemoryRouter>
+  </RoleContext.Provider></AuthContext.Provider></QueryClientProvider>,
+);
+const PAPER_34 = { id: 413, invoice_number: "KGH/2026-27/34", counter: 34, paper: true, invoice_date: "2026-09-30" };
+/** September's paper book with `counter` next. */
+const paperBook = (counter: number) => ({
+  business: 3, month: "2026-09", fy: "2026-27", bills: [], entered: 1, runs: [[34, 34]], missing: [], explained: [], twice: [], after: [], after_months: [],
+  next: { counter, invoice_number: `KGH/2026-27/${counter}`, invoice_date: "2026-09-30" }, locked: false, gstr1_due: "2026-10-11",
+});
+/** The paper book from before the save, when 34 was next: the save then asked every bill screen again (keepBill, invalidateSales). */
+async function savedOver(qc: QueryClient) {
+  qc.setQueryData(salesKeys.paperBook(3, "2026-09"), toPaperBook(paperBook(34)));
+  await qc.invalidateQueries({ queryKey: salesKeys.all });
+}
+
+test("right after a paper save the panel waits for the paper book it asked again, never offering the number just saved, then the next one takes focus", async () => {
+  let fresh: (w: unknown) => void = () => {};
+  salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => new Promise((resolve) => { fresh = resolve; })],
+  ]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  expect(within(panel).getByRole("link", { name: "Back to the paper book" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument();
+  await act(async () => { fresh(paperBook(35)); });
+  const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
+  expect(next).toHaveAttribute("href", "/sales/new?paper=1&firm=3&date=2026-09-30&number=35");
+  await waitFor(() => expect(next).toHaveFocus());
+});
+
+test("the next paper bill takes focus when the paper book asked again answers, even with the same book as before", async () => {
+  let fresh: (w: unknown) => void = () => {};
+  salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => new Promise((resolve) => { fresh = resolve; })],
+  ]);
+  const qc = testQueryClient();
+  // the book on this device already names 35, and asking again answers the same: its data stays the very same object
+  qc.setQueryData(salesKeys.paperBook(3, "2026-09"), toPaperBook(paperBook(35)));
+  await qc.invalidateQueries({ queryKey: salesKeys.all });
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  const panel = status("Saved KGH/2026-27/34");
+  await waitFor(() => expect(within(panel).getByRole("link", { name: "Back to the paper book" })).toHaveFocus());
+  await act(async () => { fresh(paperBook(35)); });
+  const next = await within(panel).findByRole("link", { name: "Next paper bill · 35" });
+  await waitFor(() => expect(next).toHaveFocus());
+});
+
+test("a paper book that can't be asked again after a paper save offers no next number, only the way back to it", async () => {
+  const { calls } = salesServer([
+    ["GET", "sales/413/", () => wireDetail(PAPER_34)],
+    ["GET", "sales/paper-book/", () => refuse(500, {})],
+  ]);
+  const qc = testQueryClient();
+  await savedOver(qc);
+  mountWith(qc, "/sales/413?saved=new");
+  await screen.findByText("Saved KGH/2026-27/34");
+  await waitFor(() => expect(calls.some((c) => c.url === "sales/paper-book/")).toBe(true));
+  const panel = status("Saved KGH/2026-27/34");
+  await waitFor(() => expect(within(panel).getByRole("link", { name: "Back to the paper book" })).toHaveFocus());
+  expect(within(panel).queryByRole("link", { name: /^Next paper bill/ })).not.toBeInTheDocument();
+});
+
+test("a bill on screen whose refresh fails stays, with an open dialog and what's typed in it, and says so; Try again asks again", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  let down = false;
+  const { calls } = salesServer([["GET", "sales/412/", () => (down ? refuse(500, {}) : wireDetail())]]);
+  const qc = testQueryClient();
+  mountWith(qc, "/sales/412");
+  await screen.findByText("Payment and sending");
+  await userEvent.click(screen.getByRole("button", { name: "More actions for KGH/2026-27/31" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: /^E-way bill/ }));
+  const dialog = await screen.findByRole("dialog", { name: "E-way bill for KGH/2026-27/31" });
+  act(() => { vi.advanceTimersByTime(400); }); // past the dialog's guard against the tail of the click that opened it
+  fireEvent.change(within(dialog).getByLabelText("Transporter"), { target: { value: "Shree Transport" } });
+  // asked again (after a send, a cancel, a reconnect…), and the server can't answer
+  down = true;
+  await act(async () => { await qc.invalidateQueries({ queryKey: billQuery(412).queryKey }); });
+  expect(await screen.findByText("Couldn't refresh this bill")).toBeInTheDocument();
+  expect(screen.getByText("The app couldn't reach the shop's records just now, so this is what was last loaded.")).toBeInTheDocument();
+  expect(screen.getByText("Payment and sending")).toBeInTheDocument();
+  expect(within(dialog).getByLabelText("Transporter")).toHaveValue("Shree Transport");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  down = false;
+  const before = calls.filter((c) => c.url === "sales/412/").length;
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByText("Couldn't refresh this bill")).not.toBeInTheDocument());
+  expect(calls.filter((c) => c.url === "sales/412/")).toHaveLength(before + 1);
+  vi.useRealTimers();
+});
+
+/** A deleted bill's page whose Restore the server answers with `answer`; GET sales/205/ answers `after` once Restore was pressed. */
+function restoreServer(answer: () => unknown, after: () => unknown) {
+  let pressed = false;
+  const server = salesServer([
+    ["GET", "sales/205/", () => (pressed ? after() : refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin() }))],
+    ["POST", "bin/4/restore/", () => { pressed = true; return answer(); }],
+  ]);
+  mount("/sales/205");
+  return server;
+}
+const STILL_DELETED = () => refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin() });
+const BACK = () => wireDetail({ id: 205, invoice_number: "KGH/2026-27/27" });
+
+test("a Restore whose bin row has gone says the server's words, not the app's, and asks for the bill again", async () => {
+  const { calls } = restoreServer(() => refuse(404, { detail: "That deleted bill isn't in the bin any more." }), STILL_DELETED);
+  await screen.findByText("This bill was deleted");
+  const banner = status("This bill was deleted");
+  await userEvent.click(within(banner).getByRole("button", { name: "Restore it" }));
+  expect(await screen.findByText("That deleted bill isn't in the bin any more.")).toBeInTheDocument();
+  expect(screen.queryByText("That isn't there any more.")).not.toBeInTheDocument();
+  await waitFor(() => expect(calls.filter((c) => c.url === "sales/205/")).toHaveLength(2));
+});
+
+test.each([
+  ["its bin row has gone (404)", () => refuse(404, { detail: "That deleted bill isn't in the bin any more." })],
+  ["it's back in Sales already (already_restored)", () => refuse(409, { detail: "KGH/2026-27/27 is back in Sales already.", code: "already_restored" })],
+])("a bill someone restored meanwhile, so %s, shows once Restore is pressed, never a Try again that can only fail", async (_why, answer) => {
+  restoreServer(answer, BACK);
+  await screen.findByText("This bill was deleted");
+  const banner = status("This bill was deleted");
+  await userEvent.click(within(banner).getByRole("button", { name: "Restore it" }));
+  expect(await screen.findByText("Payment and sending")).toBeInTheDocument();
+  expect(screen.queryByText("This bill was deleted")).not.toBeInTheDocument();
+});
+
+test("a lasting refusal of Restore says the server's words and keeps Restore it; a failure to get through offers Try again", async () => {
+  let tries = 0;
+  restoreServer(() => {
+    tries += 1;
+    return tries === 1 ? refuse(409, { detail: "Anil Gupta was deleted, so this bill can't come back. Restore the customer first.", code: "customer_gone" }) : refuse(500, {});
+  }, STILL_DELETED);
+  await screen.findByText("This bill was deleted");
+  const banner = status("This bill was deleted");
+  await userEvent.click(within(banner).getByRole("button", { name: "Restore it" }));
+  expect(await screen.findByText("Anil Gupta was deleted, so this bill can't come back. Restore the customer first.")).toBeInTheDocument();
+  expect(within(banner).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  await userEvent.click(within(banner).getByRole("button", { name: "Restore it" }));
+  expect(await screen.findByText("Not restored: the app couldn't get through")).toBeInTheDocument();
+  expect(within(banner).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+});
+
+test("the saved panel's words follow a send made from it: a new bill's say WhatsApp opened; an edited one's say the corrected bill went", async () => {
+  vi.spyOn(window, "open").mockImplementation(() => null);
+  const BEFORE = { at: "2026-10-08T11:00:00+05:30", last_at: "2026-10-08T11:00:00+05:30", count: 1, via: "whatsapp", to: "" };
+  let sent: typeof SENT | null = null;
+  salesServer([
+    ["GET", "sales/412/", () => wireDetail({ sent })],
+    ["POST", "sales/412/sent/", () => { sent = sent ? { ...sent, last_at: "2026-10-08T12:41:00+05:30", count: 2 } : SENT; return { id: 412, sent }; }],
+  ]);
+  const view = mount("/sales/412?saved=new");
+  await screen.findByText("Saved KGH/2026-27/31");
+  const fresh = status("Saved KGH/2026-27/31");
+  const send = within(fresh).getByRole("button", { name: "Send on WhatsApp" });
+  await waitFor(() => expect(send).toBeEnabled());
+  await userEvent.click(send);
+  expect(await within(fresh).findByText("WhatsApp opened the chat with Anil Gupta, with the bill's message typed in.")).toBeInTheDocument();
+  expect(fresh).not.toHaveTextContent("Send it now, or print it.");
+  expect(within(fresh).getByRole("button", { name: "Send again" })).toBe(send);
+  view.unmount();
+  // sent before the edit: the panel asks for the corrected bill, once
+  sent = BEFORE;
+  mount("/sales/412?saved=edit");
+  await screen.findByText("Changes saved");
+  const edited = status("Changes saved");
+  expect(edited).toHaveTextContent("Written to the audit log, with what changed. Anil Gupta has the old bill; send the corrected one.");
+  const corrected = within(edited).getByRole("button", { name: "Send the corrected bill" });
+  await waitFor(() => expect(corrected).toBeEnabled());
+  await userEvent.click(corrected);
+  expect(await within(edited).findByText("Changes saved and the corrected bill sent")).toBeInTheDocument();
+  expect(edited).not.toHaveTextContent("send the corrected one");
+  expect(within(edited).getByRole("button", { name: "Send again" })).toBe(corrected);
 });

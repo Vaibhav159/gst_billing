@@ -5,7 +5,7 @@ import { problemOf, type ApiProblem } from "@/core/api/errors";
 import { useNetwork } from "@/core/api/network";
 import { billQuery, cachedBillNumber, useBill } from "@/core/api/sales";
 import { cn } from "@/core/cn";
-import { LoadError, Page, Skeleton } from "@/core/ui";
+import { LoadError, Page, Skeleton, StaleNote } from "@/core/ui";
 import { useView } from "@/core/view";
 import { DeletedBill } from "./bill/DeletedBill";
 import { DesktopBill } from "./bill/DesktopBill";
@@ -41,15 +41,20 @@ export default function BillPage() {
   const q = useBill(id);
   if (id === null) return <MissingBill id={raw} />;
   const early = cachedBillNumber(qc, id) ?? "Sales bill";
+  // Try again asks again through the client, as every page's does (Ruling 1B-11)
+  const retry = () => { void qc.refetchQueries({ queryKey: billQuery(id).queryKey }); };
   if (q.isPending) {
     // offline before anything came: say so, rather than load for good
     return q.isPaused && net === "offline" ? <DetailLoading title={early} problem={{ kind: "offline", message: "You're offline" }} /> : <DetailLoading title={early} />;
   }
-  if (q.isError) {
+  if (q.data === undefined) {
+    // nothing came, and asking failed
     const p = problemOf(q.error);
-    // Try again asks again through the client, as every page's does (Ruling 1B-11): the bill is all this page shows now
-    return p.kind === "notfound" ? <MissingBill id={raw} /> : <DetailLoading title={early} problem={p} retry={() => { void qc.refetchQueries({ queryKey: billQuery(id).queryKey }); }} />;
+    return p.kind === "notfound" ? <MissingBill id={raw} /> : <DetailLoading title={early} problem={p} retry={retry} />;
   }
-  if (q.data.kind === "deleted") return <DeletedBill b={q.data.binned} />;
-  return isPhone ? <PhoneBill b={q.data.bill} /> : <DesktopBill b={q.data.bill} />;
+  // a refresh that failed (after a send, a cancel, a reconnect…) keeps the bill on screen, with any dialog open on it and
+  // what's typed there, and says so (part 0's rule, as QueryView's): one slot, with or without the note
+  const note = q.isError ? <StaleNote problem={problemOf(q.error)} what="this bill" retry={retry} busy={q.isFetching} /> : null;
+  if (q.data.kind === "deleted") return <DeletedBill b={q.data.binned} note={note} />;
+  return isPhone ? <PhoneBill b={q.data.bill} note={note} /> : <DesktopBill b={q.data.bill} note={note} />;
 }

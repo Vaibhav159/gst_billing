@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, BookOpenText, MessageCircle, Printer, Send } from "lucide-react";
 import { usePaperBook } from "@/core/api/sales";
 import { cn } from "@/core/cn";
@@ -11,14 +11,17 @@ import type { Detail } from "./useDetail";
  * Right after a save (?saved=new|edit, &sent=1 when the save sent it; plan 1D), one panel says what happened and owns
  * the next step: Send, or Print when there's no number to send to (PROTO sales/BillDetail.jsx:137-201). It takes focus,
  * so the keyboard goes on from here. A paper bill's next step is the next paper bill: the same firm and date, and the
- * paper book's next number. An unsent paper bill is never asked to be sent: after an edit its step is Print. The total
- * is the bill's exact one (Ruling 1B-12).
+ * paper book's next number, once the paper book has answered since the save. An unsent paper bill is never asked to be
+ * sent: after an edit its step is Print. A send made while it shows changes what it says. The total is the bill's exact
+ * one (Ruling 1B-12).
  */
 export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; phone?: boolean }) {
   const acts = useRef<HTMLDivElement>(null);
   const paper = b.paper && d.saved !== "edit";
   const ym = b.invoice_date.slice(0, 7);
   const book = usePaperBook(paper ? b.business : null, paper ? ym : null);
+  // the bill's last send when the panel came up: a send made while it shows moves it on
+  const [lastAtFirst] = useState(() => b.sent?.last_at ?? "");
   useEffect(() => {
     const box = acts.current;
     const a = document.activeElement;
@@ -26,11 +29,13 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
     // unless the person has moved on
     if (!box || (a && a !== document.body && !box.contains(a) && !a.hasAttribute("data-page-title"))) return;
     box.querySelector<HTMLElement>("a[href], button:not([disabled])")?.focus({ preventScroll: true });
-  }, [book.data, d.ready]);
+  }, [book.data, book.isFetching, d.ready]);
   const c = b.customer;
   const shell = cn("card border-sale-line anim-rise flex gap-4", phone ? "flex-col items-stretch p-4" : "items-center px-5 py-4");
   if (paper) {
-    const next = book.data && !book.data.locked ? book.data.next : null;
+    // the save asks the paper book again: until that answer is in, the book still names the number just saved as the
+    // next one, so nothing is offered; nor when asking again failed
+    const next = book.isSuccess && !book.isFetching && !book.data.locked ? book.data.next : null;
     return (
       <div role="status" className={shell}>
         <div className="flex items-center gap-4 min-w-0 flex-1">
@@ -48,7 +53,10 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
     );
   }
   const edit = d.saved === "edit";
-  const sent = Boolean(b.sent) && d.sentNow;
+  const sentHere = Boolean(b.sent) && b.sent?.last_at !== lastAtFirst;
+  // sent: the save sent it (&sent=1), a send was made while the panel shows, or (a new bill) it was sent at all. An edited
+  // bill sent before the edit still owes the customer its corrected copy
+  const sent = Boolean(b.sent) && (d.sentNow || sentHere || !edit);
   const who = c.type === "walkin" ? (b.sent?.to ? `+91 ${mobileText(b.sent.to)}` : "the customer") : c.name;
   const title = edit ? (sent ? "Changes saved and the corrected bill sent" : "Changes saved") : sent && phone ? "Saved and handed to WhatsApp" : `Saved ${b.invoice_number}`;
   const body = edit
@@ -57,12 +65,12 @@ export function SavedPanel({ b, d, phone = false }: { b: BillDetail; d: Detail; 
       : `${inr(b.total_amount)} · ${c.name}. ${d.hasNumber ? "Send it now, or print it." : "Print it, or give a WhatsApp number to send it."}`;
   const canSend = d.can("bill.send") && !d.cancelled;
   let actions: ReactNode;
-  // an unsent paper bill: the customer has the paper one, so nothing asks to send it
-  if (sent || !canSend || (b.paper && !b.sent)) actions = <ButtonLink to={`/sales/${b.id}/print`} size="lg" icon={Printer} full={phone}>Print</ButtonLink>;
+  // sent already when the panel came up, or an unsent paper bill (the customer has the paper one): the step is Print.
+  // A send made here keeps its button, as Send again, so a double click's second click never lands on a new Print link
+  if ((sent && !sentHere) || !canSend || (b.paper && !b.sent)) actions = <ButtonLink to={`/sales/${b.id}/print`} size="lg" icon={Printer} full={phone}>Print</ButtonLink>;
   else if (d.hasNumber) {
-    // a bill sent from here reads Send again in place (an edited one keeps asking for its corrected copy); a double
-    // click's second click sends nothing (d.sendPress)
-    actions = <Button variant="primary" size="lg" icon={Send} full={phone} disabled={!d.ready} title={d.sendWait} onClick={d.sendPress}>{b.sent ? (edit ? "Send the corrected bill" : "Send again") : "Send on WhatsApp"}</Button>;
+    // (and that second click sends nothing either: d.sendPress)
+    actions = <Button variant="primary" size="lg" icon={Send} full={phone} disabled={!d.ready} title={d.sendWait} onClick={d.sendPress}>{sent ? "Send again" : b.sent ? "Send the corrected bill" : "Send on WhatsApp"}</Button>;
   } else {
     actions = (
       <div className={cn("flex gap-2", phone ? "flex-col" : "")}>

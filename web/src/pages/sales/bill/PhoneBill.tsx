@@ -10,8 +10,11 @@ import { Activity, EwayCard, OtherBills, Parties, RoleNote, StateBanners, TotalB
 import { SavedPanel } from "./SavedPanel";
 import { useDetail } from "./useDetail";
 
-/** One bill on a phone (PROTO sales/BillDetail.jsx:453-534): the everyday actions in the bar, the rest under More, the links in the header. */
-export function PhoneBill({ b }: { b: BillDetail }) {
+/**
+ * One bill on a phone (PROTO sales/BillDetail.jsx:453-534): the everyday actions in the bar, the rest under More, the
+ * links in the header. note: the page's word that a refresh failed, first.
+ */
+export function PhoneBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
   const d = useDetail(b);
   const saved = Boolean(d.saved);
   // a paper bill's copy lives in More, so the bar never nags to send it
@@ -51,6 +54,7 @@ export function PhoneBill({ b }: { b: BillDetail }) {
     <Page title={`Bill ${b.invoice_number}`} phoneSubtitle={`${d.firmName} · ${date(b.invoice_date)}`} back
       phoneActions={<Menu title={`Bill ${b.invoice_number}`} items={linkItems} trigger={(p) => <IconButton {...p} label={`Links for ${b.invoice_number}`} icon={MoreHorizontal} />} />}
       actionBar={bar}>
+      {note}
       {saved ? <SavedPanel b={b} d={d} phone /> : null}
       <StateBanners b={b} d={d} />
       <Card>

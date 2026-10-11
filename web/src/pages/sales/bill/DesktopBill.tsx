@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Copy, FileText, Lock, MessageCircle, MoreHorizontal, Pencil, Printer, ReceiptText, Send } from "lucide-react";
 import { date, dateLong } from "@/core/format";
 import type { BillDetail } from "@/core/sales/types";
@@ -9,8 +10,11 @@ import { Activity, EwayCard, OtherBills, Parties, PaymentCard, RoleNote, StateBa
 import { SavedPanel } from "./SavedPanel";
 import { useDetail } from "./useDetail";
 
-/** One bill on a desktop (PROTO sales/BillDetail.jsx:389-451): the items, parties and activity on the left; the total, payment, e-way bill and the customer's other bills on the right. */
-export function DesktopBill({ b }: { b: BillDetail }) {
+/**
+ * One bill on a desktop (PROTO sales/BillDetail.jsx:389-451): the items, parties and activity on the left; the total,
+ * payment, e-way bill and the customer's other bills on the right. note: the page's word that a refresh failed, first.
+ */
+export function DesktopBill({ b, note }: { b: BillDetail; note?: ReactNode }) {
   const d = useDetail(b);
   const items = d.billMenu(b, d.dialogs.open, { open: false, print: false, sendIt: false, duplicate: !d.cancelled, remake: false, edit: false, shareIt: true, link: true, eway: true, renumber: true, move: true, links: true });
   const saved = Boolean(d.saved);
@@ -32,6 +36,7 @@ export function DesktopBill({ b }: { b: BillDetail }) {
         {sendBtn}
         <Menu width={290} title={`Bill ${b.invoice_number}`} items={items} trigger={(p) => <IconButton {...p} variant="secondary" label={`More actions for ${b.invoice_number}`} icon={MoreHorizontal} />} />
       </>}>
+      {note}
       {saved ? <SavedPanel b={b} d={d} /> : null}
       <StateBanners b={b} d={d} />
       <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
