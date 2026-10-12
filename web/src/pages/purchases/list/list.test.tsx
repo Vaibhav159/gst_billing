@@ -1,4 +1,4 @@
-import { act, configure, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { ScopeProvider } from "@/core/scope";
@@ -9,12 +9,16 @@ import PurchaseList from "../PurchaseList";
 
 vi.mock("@/core/purchases/export", () => ({ purchaseExport: vi.fn(async () => {}) }));
 const mount = (path = "/purchases", viewer = false) => renderApp(<ScopeProvider><Routes><Route path="/purchases" element={<PurchaseList />} /><Route path="/purchases/:id" element={<p>Opened the purchase</p>} /></Routes></ScopeProvider>, { path, ...(viewer ? { me: { role: "viewer" as const, permissions: ["view"] } } : {}) });
-// The full two-CPU CI run can take over a second to deliver query results.
-// Keep waiting for the actual request/DOM signal; never sleep to guess readiness.
-beforeAll(() => configure({ asyncUtilTimeout: 5000 }));
-afterAll(() => configure({ asyncUtilTimeout: 1000 }));
-beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true }); vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30")); });
-afterEach(() => vi.useRealTimers());
+beforeEach(() => {
+  localStorage.clear();
+  Object.assign(window, { __phone: false });
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-08T12:30:00+05:30") });
+});
+afterEach(() => {
+  cleanup();
+  Object.assign(window, { __phone: false });
+  vi.useRealTimers();
+});
 
 test("uses the linked firm and credit month and the whole-filter summary", async () => {
   const page = { ...purchasePageWire([purchaseRowWire()]), summary: { bills: 81, taxable: "1000.00", cgst: "15.00", sgst: "15.00", igst: "0.00", tax: "30.00", total_amount: "1030.00", credit: "30.00" } };
@@ -30,9 +34,14 @@ test("uses the linked firm and credit month and the whole-filter summary", async
 test("checks and dates ask the server, keeping month and date scopes exclusive", async () => {
   const { calls } = salesServer([["GET", "purchases/", () => purchasePageWire([purchaseRowWire()])]]);
   mount();
-  await userEvent.click(await screen.findByRole("button", { name: /Same bill twice/ }));
+  const duplicates = screen.getByRole("button", { name: /Same bill twice/ });
+  // The filters exist while loading, but their fieldset ignores clicks until enabled.
+  await waitFor(() => expect(duplicates).toBeEnabled());
+  await userEvent.click(duplicates);
   await waitFor(() => expect(calls.filter((c) => c.url === "purchases/").at(-1)?.params.dups).toBe(1));
-  await userEvent.click(screen.getByRole("button", { name: "From – to" }));
+  const dates = screen.getByRole("button", { name: "From – to" });
+  await waitFor(() => expect(dates).toBeEnabled());
+  await userEvent.click(dates);
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-09-01" } });
   fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-09-15" } });
   act(() => vi.setSystemTime(Date.now() + 400));
@@ -67,9 +76,10 @@ test("phone lists keep supplier navigation and credit filters in the sheet", asy
   salesServer([["GET", "purchases/", () => purchasePageWire([purchaseRowWire()])]]);
   mount();
   expect(await screen.findByRole("link", { name: "Suppliers" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+  const filters = screen.getByRole("button", { name: "Filters" });
+  await waitFor(() => expect(filters).toBeEnabled());
+  await userEvent.click(filters);
   expect(within(screen.getByRole("dialog")).getByRole("combobox", { name: "Credit claimed in" })).toBeInTheDocument();
-  Object.assign(window, { __phone: false });
 });
 
 test("Credit not allowed asks the server for eligible 0 and the row carries the badge", async () => {
@@ -85,5 +95,4 @@ test("the phone Add keeps the firm in view, as the desktop button does", async (
   salesServer([["GET", "purchases/", () => purchasePageWire([purchaseRowWire()])]]);
   mount("/purchases?firm=3");
   expect(await screen.findByRole("link", { name: "Add" })).toHaveAttribute("href", "/purchases/new?firm=3");
-  Object.assign(window, { __phone: false });
 });
