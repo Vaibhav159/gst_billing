@@ -189,6 +189,12 @@ EXPLORER_PERMISSION_CHANGE = lambda r: r.user.is_superuser  # noqa: E731
 
 # REST Framework settings
 REST_FRAMEWORK = {
+    # Ruling 7-D15: deep JSON is a 400 (billing/api/parsers.py).
+    "DEFAULT_PARSER_CLASSES": [
+        "billing.api.parsers.SafeJSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "billing.api.auth.SessionJWTAuthentication",
     ),

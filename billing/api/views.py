@@ -32,7 +32,7 @@ from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -73,6 +73,7 @@ from billing.utils import (
 )
 
 from .mixins import AuditLogMixin, ProtectedDeleteMixin, drop_settled_party_rows, mark_undone, protected_delete_response
+from .parsers import SafeJSONParser
 from .permissions import (
     AdminOnlyPermission,
     RoleBasedPermission,
@@ -136,7 +137,7 @@ class BusinessViewSet(ProtectedDeleteMixin, AuditLogMixin, viewsets.ModelViewSet
     serializer_class = BusinessSerializer
     permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
     v3_actions = {"create": "firm.edit", "update": "firm.edit", "partial_update": "firm.edit", "destroy": "firm.edit"}
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    parser_classes = [MultiPartParser, FormParser, SafeJSONParser]
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
@@ -2864,7 +2865,7 @@ class AIInvoiceCreateView(APIView):
     # Accept both JSON (legacy / non-AI flows) and multipart (AI Import
     # which now ships the original source image alongside the extracted
     # data so we can store an audit-trail copy).
-    parser_classes = [MultiPartParser, JSONParser]
+    parser_classes = [MultiPartParser, SafeJSONParser]
 
     # One transaction: invoice -> files -> lines -> total -> inter-firm mirror.
     # A mid-flight failure (a Decimal like "1,250") used to leave a stub

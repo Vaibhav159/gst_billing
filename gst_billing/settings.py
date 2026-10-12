@@ -220,6 +220,12 @@ EXPLORER_PERMISSION_CHANGE = lambda r: r.user.is_superuser  # noqa: E731
 
 # REST Framework settings
 REST_FRAMEWORK = {
+    # Ruling 7-D15: deep JSON is a 400 (billing/api/parsers.py).
+    "DEFAULT_PARSER_CLASSES": [
+        "billing.api.parsers.SafeJSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 15,
     "DEFAULT_THROTTLE_CLASSES": [
@@ -319,8 +325,6 @@ if REDIS_PASSWORD:
         "password": os.getenv("REDIS_PASSWORD", None),  # Redis password (optional)
         "ssl": True,
     }
-
-    print(f"Using Redis with password: {CACHEOPS_REDIS=}")
 
     CACHEOPS_DEFAULTS = {
         "timeout": 60 * 15,  # 15 minutes default cache timeout
