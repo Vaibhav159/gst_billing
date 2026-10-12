@@ -82,7 +82,8 @@ export function readSheet(sheet: Sheet, cols: ColumnOverrides = {}): ReadSheet {
   if (/^summary$/i.test(sheet.name.trim())) { out.summary = true; return out; }
   type Head = Omit<ParsedRow, "n" | "kind" | "table" | "cont">;
   let kind: BillKind | null = null, table: Table | null = null, last: Head | null = null;
-  const earlier = new Map<string, Head>();
+  // Each bill number's bills, one per party: a blank-party row joins only a number that one party uses.
+  const earlier = new Map<string, Head[]>();
   for (let i = 0; i < rows.length; i++) {
     const n = i + 1;
     const cells = (rows[i] || []).map((c) => (c instanceof Date ? str(c) : c));
@@ -126,11 +127,15 @@ export function readSheet(sheet: Sheet, cols: ColumnOverrides = {}): ReadSheet {
       Object.assign(v, { number: last.number, date: last.date, party: last.party, gstin: last.gstin, payment: v.payment || last.payment });
     }
     // X-63: a row repeating an earlier bill's number with the party blank is that bill's next item.
-    const joins = !cont && v.number && !v.party ? earlier.get(`${kind}|${v.number.toUpperCase()}`) : undefined;
+    const matches = !cont && v.number && !v.party ? earlier.get(`${kind}|${v.number.toUpperCase()}`) ?? [] : [];
+    if (matches.length > 1) { out.skipped.push({ n, text: first, bill: true, why: `No party name, and bill ${v.number} is under more than one party (${matches.map(m => m.party).join(", ")}). Type the party on this row.` }); continue; }
+    const joins = matches[0];
     if (joins) Object.assign(v, { date: v.date || joins.date, party: joins.party, gstin: v.gstin || joins.gstin, payment: v.payment || joins.payment });
     if (!v.number || !v.party) { out.skipped.push({ n, text: first, bill: true, why: !v.number && !v.party ? "No bill number or party" : !v.number ? "No bill number" : `No party name, and no earlier bill ${v.number} to join` }); continue; }
     if (!(Number(v.qty) && Number(v.price)) && !v.total && !v.taxable) { out.skipped.push({ n, text: first, bill: true, why: `No amounts on this row of bill ${v.number}` }); continue; }
-    last = v; if (!earlier.has(`${kind}|${v.number.toUpperCase()}`)) earlier.set(`${kind}|${v.number.toUpperCase()}`, v);
+    last = v;
+    const same = earlier.get(`${kind}|${v.number.toUpperCase()}`) ?? [];
+    if (!same.some(b => b.party.toUpperCase() === v.party.toUpperCase())) earlier.set(`${kind}|${v.number.toUpperCase()}`, [...same, v]);
     out.rows.push({ n, kind, table: table.n, cont, ...v });
   }
   return out;

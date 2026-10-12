@@ -149,6 +149,13 @@ describe("register layouts and editable bill checks", () => {
     const bills = groupBills(read, "purchase");
     expect(bills[0].rows).toEqual([2, 4]); expect(bills[0].lines.map(l => l.item)).toEqual(["Gold", "Ring"]); expect(bills[0].dates).toEqual(new Set(["01/04/2026"]));
   });
+  it("lists a blank-party row openly when its bill number is under more than one party, instead of joining the first (X-63)", () => {
+    const rows = [["Bill No.", "Date", "Party", "Item", "Quantity", "Rate", "Taxable Value"],
+      ["7", "01/04/2026", "B", "Gold", 1, 100, 100], ["7", "02/04/2026", "D", "Silver", 1, 10, 10], ["7", "", "", "Ring", 2, 50, 100], ["7", "", "b ", "Coin", 1, 5, 5]];
+    const read = readSheet({ name: "S", rows });
+    expect(read.rows.map(r => [r.n, r.number, r.party])).toEqual([[2, "7", "B"], [3, "7", "D"], [5, "7", "b"]]);
+    expect(read.skipped).toEqual([{ n: 4, text: "7", bill: true, why: "No party name, and bill 7 is under more than one party (B, D). Type the party on this row." }]);
+  });
   it("reads equal line totals as line totals, not as a repeated bill total", () => {
     const one = withEdits(parsed()[1], { lines: { 0: { cgst: 0, sgst: 0, slab: "0", total: 10000 } } });
     expect(checkBill({ ...one, lines: [one.lines[0], one.lines[0]] }, context).notes.some(n => n.includes("differs"))).toBe(false);
