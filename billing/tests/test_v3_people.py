@@ -353,6 +353,27 @@ class PeopleTest(TestCase):
         self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": True}, format="json")
         self.assertEqual(UserSecurity.objects.get(user=self.staff).tokens_after, stopped_at)
 
+    def test_v2_users_status_takes_only_true_or_false(self):
+        """X-65: v2 sends JSON booleans; the string "false" must not keep or bring back the person."""
+        from billing.services.people import stop_person
+
+        for body, kind in (({"is_active": "false"}, "json"), ({"is_active": "true"}, "json"), ({"is_active": "false"}, "multipart"),
+                           ({"is_active": 0}, "json"), ({"is_active": None}, "json")):
+            response = self.client.patch("/api/users/", {"user_id": self.staff.pk, **body}, format=kind)
+            self.assertEqual(response.status_code, 400, (body, kind))
+            self.assertEqual(response.data["error"], "Status must be true or false.")
+        self.staff.refresh_from_db()
+        self.assertTrue(self.staff.is_active)
+        stop_person(self.staff, self.owner)
+        for kind in ("json", "multipart"):
+            self.assertEqual(self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": "true"}, format=kind).status_code, 400)
+        self.staff.refresh_from_db()
+        self.assertFalse(self.staff.is_active)
+        response = self.client.patch("/api/users/", {"user_id": self.owner.pk, "is_active": "true"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        response = self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": True}, format="json")
+        self.assertEqual((response.status_code, response.data["is_active"]), (200, True))
+
     def test_v2_editor_keeps_v3_group_and_password_revokes(self):
         from billing.models import SignInSession, UserSecurity
 

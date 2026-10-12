@@ -3356,7 +3356,11 @@ class UserManagementView(APIView):
         if user.pk == request.user.pk and request.data.get("role") in ("admin", "editor", "viewer") \
                 and request.data["role"] != get_user_role(user):
             return Response({"detail": "You can't change your own role. Another owner can.", "code": "own_account"}, status=409)
-        if user.pk == request.user.pk and "is_active" in request.data and request.data["is_active"] is not True:
+        # X-65: v2 sends a JSON boolean. A form's "false" is a non-empty string, so anything else is refused.
+        active = request.data.get("is_active")
+        if "is_active" in request.data and not isinstance(active, bool):
+            return Response({"error": "Status must be true or false."}, status=400)
+        if user.pk == request.user.pk and active is False:
             return Response({"detail": "You can't stop yourself signing in. Another owner can.", "code": "own_account"}, status=409)
 
         # Before any change, so a refused password leaves the role and status as they were.
@@ -3373,10 +3377,10 @@ class UserManagementView(APIView):
             user.groups.set([Group.objects.get(name=new_role), *kept])
 
         # Update active status: stopping signs them out everywhere, as v3's stop does (X-65).
-        if "is_active" in request.data and bool(request.data["is_active"]) != user.is_active:
+        if active is not None and active != user.is_active:
             from billing.services.people import allow_person, stop_person
 
-            if request.data["is_active"]:
+            if active:
                 allow_person(user)
             else:
                 stop_person(user, request.user)
