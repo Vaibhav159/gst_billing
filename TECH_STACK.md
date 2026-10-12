@@ -1,12 +1,9 @@
 # GST Billing Application Tech Stack
 
 ## Frontend
-- **Framework**: React (migrating from HTMX)
-- **State Management**: React Hooks (useState, useEffect, useContext)
-- **Routing**: React Router
-- **Styling**: Tailwind CSS
-- **HTTP Client**: Axios
-- **Build Tool**: Webpack
+- **Framework**: React 18 with TypeScript, built by Vite 5
+- **Data**: TanStack Query over one axios instance
+- **Routing**: React Router 7; styling Tailwind 3.4
 - **Package Manager**: npm
 
 ## Backend
@@ -39,10 +36,10 @@
 - **Documentation**: Markdown
 
 ## Testing
-- **Frontend Testing**: Jest, React Testing Library
+- **Frontend Testing**: Vitest, React Testing Library, Playwright with axe
 - **Backend Testing**: pytest, Django Test Framework
 - **Coverage Reporting**: pytest-cov
-- **E2E Testing**: Cypress
+- **E2E Testing**: Playwright
 
 ## Monitoring & Analytics
 - **Error Tracking**: Sentry

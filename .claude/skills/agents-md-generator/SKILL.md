@@ -13,7 +13,7 @@ Agents read the *nearest* AGENTS.md to the file they are editing. Root carries o
 
 **NOTHING GOES IN AN AGENTS.md UNTIL YOU HAVE RUN IT OR PROVEN IT EXISTS.**
 
-A doc that says `pnpm test` in an npm repo, or points at `src/lib/api.ts` when the file is `src/utils/api.ts`, is *worse than no doc*: the next agent trusts it, acts on it, and burns a turn discovering the lie. Confident-and-wrong is the failure this skill exists to prevent.
+A doc that says `pnpm test` in an npm repo, or points at `src/lib/api.ts` when the file is `web/src/core/api/client.ts`, is *worse than no doc*: the next agent trusts it, acts on it, and burns a turn discovering the lie. Confident-and-wrong is the failure this skill exists to prevent.
 
 | Claim | Proof required before writing it |
 |---|---|
@@ -30,11 +30,9 @@ A doc that says `pnpm test` in an npm repo, or points at `src/lib/api.ts` when t
 - Not for anything read out of a README. READMEs go stale; the filesystem does not. `README.md` here still says `pip install -e .` while CI uses `uv`.
 - Not "I'll flag it as TODO." Delete the line instead.
 - Copying a line from the previous AGENTS.md is a **new** claim. Re-verify it.
-- A dependency in package.json is not a convention. This repo ships
-  `@tanstack/react-query` and mounts its provider in `src/App.tsx`, yet has
-  **zero** `useQuery`/`useMutation` call sites — documenting it as "how we fetch
-  data" would send the next agent down a path nothing here follows. Grep for use,
-  not for installation.
+- A dependency in package.json is not a convention. TanStack Query is used by
+  `web/src/core/api/sales.ts` through `useQuery` and `useMutation`; its provider
+  is mounted in `web/src/App.tsx`. Grep for use, not for installation.
 
 Finish by running `.claude/skills/agents-md-generator/verify_agents_md.py`. Not optional.
 
@@ -45,7 +43,7 @@ Everything lives under `gst_billing/` (the git root). Two deployable surfaces, o
 | Surface | Path | Stack |
 |---|---|---|
 | Backend | `billing/`, `gst_billing/` | Django 5.2 LTS, DRF, SimpleJWT, Postgres (Neon), cacheops |
-| Frontend | `sweet-rebuild-suite-main/` | Vite + React 18 + TS, Tailwind, shadcn/ui, TanStack Query, axios, Capacitor (iOS) |
+| Frontend | `web/` | Vite 5 + React 18 + TS, Tailwind, the kit (@/core/ui), TanStack Query, axios |
 | E2E | `e2e-tests/` | Playwright, its own package.json |
 | Serving | `nginx/`, `deploy/`, `docker-compose.yml` | nginx image builds+serves the frontend; Django image is API only |
 
@@ -53,9 +51,9 @@ Re-derive this before trusting it — the map is a starting point, not the sourc
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-ls -d billing gst_billing sweet-rebuild-suite-main e2e-tests nginx deploy 2>/dev/null
+ls -d billing gst_billing web e2e-tests nginx deploy 2>/dev/null
 find . -name package.json -not -path '*/node_modules/*' -maxdepth 3
-python -c "import json,sys;print(list(json.load(open('sweet-rebuild-suite-main/package.json'))['scripts']))"
+python -c "import json,sys;print(list(json.load(open('web/package.json'))['scripts']))"
 ls billing/management/commands/
 sed -n '/^\[tool.pytest/,/^\[/p' pyproject.toml
 ```
@@ -68,7 +66,7 @@ Write exactly these five. More files than working surfaces is noise; fewer means
 |---|---|---|
 | `AGENTS.md` | anyone, anywhere in the repo | 120 lines |
 | `billing/AGENTS.md` | editing Django models/API/services | 150 lines |
-| `sweet-rebuild-suite-main/AGENTS.md` | editing React/TS | 150 lines |
+| `web/AGENTS.md` | editing React/TS | 150 lines |
 | `e2e-tests/AGENTS.md` | editing Playwright specs | 60 lines |
 | `deploy/AGENTS.md` | editing nginx/compose/CI | 60 lines |
 
@@ -91,14 +89,14 @@ This is what makes the docs work for backend *and* frontend rather than being tw
 
 ```bash
 # Money rules mirrored in two languages
-ls billing/tax_rules.py sweet-rebuild-suite-main/src/utils/taxRules.ts
+ls billing/tax_rules.py web/src/core/sales/pos.ts
 # Serializer fields the TS types must match
 grep -n "fields = " billing/api/serializers.py | head
-wc -l sweet-rebuild-suite-main/src/types/api.ts
+wc -l web/src/core/sales/wire.ts
 # Routes the axios client calls
 grep -n "path(\|router.register" billing/api/urls.py | head -30
 # Duplicated money math - the mechanism behind this repo's repeat bugs
-grep -rn "> 1 ?" sweet-rebuild-suite-main/src/ | grep -i "rate\|gst"
+grep -rn "> 1 ?" web/src/ | grep -i "rate\|gst"
 ```
 
 Each contract becomes a "change both sides" line in the **root** file, with both paths.
@@ -131,8 +129,8 @@ Only content that changes what an agent *does*. Ask: "would an agent do the wron
 - `pytest` is the test runner; `manage.py test billing` aborts because the empty `billing/tests.py` stub shadows the `billing/tests/` package.
 - `vite build` does not typecheck. CI runs `npx tsc --noEmit -p tsconfig.app.json` separately.
 - The frontend must run through the Vite dev server for `/api` and `/media` to proxy (`vite.config.ts`); a static build of `dist/` will not reach Django.
-- `billing/tax_rules.py` and `src/utils/taxRules.ts` are deliberate mirrors — change both or the preview disagrees with the stored row.
-- Money is `Decimal` server-side. Interstate/intra is decided by `tax_rules.is_interstate` (GSTIN, falling back to state name), *not* the GSTIN-only `Invoice.is_igst_applicable` property at `billing/models.py:373`.
+- `billing/tax_rules.py` and `web/src/core/sales/pos.ts` are deliberate mirrors — change both or the preview disagrees with the stored row.
+- Money is `Decimal` server-side. A bill's interstate/intra placement is decided by `tax_rules.supply_interstate` (its own place of supply first); `Invoice.is_igst_applicable` in `billing/models.py` delegates to it. `tax_rules.is_interstate` is for parties with no bill yet.
 - Print/export/import paths are the ones that go stale: a fix applied to the primary write path usually needs the same fix in the import, AI, export, and print copies.
 - `gst_billing/local.py` holds both dev and prod DSNs; prod is reachable only with `GST_DB=prod GST_ALLOW_PROD=1`. Never point migrations or `shell` at it.
 

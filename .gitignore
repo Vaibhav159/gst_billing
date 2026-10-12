@@ -162,8 +162,5 @@ audit-results/
 # Claude Code runtime artifacts
 .claude/scheduled_tasks.lock
 
-# Stray nested duplicate of the React app
-sweet-rebuild-suite-main/sweet-rebuild-suite-main/
-
 # Claude Code worktrees — local scratch checkouts, never part of the repo
 .claude/worktrees/

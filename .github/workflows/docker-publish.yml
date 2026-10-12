@@ -74,10 +74,10 @@ jobs:
           source .venv/bin/activate
           pytest billing/ -x --tb=short
       - name: Frontend typecheck
-        working-directory: sweet-rebuild-suite-main
+        working-directory: web
         run: |
           npm ci
-          npx tsc --noEmit -p tsconfig.app.json
+          npm run typecheck
 
   build-and-push:
     needs: test

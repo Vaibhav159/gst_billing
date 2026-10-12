@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "gst-sandbox-vite",
-      "url": "http://localhost:5174",
-      "port": 5174
+      "name": "gst-sandbox-vite-v3",
+      "url": "http://localhost:5180",
+      "port": 5180
     },
     {
       "name": "gst-sandbox-nginx",

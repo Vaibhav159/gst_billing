@@ -4,7 +4,7 @@
   "private": true,
   "description": "Playwright E2E suite for the GST Billing app. Run separately from the frontend.",
   "scripts": {
-    "test": "playwright test --reporter=list"
+    "test": "playwright test -c v3.config.js --reporter=list"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

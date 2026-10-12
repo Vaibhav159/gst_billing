@@ -104,7 +104,7 @@ traps.>
 
 ---
 
-## Frontend — `sweet-rebuild-suite-main/AGENTS.md`
+## Frontend — `web/AGENTS.md`
 
 Cap 150 lines.
 

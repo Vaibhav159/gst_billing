@@ -1,7 +1,7 @@
 # Web v3 (Vite + React + TS) — agent guide
 
-v3, the rebuild of every screen, built on branch `v3` in parts 0–7 beside v2
-(`../sweet-rebuild-suite-main/`, untouched until the switch-over). It talks to
+v3, the rebuild of every screen (parts 0–7), served in production since v3.0.0;
+v2's screens were removed at the switch-over. It talks to
 the same Django API at `/api/`. The visual spec is the agreed prototype, whose
 source is `/home/ubuntu/gst-billing-sandbox/ui-prototype/src/` (PROTO below).
 Root conventions: [`../AGENTS.md`](../AGENTS.md).
@@ -17,7 +17,7 @@ npm run build                           # the typecheck, then vite build into di
 ```
 
 The end-to-end suite (Playwright, with WCAG 2.2 AA checks by axe) lives in
-`../e2e-tests/` and drives a running Vite; see its AGENTS.md, section v3. On the
+`../e2e-tests/` and drives a running Vite; see its AGENTS.md, section The suite. On the
 sandbox VM, from `../e2e-tests/`:
 
 ```bash

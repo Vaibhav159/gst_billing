@@ -9,7 +9,7 @@
 #
 # A second copy runs beside the first as another compose project on other
 # ports: sandbox.sh sets GST_SANDBOX_PROJECT and the GST_SANDBOX_*_PORT
-# variables below (unset, they give gst-sandbox on 8060, 5174 and 5180).
+# variables below (unset, they give gst-sandbox on 8060 and 5180).
 # Volumes are per project; image tags carry the project name, so a build for
 # one copy never replaces the other's images.
 name: ${GST_SANDBOX_PROJECT:-gst-sandbox}
@@ -72,7 +72,7 @@ services:
       REDIS_HOST: redis
       GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      SANDBOX_TRUSTED_ORIGINS: http://localhost:${GST_SANDBOX_NGINX_PORT:-8060},http://127.0.0.1:${GST_SANDBOX_NGINX_PORT:-8060},http://localhost:${GST_SANDBOX_VITE_PORT:-5174},http://127.0.0.1:${GST_SANDBOX_VITE_PORT:-5174},http://localhost:${GST_SANDBOX_VITE3_PORT:-5180},http://127.0.0.1:${GST_SANDBOX_VITE3_PORT:-5180}
+      SANDBOX_TRUSTED_ORIGINS: http://localhost:${GST_SANDBOX_NGINX_PORT:-8060},http://127.0.0.1:${GST_SANDBOX_NGINX_PORT:-8060},http://localhost:${GST_SANDBOX_VITE3_PORT:-5180},http://127.0.0.1:${GST_SANDBOX_VITE3_PORT:-5180}
     volumes:
       - static:/app/staticfiles
       - media:/app/media
@@ -119,33 +119,7 @@ services:
     mem_limit: 128m
     cpus: 0.25
 
-  # Fast UI loop (./sandbox.sh dev): Vite with hot reload over the synced
-  # frontend source. /api goes through the sandbox nginx, so uploads, signed
-  # media and headers behave exactly as they do behind the built app.
-  vite:
-    <<: *defaults
-    profiles: ["dev"]
-    image: node:20-alpine
-    working_dir: /app
-    environment:
-      VITE_DEV_PORT: "${GST_SANDBOX_VITE_PORT:-5174}"
-      VITE_API_TARGET: http://nginx:80
-    volumes:
-      - ../../sweet-rebuild-suite-main:/app
-      - node_modules:/app/node_modules
-    command: >
-      sh -c "if ! cmp -s package-lock.json node_modules/.sandbox-lock; then
-               npm ci --no-audit --no-fund && cp package-lock.json node_modules/.sandbox-lock;
-             fi &&
-             exec npx vite --host 0.0.0.0 --port ${GST_SANDBOX_VITE_PORT:-5174} --strictPort"
-    ports:
-      - "127.0.0.1:${GST_SANDBOX_VITE_PORT:-5174}:${GST_SANDBOX_VITE_PORT:-5174}"
-    depends_on:
-      - nginx
-    mem_limit: 1g
-    cpus: 1.0
-
-  # v3's app (web/), beside v2's Vite on 5174. Same rule: /api through the sandbox nginx.
+  # The app (web/) in Vite, hot reload (./sandbox.sh dev). /api goes through the sandbox nginx, so uploads, signed media and headers behave as behind the built app.
   vite-v3:
     <<: *defaults
     profiles: ["dev"]
@@ -175,5 +149,4 @@ volumes:
   redis: {}
   static: {}
   media: {}
-  node_modules: {}
   node_modules_v3: {}

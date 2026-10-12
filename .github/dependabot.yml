@@ -20,7 +20,7 @@ updates:
     multi-ecosystem-group: "monthly"
 
   - package-ecosystem: "npm"
-    directory: "/sweet-rebuild-suite-main"
+    directory: "/web"
     patterns: ["*"]
     multi-ecosystem-group: "monthly"
 

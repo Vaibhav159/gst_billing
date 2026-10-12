@@ -67,7 +67,7 @@ build-backend = "setuptools.build_meta"
 
 # Use setuptools package discovery scoped to our two top-level Python
 # packages. The repo has several non-Python top-level dirs (frontend,
-# nginx, sweet-rebuild-suite-main, etc.) so flat auto-detection fails;
+# nginx, web, e2e-tests, etc.) so flat auto-detection fails;
 # `include` keeps it scoped while still picking up subpackages like
 # billing.api, billing.management, billing.management.commands, etc.
 [tool.setuptools.packages.find]

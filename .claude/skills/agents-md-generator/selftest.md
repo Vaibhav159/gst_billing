@@ -4,8 +4,8 @@
          .claude/skills/agents-md-generator/selftest.md
      If this ever passes, the verifier has stopped verifying. -->
 # verifier self-test (intentionally broken)
-Run `pnpm test` and `npm run typecheck`.
+Run `pnpm test` and `npm run nonexistent-script`.
 The client lives at `src/lib/api.ts` and rules at `billing/tax_helpers.py`.
 Alias example: `@/utils/nonexistentThing`.
 See [missing](../nope/AGENTS.md).
-Real ones for contrast: `billing/tax_rules.py`, `@/utils/api`, `npm run test`.
+Real ones for contrast: `billing/tax_rules.py`, `@/core/api/client`, `npm run test`.

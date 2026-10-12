@@ -67,7 +67,7 @@ def spa_fallback(request):
         "<!doctype html><title>GST Billing</title>"
         "<p>API lives at <code>/api/</code>. The app UI is served by nginx in "
         "production; locally, run the Vite dev server "
-        "(sweet-rebuild-suite-main).</p>"
+        "(web/).</p>"
     )
 
 

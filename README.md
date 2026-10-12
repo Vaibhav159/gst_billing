@@ -13,10 +13,7 @@ A comprehensive billing and invoice management system designed for Indian busine
 
 ## 📋 Project Status
 
-The HTMX → React migration is complete: the app UI is the Vite/React SPA in
-`sweet-rebuild-suite-main/`, served by nginx in production. The old webpack/HTMX
-frontend has been removed; Django now serves only the API, the admin, and SQL
-explorer.
+The app UI is v3, the Vite/React app in `web/`, served by nginx in production since v3.0.0. Django serves only the API, the admin and the SQL explorer.
 
 ## 🛠️ Tech Stack
 
@@ -101,13 +98,12 @@ See [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) for the detailed development roadma
 
 4. Start the frontend dev server (separate terminal)
    ```bash
-   cd sweet-rebuild-suite-main
-   npm install
+   cd web
+   npm ci
    npm run dev
    ```
 
-5. Access the app at the Vite URL it prints (the dev server proxies `/api/`
-   to Django on port 8000)
+5. Access the app at the Vite URL it prints (the dev server proxies `/api/` to `VITE_API_TARGET`; with a local runserver, start it as `VITE_API_TARGET=http://127.0.0.1:8000 npm run dev`)
 
 ### Managing Dependencies with pip
 
@@ -145,13 +141,12 @@ python manage.py test
 
 ### Frontend Tests
 ```bash
-cd sweet-rebuild-suite-main
-npm test        # vitest unit tests
-npx tsc --noEmit -p tsconfig.app.json   # typecheck
+cd web
+npm test -- --run   # vitest unit tests
+npm run typecheck
 ```
 
-End-to-end tests (Playwright) live in `e2e-tests/` — see that folder's
-config for the dev-server setup they expect.
+End-to-end tests (Playwright) live in `e2e-tests/` (`npx playwright test -c v3.config.js`); see `e2e-tests/AGENTS.md`.
 
 ### Continuous Integration
 This project uses CircleCI for continuous integration. Every push to the repository triggers a build that runs all the tests with PostgreSQL. You can view the build status in the CircleCI dashboard.

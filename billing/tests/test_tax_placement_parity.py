@@ -5,7 +5,7 @@ the server resolved each side to a state code (GSTIN first, then the name).
 A firm with a GSTIN and a stale state name, a party with a GSTIN and no state,
 and "JAMMU & KASHMIR" against "JAMMU AND KASHMIR" all came out differently, so
 previews, confirm sheets and import review showed heads the server then
-re-filed. src/utils/taxPlacementParity.test.ts reads the same file.
+re-filed. The fixture lived beside v2's screens until v3.0.0 removed them.
 """
 
 import json
@@ -17,7 +17,7 @@ from django.test import SimpleTestCase
 from billing.constants import GST_CODE
 from billing.tax_rules import is_interstate, state_code
 
-FIXTURE = Path(__file__).resolve().parents[2] / "sweet-rebuild-suite-main" / "src" / "test" / "fixtures" / "tax-placement.json"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "tax-placement.json"
 CASES = json.loads(FIXTURE.read_text())
 
 

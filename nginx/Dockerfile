@@ -1,12 +1,11 @@
-# Stage 1: Build the Vite React Frontend
+# Stage 1: build the app (v3, web/). npm run build typechecks first (tsc), then vite build into dist/.
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-# Copy the new frontend codebase
-COPY sweet-rebuild-suite-main/package.json sweet-rebuild-suite-main/package-lock.json* ./
+COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-COPY sweet-rebuild-suite-main/ ./
+COPY web/ ./
 RUN npm run build
 
 # Stage 2: Serve with Nginx

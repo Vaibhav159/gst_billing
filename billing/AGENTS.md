@@ -69,7 +69,7 @@ shared setup. Config is in `pyproject.toml` under `[tool.pytest.ini_options]`
 
 - `serializers.py` mostly uses `fields = "__all__"`, so renaming a model field
   changes the API silently. Grep the new and old names in
-  `../sweet-rebuild-suite-main/src/` before merging.
+  `../web/src/` before merging.
 - Line-item construction exists in several places (invoice write path, bulk
   import, CSV import, AI import, inward bills) with different money contracts.
   Fixing one is rarely enough — grep for the others.

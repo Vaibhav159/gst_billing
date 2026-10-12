@@ -2,7 +2,7 @@
 """Verify every machine-checkable claim in the repo's AGENTS.md files.
 
 Checks each backticked token, classified by shape:
-  @/foo          -> frontend alias; must resolve under sweet-rebuild-suite-main/src/
+  @/foo          -> frontend alias; must resolve under web/src/
   /api/token/    -> URL route; a matching segment must appear in a urls.py or nginx conf
   npm run x      -> the script must exist in the relevant package.json
   path/to/file   -> must exist repo-relative, file-relative, or by basename anywhere
@@ -22,7 +22,7 @@ from pathlib import Path
 SKIP_DIRS = {"node_modules", ".venv", ".git", "dist", "__pycache__", "staticfiles", "ios"}
 CAPS = {"AGENTS.md": 120, "e2e-tests/AGENTS.md": 60, "deploy/AGENTS.md": 60}
 DEFAULT_CAP = 150
-FRONTEND = "sweet-rebuild-suite-main"
+FRONTEND = "web"
 CODE_CHARS = set('()"\'=<>|$*?{}')
 EXT_GUESSES = ["", ".ts", ".tsx", ".js", ".jsx", ".py", ".md"]
 KNOWN_EXT = re.compile(r"\.(py|ts|tsx|js|jsx|json|toml|ya?ml|conf|sh|md|lock|html|css|txt)$")

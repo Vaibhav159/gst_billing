@@ -1,5 +1,7 @@
 # Inward Bills Module Implementation Plan
 
+> Historical v2 implementation plan. Its frontend files were removed at the v3 switch-over; all `src/` paths below are relative to that historical v2 frontend, not the current `web/` app.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A standalone Inward Bills module — AI-assisted capture (upload → pre-fill → verify → save) plus a browsable purchase register where each recorded bill's original file is viewable/downloadable.
@@ -20,11 +22,11 @@
 - Create `billing/tests/test_inward_bills.py` — service + endpoint tests.
 
 **Frontend**
-- Create `sweet-rebuild-suite-main/src/hooks/useInwardBills.ts` — query/mutation hooks.
-- Create `sweet-rebuild-suite-main/src/pages/InwardBills.tsx` — register list + filters.
-- Create `sweet-rebuild-suite-main/src/pages/InwardBillAdd.tsx` — capture flow.
-- Create `sweet-rebuild-suite-main/src/pages/InwardBillDetail.tsx` — detail + file viewer.
-- Modify `sweet-rebuild-suite-main/src/App.tsx` — lazy routes.
+- Create `src/hooks/useInwardBills.ts` — query/mutation hooks.
+- Create `src/pages/InwardBills.tsx` — register list + filters.
+- Create `src/pages/InwardBillAdd.tsx` — capture flow.
+- Create `src/pages/InwardBillDetail.tsx` — detail + file viewer.
+- Modify `src/App.tsx` — lazy routes.
 - Modify the sidebar nav component — add "Inward Bills" entry.
 
 ---
@@ -153,35 +155,35 @@ def find_duplicate(business, invoice_number):
 
 ## Task 6: Frontend data hooks
 
-**Files:** Create `sweet-rebuild-suite-main/src/hooks/useInwardBills.ts`
+**Files:** Create `src/hooks/useInwardBills.ts`
 
 - [ ] **Step 1:** `useInwardBills(filters)` (TanStack Query GET list), `useInwardBill(id)` (GET detail), `useExtractInwardBill()` (mutation → `/extract/`), `useCreateInwardBill()` (mutation → POST, multipart). Follow the auth/fetch pattern in existing hooks (`useDataStore.ts`). Invalidate the list query on create.
 - [ ] **Step 2: Commit** — `feat(inward-bills): frontend data hooks`
 
 ## Task 7: Register page
 
-**Files:** Create `sweet-rebuild-suite-main/src/pages/InwardBills.tsx`
+**Files:** Create `src/pages/InwardBills.tsx`
 
 - [ ] **Step 1:** Table (firm, supplier, invoice #, date, taxable, tax, total, file icon) with firm select, month/date range, and search box; "Add Inward Bill" button → `/inward-bills/add`; row click → `/inward-bills/:id`. Empty + loading states. Match `InvoiceList.tsx` styling.
 - [ ] **Step 2: Commit** — `feat(inward-bills): purchase register page`
 
 ## Task 8: Add / capture page
 
-**Files:** Create `sweet-rebuild-suite-main/src/pages/InwardBillAdd.tsx`
+**Files:** Create `src/pages/InwardBillAdd.tsx`
 
 - [ ] **Step 1:** Step A: firm `Select` + file dropzone (accept pdf/jpeg/png/heic). On file, call extract; show spinner. Step B: verify form pre-filled from the response — supplier (auto-fill from gstin via customers, editable), invoice #, date, editable line-item rows (hsn, qty, rate → live taxable + tax + total), tax-type readout, and warning banners (`gstin_mismatch` → override checkbox; `duplicate` → override checkbox; `extraction_failed` → info). Save → `useCreateInwardBill` (multipart incl. file + `override_warnings`) → toast + navigate to detail. Handle 409 by surfacing the duplicate warning.
 - [ ] **Step 2: Commit** — `feat(inward-bills): capture/verify page`
 
 ## Task 9: Detail page + file viewer
 
-**Files:** Create `sweet-rebuild-suite-main/src/pages/InwardBillDetail.tsx`
+**Files:** Create `src/pages/InwardBillDetail.tsx`
 
 - [ ] **Step 1:** Show header fields + line-item table + tax summary; render the original file inline — PDF via `<iframe src={source_file_url}>`, images via `<img src={source_preview_url || source_file_url}>`; "Download original" link. Loading/not-found states.
 - [ ] **Step 2: Commit** — `feat(inward-bills): detail page with inline file viewer`
 
 ## Task 10: Routing + nav + smoke test
 
-**Files:** Modify `sweet-rebuild-suite-main/src/App.tsx`; sidebar nav component
+**Files:** Modify `src/App.tsx`; sidebar nav component
 
 - [ ] **Step 1:** Lazy-import the three pages; add routes `/inward-bills`, `/inward-bills/add`, `/inward-bills/:id`. Add a sidebar "Inward Bills" entry (Receipt/FileDown icon) near Invoices.
 - [ ] **Step 2:** Start the dev server (preview tools), sign in, walk upload→extract→verify→save, confirm the bill appears in the register and the file opens in detail. Capture a screenshot.

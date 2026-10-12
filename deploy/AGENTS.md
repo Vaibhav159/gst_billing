@@ -7,7 +7,7 @@ Root conventions: [`../AGENTS.md`](../AGENTS.md).
 ## Images
 
 - `vaibhav198/gst-billing-nginx` — built from `../nginx/Dockerfile`. Stage 1 runs
-  `npm ci && npm run build` **inside `sweet-rebuild-suite-main/`**; stage 2 serves
+  `npm ci && npm run build` **inside `web/`** (`npm run build` typechecks first); stage 2 serves
   that `dist/` and reverse-proxies `/api/`, `/admin/`, `/explorer/` to `web:8000`.
   **A frontend change ships only when this image is rebuilt.**
 - `vaibhav198/gst-billing` — Django/gunicorn, API only. Its SPA route is a

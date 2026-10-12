@@ -86,7 +86,7 @@ const HIDE_NAV = new Set([
 ]);
 
 /**
- * Every address in v2 (sweet-rebuild-suite-main/src/App.tsx) except /login, / and *, and where it lives now.
+ * Every address in v2.0.9's App.tsx except /login, / and *, and where it lives now.
  * /billing/invoice/:id may be a purchase (v2 kept purchases as inward invoices): part 1's bill page sends those on.
  */
 export const V2_REDIRECTS: [string, (p: Record<string, string>) => string][] = [

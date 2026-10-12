@@ -7,8 +7,7 @@ HSN_CODE = 711319
 
 # Units. LineItem.unit stays free-text so historical rows keep whatever they
 # say; these choices constrain Product.default_unit and are the API's canon.
-# The V2 UI keeps a mirror in sweet-rebuild-suite-main/src/utils/mockData.ts
-# (itemUnits / itemUnitLabels) — change both together.
+# The app keeps a mirror in web/src/core/format.ts (UNITS) — change both together.
 UNIT_GMS = "gms"
 UNIT_CHOICES = (
     ("gms", "Grams (gms)"),

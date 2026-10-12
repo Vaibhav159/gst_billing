@@ -54,8 +54,8 @@ class ProductDefaultUnitTest(BaseAPITestCase):
 
 class UnitCanonTest(BaseAPITestCase):
     def test_ui_mirror_and_backend_canon_agree(self):
-        # sweet-rebuild-suite-main/src/utils/mockData.ts (itemUnits) must list
-        # exactly these keys. If this test moves, move the mirror with it.
+        # web/src/core/format.ts (UNITS) lists these units for the app. If this
+        # test moves, move the mirror with it.
         self.assertEqual(
             [key for key, _ in UNIT_CHOICES],
             ["gms", "g", "kg", "pcs", "unit", "nos", "mtr", "ltr", "ml",

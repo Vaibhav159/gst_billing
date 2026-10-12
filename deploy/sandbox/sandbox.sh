@@ -5,7 +5,7 @@
 #
 #   ./sandbox.sh init     generate secrets once (DB password, Django key)
 #   ./sandbox.sh up       build + start db, redis, web, nginx (127.0.0.1:8060)
-#   ./sandbox.sh dev      also start Vite: v2 on 127.0.0.1:5174, v3 on 127.0.0.1:5180
+#   ./sandbox.sh dev      also start the app's Vite on 127.0.0.1:5180
 #   ./sandbox.sh seed     load synthetic data; logins -> $ENV_DIR/logins.txt
 #   ./sandbox.sh reseed   wipe the sandbox data and seed again
 #   ./sandbox.sh build    rebuild images (after dependency changes)
@@ -14,9 +14,9 @@
 #
 # A second sandbox: GST_SANDBOX_PROJECT=gst-sandbox-2 ./sandbox.sh up|dev|seed
 # runs its own compose project (database, Redis, volumes, image tags) on
-# 127.0.0.1:8160 (nginx), 5274 (v2 Vite) and 5280 (v3 Vite), and its seed
-# writes $ENV_DIR/logins-2.txt. gst-sandbox-N takes 8060/5174/5180 + 100*(N-1).
-# GST_SANDBOX_NGINX_PORT, GST_SANDBOX_VITE_PORT, GST_SANDBOX_VITE3_PORT and
+# 127.0.0.1:8160 (nginx) and 5280 (Vite), and its seed
+# writes $ENV_DIR/logins-2.txt. gst-sandbox-N takes 8060/5180 + 100*(N-1).
+# GST_SANDBOX_NGINX_PORT, GST_SANDBOX_VITE3_PORT and
 # GST_SANDBOX_LOGINS (a file name in $ENV_DIR) override them.
 set -euo pipefail
 
@@ -38,10 +38,9 @@ esac
 # compose.yaml reads these (its defaults are the first sandbox's).
 export GST_SANDBOX_PROJECT="$PROJECT"
 export GST_SANDBOX_NGINX_PORT="${GST_SANDBOX_NGINX_PORT:-$(( 8060 + offset ))}"
-export GST_SANDBOX_VITE_PORT="${GST_SANDBOX_VITE_PORT:-$(( 5174 + offset ))}"
 export GST_SANDBOX_VITE3_PORT="${GST_SANDBOX_VITE3_PORT:-$(( 5180 + offset ))}"
 LOGINS_FILE="$ENV_DIR/${GST_SANDBOX_LOGINS:-$logins}"
-for port in "$GST_SANDBOX_NGINX_PORT" "$GST_SANDBOX_VITE_PORT" "$GST_SANDBOX_VITE3_PORT"; do
+for port in "$GST_SANDBOX_NGINX_PORT" "$GST_SANDBOX_VITE3_PORT"; do
     case "$port" in
         80|8000|5432) echo "Port $port belongs to Bahikhata production; pick another." >&2; exit 1 ;;
     esac
@@ -94,7 +93,7 @@ case "$cmd" in
         ;;
     dev)
         need_env
-        dc --profile dev up -d vite vite-v3
+        dc --profile dev up -d vite-v3
         dc --profile dev ps
         ;;
     build)

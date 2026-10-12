@@ -8,7 +8,7 @@ product — design serves the task. Authenticated, data-dense billing tool; no m
 
 Invoicing and GST-compliance workbench for a family jewellery business in Udaipur,
 Rajasthan, running three firms (LODHA JEWELLERS, PYARCHAND, SHREE LODHA) from one
-database. Django + DRF backend, React/Vite/shadcn SPA (`sweet-rebuild-suite-main/`)
+database. Django + DRF backend, React/Vite SPA (`web/`)
 served by nginx in production at billing.cheq.dpdns.org.
 
 ## Users
@@ -55,7 +55,7 @@ Delight lives in speed and correctness, not decoration.
    database and with every other page showing it. Ambiguity (unlabeled periods,
    unexplained ↓49%) is a defect.
 2. **Same rule everywhere.** Tax direction (intra/inter-state) is decided by one
-   shared rule on server and client (`billing/tax_rules.py` ↔ `src/utils/taxRules.ts`).
+   shared rule on server and client (`billing/tax_rules.py` ↔ `web/src/core/sales/pos.ts`).
 3. **Phone-first for capture, desktop-first for filing.** Photographing a supplier
    bill happens standing in the shop; GSTR review happens seated.
 4. **Editable ≠ trusted.** Client-computed tax is advisory; the server re-derives.

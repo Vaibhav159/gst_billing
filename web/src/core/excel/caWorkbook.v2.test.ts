@@ -1,8 +1,7 @@
 import * as XLSX from "xlsx-js-style";
-import { generateReportExcel } from "./__fixtures__/v2Report";
-import { mapDjangoInvoice } from "./__fixtures__/v2Adapter";
 import books from "./__fixtures__/caWorkbook.books.json";
 import responses from "./__fixtures__/caWorkbook.responses.json";
+import golden from "./fixtures/caWorkbook.v2.golden.json";
 import { bytesOf } from "@/core/files/zip";
 import { workbookBlob, type CaWorkbook } from "./caWorkbook";
 
@@ -15,25 +14,34 @@ const SUMMARY_HEAD = [
   "Invoices", "Taxable Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "Round Off (₹)", "Total Invoice Value (₹)", "Net Total (₹)",
 ];
 const business = { ...books.business, id: String(books.business.id) };
-const customers = books.customers.map(party => ({ ...party, id: String(party.id) }));
 type Case = keyof typeof responses;
 
 /** Python's test_ca_workbook_parity verifies these are real API/builder responses
- * from caWorkbook.books.json. Neither adapter totals nor CA rows are hand-built here. */
+ * from caWorkbook.books.json. The v2 output was generated from its real adapter
+ * before retirement; fixtures/README.md records its provenance and projection. */
 async function both(includePayment: boolean, name: Case = "ordinary") {
   const response = responses[name];
-  const invoices = response.invoices.map(mapDjangoInvoice);
-  expect(invoices.every(invoice => invoice.roundedOff === undefined)).toBe(true);
+  const key = `${name}.${includePayment ? "payment" : "plain"}` as keyof typeof golden.workbooks;
+  const snapshot = golden.workbooks[key];
+  const oldBook: XLSX.WorkBook = { SheetNames: snapshot.sheetNames, Sheets: {} };
+  for (const [name, frozen] of Object.entries(snapshot.sheets)) {
+    const sheet: XLSX.WorkSheet = { "!ref": frozen.ref };
+    frozen.rows.forEach((row, r) => row.forEach((value, c) => {
+      if (!value) return;
+      const [v, t, z = "General"] = value as [string | number, XLSX.ExcelDataType, string?];
+      sheet[XLSX.utils.encode_cell({ r, c })] = { v, t, z };
+    }));
+    oldBook.Sheets[name] = sheet;
+  }
   const data = structuredClone(response.workbook) as CaWorkbook;
   // The plain-download toggle only omits payment blocks; it changes no figure.
   if (!includePayment) for (const firm of data.firms) for (const month of firm.months) {
     month.sales.split = []; month.purchases.split = [];
   }
   const before = JSON.stringify(data);
-  const oldBlob = generateReportExcel({ invoices, businesses: [business], customers, includePayment });
   const newBlob = await workbookBlob(data);
   expect(JSON.stringify(data)).toBe(before);
-  return Promise.all([oldBlob, newBlob].map(async blob => XLSX.read(await bytesOf(blob), { type: "array", cellNF: true })));
+  return [oldBook, XLSX.read(await bytesOf(newBlob), { type: "array", cellNF: true })];
 }
 
 function cell(sheet: XLSX.WorkSheet, row: number, column: number): XLSX.CellObject {
@@ -159,7 +167,7 @@ test("X-81 appends the original unit and precise rate without converting carats 
   expect(cell(sheet, empty, 9)).toMatchObject({ t: "n", v: 0, z: "#,##0.00" });
 });
 
-test("X-84 keeps Round Off zero and itemless bills taxable through both real transformations", async () => {
+test("X-84 keeps Round Off zero and itemless bills taxable against the real v2 output", async () => {
   const [oldBook, newBook] = await both(true);
   for (const book of [oldBook, newBook]) {
     const sheet = book.Sheets[business.name];

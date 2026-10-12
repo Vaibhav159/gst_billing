@@ -49,7 +49,7 @@ async function prototypeShot(browser, info, screen, width, theme) {
   const context = await browser.newContext({ viewport: { width, height: 844 } });
   try {
     // Local UMD files avoid CDN dependency and keep prototype capture reproducible.
-    const v2 = path.resolve(__dirname, '../../sweet-rebuild-suite-main/node_modules');
+    const v2 = path.resolve(__dirname, '../../web/node_modules');
     await context.route('https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js', (route) => route.fulfill({ path: path.join(v2, 'react/umd/react.production.min.js'), contentType: 'application/javascript' }));
     await context.route('https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js', (route) => route.fulfill({ path: path.join(v2, 'react-dom/umd/react-dom.production.min.js'), contentType: 'application/javascript' }));
     await context.addInitScript(({ screen, width, theme }) => {

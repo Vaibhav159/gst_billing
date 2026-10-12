@@ -1,5 +1,5 @@
 {
-  "_about": "Where a supply is taxed, as billing/tax_rules.py and src/utils/taxRules.ts must both decide it (M16). Read by billing/tests/test_tax_placement_parity.py and src/utils/taxPlacementParity.test.ts. Each side also checks that every name in its own state table is listed here, so a state added on one side only fails a test.",
+  "_about": "Where a supply is taxed, as billing/tax_rules.py decides it (M16; web/src/core/sales/pos.ts mirrors it for previews). Read by billing/tests/test_tax_placement_parity.py, which also checks that every name in the server's state table is listed here.",
   "state_names": [
     {
       "name": "JAMMU AND KASHMIR",

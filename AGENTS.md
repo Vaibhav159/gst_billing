@@ -2,7 +2,7 @@
 
 Invoicing and GST-return software for Indian jewellery businesses. Two surfaces
 over one money domain: a **Django + DRF API** (`billing/`, `gst_billing/`) and a
-**Vite + React SPA** (`sweet-rebuild-suite-main/`). They are separate builds and
+**Vite + React SPA** (`web/`, v3). They are separate builds and
 separate production images.
 
 Each directory below has its own AGENTS.md with the detail. **Read the nearest one
@@ -13,33 +13,25 @@ to the file you are editing** — this file only carries what is true on both si
 | What | Where | Command |
 |---|---|---|
 | Backend | repo root | `source .venv/bin/activate && python manage.py runserver` |
-| Frontend | `sweet-rebuild-suite-main/` | `npm run dev` |
+| Frontend | `web/` | `npm run dev` (5180) |
 | Backend tests | repo root | `.venv/bin/python -m pytest billing/` |
-| Frontend tests | `sweet-rebuild-suite-main/` | `npm run test` |
+| Frontend tests | `web/` | `npm test -- --run` |
 
 The frontend **must** run through the Vite dev server: `/api` and `/media` are
-proxied to Django there (`sweet-rebuild-suite-main/vite.config.ts`). Serving a
+proxied to Django there (`web/vite.config.ts`, `VITE_API_TARGET`). Serving a
 static build of `dist/` will send API calls to the frontend host and every
 request will 404.
 
-Ports: CI uses Django `8000` / Vite `8080` (the defaults). Locally this repo's
-`.claude/launch.json` runs Vite on `5001` against Django on `5002` via
-`VITE_DEV_PORT` / `VITE_API_TARGET`. Either is fine — just keep them paired.
+Ports: CI runs Django on `8000` and the app's Vite on `8081` (`VITE_DEV_PORT`, `VITE_API_TARGET`). The sandbox (`deploy/sandbox/`) serves Vite on `5180` and nginx on `8060`; `.claude/launch.json` names both.
 
 ## Contracts that span both sides
 
 Change one without the other and the bug is silent: totals still look right on
 screen while the stored row or the filed return is wrong.
 
-- **Tax placement** — `billing/tax_rules.py` and
-  `sweet-rebuild-suite-main/src/utils/taxRules.ts` are deliberate mirrors
-  (interstate → IGST, intra → CGST+SGST, same GSTIN-then-state-name fallback).
-  Change both, or the preview disagrees with what gets written.
-- **API shapes** — `billing/api/serializers.py` produces what
-  `sweet-rebuild-suite-main/src/types/api.ts` declares. Most serializers are
-  `fields = "__all__"`, so a model field rename silently changes the wire format.
-- **Routes** — `billing/api/urls.py` defines every path the axios client in
-  `sweet-rebuild-suite-main/src/utils/api.ts` calls against `baseURL: "/api/"`.
+- **Tax placement** — `billing/tax_rules.py` decides; `web/src/core/sales/pos.ts` (with the state table in `web/src/core/ids.ts`) mirrors it for the form's preview. Change both, or the preview disagrees with what gets written.
+- **API shapes** — `billing/api/` produces what each area's `web/src/core/*/wire.ts` and `types.ts` read. v2's serializers are mostly `fields = "__all__"`, so a model field rename silently changes the wire format.
+- **Routes** — `billing/api/urls.py` defines every path the axios instance in `web/src/core/api/client.ts` calls under `/api/`.
 - **Auth** — JWT from `/api/token/`, refresh at `/api/token/refresh/` with
   **rotation on** server-side, so the client must store each new refresh token.
 
@@ -49,7 +41,7 @@ screen while the stored row or the filed return is wrong.
 - **Money is `Decimal` on the server.** Never `float` for tax or totals.
 - **Rates are stored as decimals** (`0.03` = 3%). Convert only through
   `billing/tax_rules.py` `normalize_rate()` / `rate_as_percent()` — an explicit GST slab
-  allowlist, mirrored in `src/utils/gstRate.ts`. Never a magnitude test like
+  allowlist, mirrored as slabs in `web/src/core/sales/slabs.ts`. Never a magnitude test like
   `value > 1 ? value / 100 : value`: that stored the 0.25% diamond slab as 25%.
 - **Dates are IST.** Do not build financial-year or month boundaries with
   `toISOString()` on a local `Date`; it shifts a day and drops 31 March.
@@ -72,31 +64,25 @@ screen while the stored row or the filed return is wrong.
 
 ```bash
 .venv/bin/python -m pytest billing/ -x --tb=short
-cd sweet-rebuild-suite-main && npx tsc --noEmit -p tsconfig.app.json && npm run test -- --run
+cd web && npm run typecheck && npm test -- --run
 ```
 
-Both must pass — this is what `.github/workflows/test.yml` runs for the server
-and v2. For v3 (`web/`, on branch `v3`) it also runs the `web` job (typecheck,
-unit tests and build) and `web-e2e` (the Playwright and WCAG 2.2 AA suite in
-`e2e-tests/`, `-c v3.config.js`); their commands are in
-[`web/AGENTS.md`](web/AGENTS.md). `vite build` does **not** typecheck, so the
-`tsc` step is the only thing checking types.
+Both must pass — `.github/workflows/test.yml` runs them as `backend` and `web` (typecheck, unit tests and build), plus `web-e2e` (the Playwright and WCAG 2.2 AA suite in `e2e-tests/`, `-c v3.config.js`); the commands are in [`web/AGENTS.md`](web/AGENTS.md). `vite build` does **not** typecheck, so the `tsc` step is the only thing checking types.
 
 ## Where things live
 
 - `billing/` — Django app: models, DRF API, services, tests → [`billing/AGENTS.md`](billing/AGENTS.md)
 - `gst_billing/` — Django project settings, URLs, WSGI
-- `sweet-rebuild-suite-main/` — React SPA → [`sweet-rebuild-suite-main/AGENTS.md`](sweet-rebuild-suite-main/AGENTS.md)
-- `web/` — v3, the rebuilt React app (branch `v3`; replaces the SPA at the switch-over) → [`web/AGENTS.md`](web/AGENTS.md)
+- `web/` — the React app (v3) → [`web/AGENTS.md`](web/AGENTS.md)
 - `e2e-tests/` — Playwright suite, its own package → [`e2e-tests/AGENTS.md`](e2e-tests/AGENTS.md)
 - `deploy/`, `nginx/`, `docker-compose.yml` — serving and release → [`deploy/AGENTS.md`](deploy/AGENTS.md)
 
 ## Finding things fast
 
 - An API route: `rg -n "path\(|router.register" billing/api/urls.py`
-- A React page: `ls sweet-rebuild-suite-main/src/pages/`
-- Every copy of a money rule: `rg -n "cgst|igst" billing/ sweet-rebuild-suite-main/src/`
-- Where a serializer field is consumed: `rg -n "<field_name>" sweet-rebuild-suite-main/src/`
+- A React page: `ls web/src/pages/`
+- Every copy of a money rule: `rg -n "cgst|igst" billing/ web/src/`
+- Where a serializer field is consumed: `rg -n "<field_name>" web/src/`
 
 ## Ponytail, lazy senior dev mode (Repo Edition)
 
@@ -106,13 +92,13 @@ Before writing any code, stop at the first rung that holds:
 
 1. **YAGNI** — Does this need to be built at all?
 2. **Reuse existing helpers** — Don't re-invent what's already here:
-   - *Tax logic*: Import `billing/tax_rules.py` or `@/utils/taxRules.ts` (`supply_interstate(invoice)` and `place_of_supply(invoice)` for a bill, which honour its own place of supply; `is_interstate` for parties with no bill yet, such as a new purchase; `normalize_tax_heads`). Never hand-roll tax placement or GSTIN prefix guessing.
-   - *UI* (v2, `sweet-rebuild-suite-main/`): Check `@/components/ui/` (49 shadcn primitives) and `@/utils/utils` (`cn`) before writing raw components. In `web/` (v3) use the kit, `@/core/ui`: see [`web/AGENTS.md`](web/AGENTS.md).
-   - *API calls* (v2): Use the configured `@/utils/api` axios instance (handles JWT auth & refresh token rotation). Don't invoke raw `axios`. In `web/` (v3) it's `@/core/api/client` with TanStack Query: see [`web/AGENTS.md`](web/AGENTS.md).
-   - *Data fetching*: In `sweet-rebuild-suite-main/` (v2), follow the existing hook pattern (`src/hooks/useDataStore.ts`) and don't introduce TanStack Query or new state managers there. `web/` (v3, being built on branch `v3`) uses TanStack Query as its only data layer, through `web/src/core/api/`.
+   - *Tax logic*: `billing/tax_rules.py`, or `@/core/sales/pos` in the browser. Never hand-roll tax placement or GSTIN prefix guessing.
+   - *UI*: use the kit, `@/core/ui`: see [`web/AGENTS.md`](web/AGENTS.md).
+   - *API calls*: Use `@/core/api/client` with TanStack Query; don't call raw `axios`.
+   - *Data fetching*: TanStack Query is the only data layer, through `web/src/core/api/`.
    - *Audit/Undo*: Use `AuditLogMixin` with `audit_entity`.
 3. **Standard library / Native** — Python `decimal.Decimal`, modern JS/TS built-ins.
-4. **Installed dependencies** — Django/DRF built-ins, `django-cacheops`, SimpleJWT, `sonner`, `lucide-react`.
+4. **Installed dependencies** — Django/DRF built-ins, `django-cacheops`, SimpleJWT, TanStack Query, `lucide-react`.
 5. **One-liner** — Can this be one clean line? Make it one line.
 6. **Only then**: write the minimum code that works.
 
@@ -121,7 +107,7 @@ The ladder runs after you understand the problem, not instead of it: trace the f
 ### Root cause & twin paths (No half-fixes)
 - **Fix the shared helper, not just the ticket's caller**: Grep callers across both backend and frontend.
 - **Check secondary paths**: Invoicing logic is mirrored across **inward bills, bulk/CSV import, AI import, Excel export, and print views**. A fix to the main invoice path without checking twins is an incomplete fix.
-- **Keep mirrors in sync**: `billing/tax_rules.py` ↔ `taxRules.ts`, and `billing/api/serializers.py` ↔ `src/types/api.ts`.
+- **Keep mirrors in sync**: `billing/tax_rules.py` ↔ `web/src/core/sales/pos.ts`, and `billing/api/` ↔ `web/src/core/*/wire.ts`.
 
 ### Rules
 - **No unrequested abstractions or dependencies**: No new npm/pip packages unless unavoidable.
@@ -136,4 +122,4 @@ The ladder runs after you understand the problem, not instead of it: trace the f
 - **Security & Permissions**: Explicit permission classes on every new endpoint (default is viewer). Never touch prod DB.
 - **Verification check**: Every non-trivial change must verify against:
   - Backend: `.venv/bin/python -m pytest billing/ -x --tb=short`
-  - Frontend: `cd sweet-rebuild-suite-main && npx tsc --noEmit -p tsconfig.app.json && npm run test -- --run` (`vite build` does not typecheck!)
+  - Frontend: `cd web && npm run typecheck && npm test -- --run` (`vite build` does not typecheck!)
