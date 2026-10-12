@@ -211,10 +211,14 @@ def _credit_lapse(lines, *, filing_month=None, filing_date=None, today=None, bil
 
 
 def _purchase_lines(business, *, filing_month=None, filing_date=None, today=None):
+    return _firm_purchase_lines([business.pk], filing_month=filing_month, filing_date=filing_date, today=today)
+
+
+def _firm_purchase_lines(business_ids, *, filing_month=None, filing_date=None, today=None):
     required = {"itc_month", "itc_eligible", "needs_review"}
     if not required <= {field.name for field in Invoice._meta.fields}:
         raise ImproperlyConfigured("3A ledger requires part 2A's itc_month, itc_eligible and needs_review fields.")
-    lines = (uncached(LineItem).filter(invoice__business_id=business.pk, invoice__type_of_invoice="inward",
+    lines = (uncached(LineItem).filter(invoice__business_id__in=business_ids, invoice__type_of_invoice="inward",
                                       invoice__invoice_date__gte=START)
             .annotate(credit_month=Coalesce("invoice__itc_month", TruncMonth("invoice__invoice_date"), output_field=DateField()),
                       credit_eligible=F("invoice__itc_eligible")))
@@ -230,29 +234,48 @@ def _sales_lines(business):
 
 
 def _book_groups(business, upto, *, filing_date=None, today=None):
-    end, books = next_month(upto), {}
-    sales = (_sales_lines(business).filter(invoice__invoice_date__gte=START, invoice__invoice_date__lt=end)
-             .annotate(month=TruncMonth("invoice__invoice_date")).values("month")
+    return _firm_books([business.pk], upto, filing_date=filing_date, today=today)[business.pk]
+
+
+def _firm_books(business_ids, upto, *, filing_date=None, today=None):
+    """_book_groups for several firms at once: one sales and one purchase query, grouped by firm."""
+    end, books = next_month(upto), {pk: {} for pk in business_ids}
+    sales = (uncached(LineItem).counted().filter(invoice__business_id__in=business_ids, invoice__type_of_invoice="outward",
+                                                 invoice__invoice_date__gte=START, invoice__invoice_date__lt=end)
+             .annotate(month=TruncMonth("invoice__invoice_date")).values("invoice__business_id", "month")
              .annotate(**_sums(), taxable=Sum(taxable_expression(), filter=Q(gst_tax_rate__gt=0))).order_by())
     for row in sales:
-        books.setdefault(month_key(row["month"]), {})["output"] = heads(row)
-        books[month_key(row["month"])]["taxable"] = to_paise(row["taxable"] or 0)
-    purchases = (_purchase_lines(business, filing_month=upto, filing_date=filing_date, today=today).filter(credit_month__gte=START, credit_month__lt=end,
-                                                  invoice__itc_eligible=True, lapsed=False)
-                 .values("credit_month").annotate(**_sums()).order_by())
+        firm = books[row["invoice__business_id"]]
+        firm.setdefault(month_key(row["month"]), {})["output"] = heads(row)
+        firm[month_key(row["month"])]["taxable"] = to_paise(row["taxable"] or 0)
+    purchases = (_firm_purchase_lines(business_ids, filing_month=upto, filing_date=filing_date, today=today)
+                 .filter(credit_month__gte=START, credit_month__lt=end, invoice__itc_eligible=True, lapsed=False)
+                 .values("invoice__business_id", "credit_month").annotate(**_sums()).order_by())
     for row in purchases:
-        books.setdefault(month_key(row["credit_month"]), {})["credit"] = heads(row)
+        books[row["invoice__business_id"]].setdefault(month_key(row["credit_month"]), {})["credit"] = heads(row)
     return books
 
 
 def _records(business, upto):
+    return _firm_records([business.pk], upto)[business.pk]
+
+
+def _firm_records(business_ids, upto):
+    """The frozen months of several firms: one FilingRecord and one FilingMonth query, grouped by firm."""
     cutoff = Q(year__lt=upto.year) | Q(year=upto.year, month__lte=upto.month)
-    records = list(uncached(FilingRecord).filter(business_id=business.pk, kind="gstr3b").filter(cutoff)
-                   .values("year", "month", "figures", "marked_at", "cash_total",
-                           *("cash_" + head for head in HEADS), *("credit_left_" + head for head in HEADS)))
-    month_rows = list(uncached(FilingMonth).filter(business_id=business.pk).filter(cutoff)
-                      .annotate(legacy_figures=F("legacy_snapshot__gstr3b__figures"))
-                      .values("year", "month", "unlocked_at", "relocked_at", "legacy_frozen_at", "legacy_figures"))
+    records, month_rows = {pk: [] for pk in business_ids}, {pk: [] for pk in business_ids}
+    for row in (uncached(FilingRecord).filter(business_id__in=business_ids, kind="gstr3b").filter(cutoff)
+                .values("business_id", "year", "month", "figures", "marked_at", "cash_total",
+                        *("cash_" + head for head in HEADS), *("credit_left_" + head for head in HEADS))):
+        records[row["business_id"]].append(row)
+    for row in (uncached(FilingMonth).filter(business_id__in=business_ids).filter(cutoff)
+                .annotate(legacy_figures=F("legacy_snapshot__gstr3b__figures"))
+                .values("business_id", "year", "month", "unlocked_at", "relocked_at", "legacy_frozen_at", "legacy_figures")):
+        month_rows[row["business_id"]].append(row)
+    return {pk: _frozen(records[pk], month_rows[pk]) for pk in business_ids}
+
+
+def _frozen(records, month_rows):
     opened = {(row["year"], row["month"]) for row in month_rows if row["unlocked_at"] is not None
               and (row["relocked_at"] is None or row["unlocked_at"] > row["relocked_at"])}
     frozen = {}
@@ -282,12 +305,33 @@ def ledger(business, upto, *, today=None, opening=None, freeze=True, filing_date
     saved = uncached(OpeningCredit).filter(business_id=business.pk).values(*HEADS).first()
     books = _book_groups(business, upto, filing_date=filing_date, today=today)
     frozen = _records(business, upto)
-    effective_opening = heads(opening if opening is not None else saved)
-    # Legacy locks without figures are recomputed from the opening being read
-    # or previewed. The unlock service persists a baseline before books change.
     legacy = list(uncached(FiledPeriod).filter(business_id=business.pk)
                   .filter(Q(year__lt=upto.year) | Q(year=upto.year, month__lte=upto.month))
                   .values("year", "month"))
+    return _assemble(books, frozen, saved, legacy, upto, opening, freeze)
+
+
+def ledgers(businesses, upto, *, today=None):
+    """ledger() for several firms in six queries in all, not six per firm (P5-3); saved openings, frozen."""
+    today = today or timezone.localdate()
+    upto = date.fromisoformat(upto + "-01") if isinstance(upto, str) else upto.replace(day=1)
+    ids = [business.pk for business in businesses]
+    if upto < START or upto > today.replace(day=1):
+        return {pk: {} for pk in ids}
+    saved = {row.pop("business_id"): row for row in uncached(OpeningCredit).filter(business_id__in=ids).values("business_id", *HEADS)}
+    books = _firm_books(ids, upto, today=today)
+    frozen = _firm_records(ids, upto)
+    legacy = {pk: [] for pk in ids}
+    for row in (uncached(FiledPeriod).filter(business_id__in=ids)
+                .filter(Q(year__lt=upto.year) | Q(year=upto.year, month__lte=upto.month)).values("business_id", "year", "month")):
+        legacy[row.pop("business_id")].append(row)
+    return {pk: _assemble(books[pk], frozen[pk], saved.get(pk), legacy[pk], upto, None, True) for pk in ids}
+
+
+def _assemble(books, frozen, saved, legacy, upto, opening, freeze):
+    effective_opening = heads(opening if opening is not None else saved)
+    # Legacy locks without figures are recomputed from the opening being read
+    # or previewed. The unlock service persists a baseline before books change.
     if freeze:
         for old in sorted(legacy, key=lambda row: (row["year"], row["month"])):
             key = f'{old["year"]:04d}-{old["month"]:02d}'
@@ -301,6 +345,12 @@ def ledger(business, upto, *, today=None, opening=None, freeze=True, filing_date
 
 def month_position(business, year, month, *, today=None, filing_date=None):
     return ledger(business, date(year, month, 1), today=today, filing_date=filing_date).get(f"{year:04d}-{month:02d}")
+
+
+def month_positions(businesses, year, month, *, today=None):
+    """month_position for several firms, through ledgers()."""
+    key = f"{year:04d}-{month:02d}"
+    return {pk: rows.get(key) for pk, rows in ledgers(businesses, date(year, month, 1), today=today).items()}
 
 
 def opening_effect(business, opening, *, today=None):
