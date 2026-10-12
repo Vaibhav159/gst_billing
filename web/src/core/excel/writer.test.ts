@@ -59,3 +59,14 @@ test("the explanatory currency note is included in the downloaded file", async (
   expect(sheet.A1.v).toBe("-123456789012345.67");
   expect(sheet.A2.v).toBe("Amounts are in rupees.");
 });
+
+test("a supplied number format preserves the CA's legacy money, quantity and count columns", async () => {
+  const XLSX = await import("xlsx-js-style");
+  const blob = await excelBlob([{ name: "Formats", cols: [100, 100, 100], rows: [{ kind: "data", cells: [
+    { v: "1.000", num: true, format: "General" },
+    { v: "12.5", num: true, format: "#,##0.000" },
+    { v: "6512.500", num: true, format: "#,##0.00" },
+  ] }] }]);
+  const sheet = XLSX.read(await bytesOf(blob), { type: "array", cellNF: true }).Sheets.Formats;
+  expect([sheet.A1.z, sheet.B1.z, sheet.C1.z]).toEqual(["General", "#,##0.000", "#,##0.00"]);
+});

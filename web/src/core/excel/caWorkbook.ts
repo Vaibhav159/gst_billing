@@ -1,4 +1,5 @@
 import { excelBlob, uniqueSheetNames, type Cell, type Row, type Sheet } from "./writer";
+import { paiseToDecimal, toPaise } from "@/core/format";
 
 export type WorkbookValue = string | number | boolean | null | WorkbookValue[] | { [key: string]: WorkbookValue };
 export type WorkbookRecord = { [key: string]: WorkbookValue };
@@ -16,8 +17,12 @@ export interface CaWorkbook {
   }[];
 }
 
-const LINE_HEAD = ["S.No.", "Bill No.", "Date", "Party", "GSTIN or PAN", "Item", "HSN", "GST rate", "Qty", "Unit", "Rate per unit", "Taxable value", "CGST", "SGST", "IGST", "Round off", "Bill value", "Payment"];
-const LINE_W = [44, 120, 92, 170, 140, 170, 68, 64, 80, 52, 100, 112, 90, 90, 90, 80, 112, 96, 120, 120];
+// X-81: A:P are the CA's existing v2 Excel Report, including its legacy unit labels.
+// Native units and the unrounded rate follow those columns; no quantity is converted.
+const LINE_HEAD = ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN Code", "GST Rate", "Qty (gm)", "Rate (₹/gm)", "Taxable Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "Round Off (₹)", "Total Invoice Value (₹)", "Payment", "Unit", "Rate per unit"];
+const LINE_W = [44, 120, 92, 170, 140, 170, 68, 64, 80, 100, 112, 90, 90, 90, 80, 140, 96, 52, 100, 120, 120];
+const MONEY_FORMAT = "#,##0.00";
+const TOTAL_HEAD = LINE_HEAD.slice(10, 16);
 const TOTAL_KEYS = ["taxable", "cgst", "sgst", "igst", "round_off", "value"] as const;
 const record = (value: WorkbookValue | undefined): WorkbookRecord => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const records = (value: WorkbookValue | undefined) => Array.isArray(value) ? value.map(record) : [];
@@ -26,7 +31,41 @@ const get = (value: WorkbookRecord, path: string) => path.split(".").reduce<Work
 const cells = (values: (string | number)[]): Cell[] => values.map(v => ({ v }));
 const band = (value: string, width: number): Row => ({ kind: "band", cells: [{ v: value, span: width }] });
 const head = (values: string[]): Row => ({ kind: "head", cells: cells(values) });
-const totalCells = (totals: WorkbookTotals) => TOTAL_KEYS.map(key => ({ v: totals[key], num: true }));
+const totalCells = (totals: WorkbookTotals) => TOTAL_KEYS.map(key => ({ v: totals[key], num: true, format: MONEY_FORMAT }));
+const countCell = (value: number): Cell => ({ v: value, num: true, format: "General" });
+const addMoney = (values: string[]) => paiseToDecimal(values.reduce((sum, value) => sum + (toPaise(value) ?? 0), 0));
+function sumTotals(values: WorkbookTotals[]): WorkbookTotals {
+  return { bills: values.reduce((sum, value) => sum + (value.bills ?? 0), 0),
+    ...Object.fromEntries(TOTAL_KEYS.map(key => [key, addMoney(values.map(value => value[key]))])) } as WorkbookTotals;
+}
+const payment = (value: string | number) => String(value).replace(/^./, first => first.toUpperCase());
+const monthLabel = (month: string) => `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month.slice(5)) - 1]} ${month.slice(0, 4)}`;
+
+function invoiceRows(lines: WorkbookSection["rows"]): Row[] {
+  const bills: WorkbookSection["rows"][] = [];
+  for (const line of lines) {
+    if (line[0] !== "") bills.push([]);
+    bills[bills.length - 1].push(line);
+  }
+  bills.sort((a, b) => String(a[0][2]).localeCompare(String(b[0][2])) || String(a[0][1]).localeCompare(String(b[0][1]), undefined, { numeric: true }));
+  return bills.flatMap((bill, index) => bill.map((line, item) => {
+    const empty = line[8] === "" && line[10] === "";
+    const values = [item === 0 ? index + 1 : "", line[1], String(line[2]).split("-").reverse().join("-"), line[3], line[4],
+      empty ? "" : line[5], line[6], line[7] === "" ? "" : `${line[7]}%`, empty ? "0.000" : line[8],
+      // Only this legacy display column follows v2's Math.round, including halfway rates.
+      // The server's amounts and the precise rate in column S stay intact.
+      paiseToDecimal(Math.round(Number(line[10]) * 100)), ...line.slice(11, 17), item === 0 ? payment(line[17]) : "", line[9], line[10], ...line.slice(18)];
+    return { kind: "data", cells: values.map((v, column): Cell => ({ v,
+      ...([0, 8, 9, 10, 11, 12, 13, 14, 15, 18].includes(column) ? { num: true,
+        format: column === 0 ? "General" : column === 8 || column === 18 ? "#,##0.000" : MONEY_FORMAT } : {}),
+    })) };
+  }));
+}
+
+function summaryRow(label: string, sales: WorkbookTotals, purchases: WorkbookTotals, kind: Row["kind"] = "data"): Row {
+  return { kind, cells: [{ v: label }, countCell(sales.bills ?? 0), ...totalCells(sales), countCell(purchases.bills ?? 0), ...totalCells(purchases),
+    { v: addMoney([sales.value, purchases.value]), num: true, format: MONEY_FORMAT }] };
+}
 type Column = [label: string, path: string, numeric?: boolean];
 const moneyColumns: Column[] = [["Taxable value", "taxable", true], ["IGST", "igst", true], ["CGST", "cgst", true], ["SGST", "sgst", true]];
 function table(rows: Row[], title: string, values: WorkbookRecord[], columns: Column[]) {
@@ -36,7 +75,15 @@ function table(rows: Row[], title: string, values: WorkbookRecord[], columns: Co
 
 function splitRows(rows: Row[], split: WorkbookRecord[]) {
   if (!split.length) return;
-  table(rows, "PAYMENT SPLIT (cash / bank)", split, [["Mode", "mode"], ["Bills", "bills", true], ["Bill value", "value", true], ...moneyColumns, ["Share %", "share", true]]);
+  rows.push({ kind: "blank", cells: [] }, band("PAYMENT SPLIT (cash / bank)", 9),
+    head(["MODE", "INVOICES", "GROSS (₹)", "TAXABLE (₹)", "GST (₹)", "SHARE %", "IGST (₹)", "CGST (₹)", "SGST (₹)"]));
+  for (const value of split) {
+    const heads = ["igst", "cgst", "sgst"].map(key => String(scalar(value[key])));
+    rows.push({ kind: "data", cells: [{ v: payment(scalar(value.mode) || "(not set)") }, countCell(Number(value.bills)),
+      ...[scalar(value.value), scalar(value.taxable), addMoney(heads)].map(v => ({ v, num: true, format: MONEY_FORMAT })),
+      { v: scalar(value.share), num: true, format: "0.0000" }, ...heads.map(v => ({ v, num: true, format: MONEY_FORMAT }))] });
+  }
+  rows.push({ kind: "blank", cells: [] });
 }
 
 function gstr1Rows(rows: Row[], firm: string, value: CaWorkbook["firms"][number]["gstr1"][number]) {
@@ -93,31 +140,47 @@ function gstr3bRows(rows: Row[], firm: string, value: CaWorkbook["firms"][number
 /** The preview and the file use these same cells, with all figures taken from §10.2. */
 export function workbookSheets(data: CaWorkbook): Sheet[] {
   const reserved = uniqueSheetNames(["Summary", "GSTR-1", "GSTR-3B", "Amendments", ...data.firms.map(value => value.firm.name)]);
-  const summary: Sheet = { name: "Summary", cols: [170, ...Array<number>(14).fill(112)], rows: [
-    { kind: "title", cells: [{ v: `GST BILL SUMMARY · ${data.scope.toUpperCase()} · ${data.period.toUpperCase()}`, span: 15 }] },
-    { kind: "band", cells: [{ v: "" }, { v: "SALES (OUTWARD SUPPLY)", span: 7 }, { v: "PURCHASES (INWARD SUPPLY)", span: 7 }] },
-    head(["Firm", ...["Bills", "Taxable value", "CGST", "SGST", "IGST", "Round off", "Bill value"], ...["Bills", "Taxable value", "CGST", "SGST", "IGST", "Round off", "Bill value"]]),
-    ...data.summary.map(row => ({ kind: "data" as const, cells: [{ v: row.firm }, { v: row.sales.bills ?? 0, num: true }, ...totalCells(row.sales), { v: row.purchases.bills ?? 0, num: true }, ...totalCells(row.purchases)] })),
-  ], note: "Sales and purchases sit side by side and are never added together." };
+  const active = data.summary.filter(row => (row.sales.bills ?? 0) + (row.purchases.bills ?? 0) > 0);
+  const summary: Sheet = { name: "Summary", cols: [170, ...Array<number>(15).fill(112)], rows: [
+    { kind: "title", cells: [{ v: "GST INVOICE SUMMARY – ALL FIRMS", span: 16 }] },
+    { kind: "band", cells: [{ v: "" }, { v: "OUTWARD SUPPLY", span: 7 }, { v: "INWARD SUPPLY", span: 7 }, { v: "" }] },
+    head(["Firm Name", "Invoices", ...TOTAL_HEAD, "Invoices", ...TOTAL_HEAD, "Net Total (₹)"]),
+    ...active.map(row => summaryRow(row.firm, row.sales, row.purchases)),
+    summaryRow("GRAND TOTAL", sumTotals(active.map(row => row.sales)), sumTotals(active.map(row => row.purchases)), "total"),
+  ], note: `${data.scope} · ${data.period}. Net Total is the combined invoice value of sales and purchases.` };
   const gstr1: Sheet = { name: "GSTR-1", cols: Array<number>(12).fill(140), rows: [], note: "Amounts are in rupees. Figures come from the server; carats use CTM." };
   const gstr3b: Sheet = { name: "GSTR-3B", cols: Array<number>(12).fill(140), rows: [], note: "Amounts are in rupees. Figures come from the server; filed returns keep their recorded figures." };
   const amendments: Sheet = { name: "Amendments", cols: Array<number>(19).fill(140), rows: [] };
   const firms = data.firms.map((value, i) => {
     const rows: Row[] = [];
+    const populated = value.months.filter(month => month.sales.rows.length || month.purchases.rows.length);
     for (const month of value.months) for (const side of ["sales", "purchases"] as const) {
       const section = month[side];
-      rows.push(band(value.firm.name.toUpperCase(), 20), { kind: "sub", cells: [{ v: side === "sales" ? "Sales (outward supply)" : "Purchases (inward supply)", span: 20 }] }, { kind: "sub", cells: [{ v: `Month: ${month.month}`, span: 20 }] }, { kind: "sub", cells: [{ v: `GSTIN: ${value.firm.gst_number}`, span: 20 }] });
+      if (!section.rows.length) continue;
+      rows.push(band(value.firm.name.toUpperCase(), LINE_W.length), { kind: "sub", cells: [{ v: side === "sales" ? "Outward Supply" : "Inward Supply", span: LINE_W.length }] }, { kind: "sub", cells: [{ v: `Month: ${monthLabel(month.month)}`, span: LINE_W.length }] }, { kind: "sub", cells: [{ v: `GSTIN: ${value.firm.gst_number || "-"}`, span: LINE_W.length }] });
       rows.push(head([...LINE_HEAD, ...(side === "sales" ? ["GSTR-1 table", "Place of supply"] : ["Credit in", "Credit state"])]));
-      for (const line of section.rows) rows.push({ kind: "data", cells: line.map((v, column) => ({ v, num: [0, 7, 8, 10, 11, 12, 13, 14, 15, 16].includes(column) })) });
-      rows.push({ kind: "total", cells: [{ v: "TOTAL", span: 11 }, ...totalCells(section.totals)] });
+      rows.push(...invoiceRows(section.rows));
+      const totals = totalCells(section.totals);
+      if (!section.rows.some(line => (toPaise(line[14]) ?? 0) > 0)) totals[3] = { ...totals[3], v: "-" };
+      rows.push({ kind: "total", cells: [{ v: "TOTAL", span: 10 }, ...totals] });
       splitRows(rows, section.split);
-      rows.push({ kind: "blank", cells: [] });
+    }
+    if (populated.length) {
+      const sales = sumTotals(populated.map(month => month.sales.totals));
+      const purchases = sumTotals(populated.map(month => month.purchases.totals));
+      rows.push({ kind: "blank", cells: [] }, { kind: "blank", cells: [] },
+        band(`PERIOD SUMMARY (${monthLabel(populated[0].month)} to ${monthLabel(populated[populated.length - 1].month)})`, LINE_W.length),
+        { kind: "head", cells: [{ v: "Supply Type", span: 10 }, ...cells(["Taxable Value", "CGST", "SGST", "IGST", "Round Off", "Total Invoice Value"])] });
+      for (const [label, totals] of [["Outward Supply", sales], ["Inward Supply", purchases]] as const) {
+        if (totals.bills) rows.push({ kind: "data", cells: [{ v: `${label} (${totals.bills} invoices)`, span: 10 }, ...totalCells(totals)] });
+      }
+      rows.push({ kind: "total", cells: [{ v: "GRAND TOTAL", span: 10 }, ...totalCells(sumTotals([sales, purchases]))] });
     }
     for (const entry of value.gstr1) gstr1Rows(gstr1.rows, value.firm.name, entry);
     for (const entry of value.gstr3b) gstr3bRows(gstr3b.rows, value.firm.name, entry);
     if (value.amendments.length) table(amendments.rows, value.firm.name, value.amendments.map(row => ({ ...row, too_late_words: row.too_late ? "Too late to amend" : "Within time" })), [["Corrected month", "month"], ["Bill No.", "invoice_number"], ["Change", "kind"], ["Section", "section"], ["Place of supply", "place_of_supply"], ["GST rate", "rate", true], ...["before", "after"].flatMap(side => [...moneyColumns, ["Bill value", "total", true] as Column].map(([label, key, num]): Column => [`${side === "before" ? "As filed" : "Now"} · ${label}`, `${side}.${key}`, num])), ["Tax difference", "tax_diff", true], ["Goes in", "goes_in"], ["Amendment deadline", "too_late_words"]]);
-    return { name: reserved[i + 4], cols: LINE_W, rows, note: "Amounts are in rupees. One row per item; a bill's number, date, party, round off and value sit on its first row. Carats and pieces have their own unit column." };
-  });
+    return { name: reserved[i + 4], cols: LINE_W, rows, note: "Amounts are in rupees. A:P keep v2's Excel Report columns and labels. Quantities use each item's stored unit; Unit and the full-precision Rate per unit follow the legacy columns. A bill's details and value sit on its first row." };
+  }).filter(sheet => sheet.rows.length);
   return [summary, ...firms, gstr1, gstr3b, ...(amendments.rows.length ? [amendments] : [])];
 }
 

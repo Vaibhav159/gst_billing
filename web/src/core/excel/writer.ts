@@ -1,6 +1,6 @@
 // v2's styled cell writer, with a shared preview model and no money calculations.
 export type RowKind = "title" | "band" | "sub" | "head" | "data" | "total" | "blank" | "fail";
-export interface Cell { v: string | number; span?: number; num?: boolean; center?: boolean; kind?: RowKind }
+export interface Cell { v: string | number; span?: number; num?: boolean; format?: string; center?: boolean; kind?: RowKind }
 export interface Row { kind: RowKind; cells: Cell[] }
 export interface Sheet { name: string; cols: number[]; rows: Row[]; note?: string }
 
@@ -64,7 +64,8 @@ export async function excelBlob(sheets: Sheet[]): Promise<Blob> {
         const scale = text.includes(".") ? text.split(".")[1].length : 0;
         const s = style(cell.kind ?? row.kind, cell, r % 2 === 0);
         // String cells are never evaluated, so their text is stored exactly as given.
-        output[XLSX.utils.encode_cell({ r, c })] = { v: numeric ? Number(text) : text, t: numeric ? "n" : "s", s, ...(numeric ? { z: `#,##0${scale ? `.${"0".repeat(scale)}` : ""}` } : {}) };
+        output[XLSX.utils.encode_cell({ r, c })] = { v: numeric ? Number(text) : text, t: numeric ? "n" : "s", s,
+          ...(cell.format && text !== "" ? { z: cell.format } : numeric ? { z: `#,##0${scale ? `.${"0".repeat(scale)}` : ""}` } : {}) };
         const span = cell.span ?? 1;
         if (span > 1) {
           merges.push({ s: { r, c }, e: { r, c: c + span - 1 } });

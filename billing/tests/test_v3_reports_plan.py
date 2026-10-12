@@ -43,6 +43,14 @@ def test_payment_shares_take_two_decimal_remainder_and_keep_blank_mode():
     assert payment_split(bills)[-1]["mode"] == ""
     assert payment_split([]) == []
 
+def test_ca_workbook_payment_shares_keep_v2_four_decimal_remainder():
+    bills = [row(i, total="1.00", payment=mode) for i, mode in enumerate(("cash", "bank", ""))]
+    result = ca_workbook(bills, [], **SEPT, split=True)
+    splits = result["firms"][0]["months"][0]["sales"]["split"]
+    assert [entry["share"] for entry in splits] == ["33.3333", "33.3333", "33.3334"]
+    assert sum(D(entry["share"]) for entry in splits) == D("100.0000")
+    assert [entry["share"] for entry in payment_split(bills)] == ["33.33", "33.33", "33.34"]
+
 def test_purchase_credit_follows_return_month_and_explains_gap():
     early = diamond(day=date(2026, 2, 18), credit_month="2026-10")
     context = {**SEPT, "start": date(2026, 10, 1), "end": date(2026, 10, 31)}

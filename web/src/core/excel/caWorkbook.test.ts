@@ -19,21 +19,20 @@ test("all required sheets are present and reserved names do not collide with fir
   const sheets = workbookSheets(data);
   expect(sheets.map(sheet => sheet.name)).toEqual(["Summary", "Summary (2)", "GSTR-1", "GSTR-3B"]);
   expect(JSON.stringify(data)).toBe(before);
-  expect(JSON.stringify(sheets[0])).not.toMatch(/net total/i);
-  expect(sheets[0].rows[sheets[0].rows.length - 1]?.cells.map(cell => cell.v)).toEqual(["Summary", 1, "80396.81", "1205.95", "1205.95", "0.00", "0.00", "82808.71", 1, "360960.00", "451.20", "451.20", "0.00", "0.00", "361862.40"]);
+  expect(sheets[0].rows[2].cells.map(cell => cell.v)).toContain("Net Total (₹)");
+  expect(sheets[0].rows[3].cells.map(cell => cell.v)).toEqual(["Summary", 1, "80396.81", "1205.95", "1205.95", "0.00", "0.00", "82808.71", 1, "360960.00", "451.20", "451.20", "0.00", "0.00", "361862.40", "444671.11"]);
 });
 
 test("line rows keep first-row-only totals, 3 decimal rates, sub-one-percent slabs and credit months", () => {
   const data = addChain(caFixture());
   const sheet = workbookSheets(data)[1];
   const rows = sheet.rows.map(row => row.cells.map(cell => cell.v));
-  // The full header rows lock out a Making column and any reordering.
-  const line = ["S.No.", "Bill No.", "Date", "Party", "GSTIN or PAN", "Item", "HSN", "GST rate", "Qty", "Unit", "Rate per unit", "Taxable value", "CGST", "SGST", "IGST", "Round off", "Bill value", "Payment"];
+  // X-81 keeps v2's A:P, then the explicit unit and full-precision rate.
+  const line = ["S.No.", "Bill No.", "Invoice Date", "Party Name", "GST Number", "Commodity", "HSN Code", "GST Rate", "Qty (gm)", "Rate (₹/gm)", "Taxable Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "Round Off (₹)", "Total Invoice Value (₹)", "Payment", "Unit", "Rate per unit"];
   expect(rows).toContainEqual([...line, "GSTR-1 table", "Place of supply"]);
   expect(rows).toContainEqual([...line, "Credit in", "Credit state"]);
-  expect(rows).toContainEqual(data.firms[0].months[0].sales.rows[1]);
-  expect(rows).toContainEqual(caFixture().firms[0].months[0].purchases.rows[0]);
-  expect(rows.flat()).not.toContain("Qty (gm)");
+  expect(rows.find(row => row[5] === "Chain")).toEqual(["", "", "", "", "", "Chain", "711319", "3%", "1.000", "100.00", "100.00", "1.50", "1.50", "0.00", "", "", "", "gms", "100.000", "B2B", "08"]);
+  expect(rows.find(row => row[5] === "Diamond")?.slice(16)).toEqual(["Bank", "ct", "56400.000", "2026-10", "to_claim"]);
 });
 
 test("GSTR sheets retain CTM, document counts, 4(B)(1), 4(D)(2), filed cash and period provenance", () => {
@@ -55,8 +54,8 @@ test("the actual workbook preserves numeric scale and never repeats a multiline 
   const back = XLSX.read(await bytesOf(await workbookBlob(data)), { type: "array", cellNF: true });
   const rows = XLSX.utils.sheet_to_json<(string | number)[]>(back.Sheets["Summary (2)"], { header: 1 });
   const first = rows.find(row => row[1] === "KGH/2026-27/21")!;
-  expect(first.slice(7, 17)).toEqual([3, 12.345, "gms", 6512.5, 80396.81, 1205.95, 1205.95, 0, 0, 82911.71]);
-  expect(rows.find(row => row[5] === "Chain")?.[16]).toBe("");
+  expect(first.slice(7, 19)).toEqual(["3%", 12.345, 6512.5, 80396.81, 1205.95, 1205.95, 0, 0, 82911.71, "Cash", "gms", 6512.5]);
+  expect(rows.find(row => row[5] === "Chain")?.[15]).toBe("");
 });
 
 test("an empty period still produces Summary and both return sheets", () => {
@@ -113,7 +112,7 @@ test("GSTR-3B has statutory zero tables and preserves cash paid as a total with 
 test("payment split is response-driven and never leaks into the next workbook", () => {
   const data = caFixture();
   data.firms[0].months[0].sales.split = [{ mode: "cash", bills: 1, value: "82808.71", taxable: "80396.81", igst: "0.00", cgst: "1205.95", sgst: "1205.95", share: "100.0000" }];
-  expect(workbookSheets(data)[1].rows.map(row => row.cells.map(cell => cell.v))).toContainEqual(["cash", 1, "82808.71", "80396.81", "0.00", "1205.95", "1205.95", "100.0000"]);
+  expect(workbookSheets(data)[1].rows.map(row => row.cells.map(cell => cell.v))).toContainEqual(["Cash", 1, "82808.71", "80396.81", "2411.90", "100.0000", "0.00", "1205.95", "1205.95"]);
   expect(workbookSheets(caFixture())[1].rows.flatMap(row => row.cells.map(cell => cell.v))).not.toContain("PAYMENT SPLIT (cash / bank)");
 });
 
@@ -123,8 +122,11 @@ test("X38 preserves server NIL placement and HSN words, and pre-ledger purchases
   const purchase = data.firms[0].months[0].purchases.rows[0]; purchase[2] = "2024-03-31"; purchase[18] = ""; purchase[19] = "outside";
   data.firms[0].gstr1[0].sections.hsn = { b2b: [{ hsn: "711319", description: "The server's period description", uqc: "GMS", quantity: "12.35", rate: "0", taxable: "80396.81", igst: "0.00", cgst: "0.00", sgst: "0.00", bills: 1 }], b2c: [] };
   const sheets = workbookSheets(data);
-  expect(sheets[1].rows.map(row => row.cells.map(cell => cell.v))).toContainEqual(sale);
-  expect(sheets[1].rows.map(row => row.cells.map(cell => cell.v))).toContainEqual(purchase);
+  const detail = sheets[1].rows.map(row => row.cells.map(cell => cell.v));
+  expect(detail.find(row => row[1] === sale[1])?.slice(19)).toEqual(["NIL", "08"]);
+  const bought = detail.find(row => row[1] === purchase[1])!;
+  expect(bought[2]).toBe("31-03-2024");
+  expect(bought.slice(19)).toEqual(["", "outside"]);
   expect(sheets[2].rows.flatMap(row => row.cells.map(cell => cell.v))).toContain("The server's period description");
 });
 

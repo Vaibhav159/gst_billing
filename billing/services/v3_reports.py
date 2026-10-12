@@ -163,7 +163,7 @@ def reconciliation_rows(bills):
              "lines": [{**line, **line_amounts(line), "rate": line["gst_rate"]} for line in bill["lines"]]} for bill in bills]
 
 
-def payment_split(bills):
+def payment_split(bills, *, share_places=2):
     with localcontext() as context:
         context.rounding = ROUND_HALF_UP
         buckets = old_payment_split(reconciliation_rows(bills))
@@ -171,13 +171,13 @@ def payment_split(bills):
     used = ZERO
     result = []
     for index, bucket in enumerate(buckets):
-        share = to_paise(bucket.gross * 100 / total) if total and index < len(buckets) - 1 else Decimal("100") - used
+        share = (bucket.gross * 100 / total).quantize(Decimal(1).scaleb(-share_places), rounding=ROUND_HALF_UP) if total and index < len(buckets) - 1 else Decimal("100") - used
         if not total and index < len(buckets) - 1:
             share = ZERO
         used += share
         result.append({"mode": "" if bucket.mode == "(not set)" else bucket.mode, "bills": bucket.invoice_count,
                        "value": money(bucket.gross), "taxable": money(bucket.taxable),
-                       **{head: money(getattr(bucket, head)) for head in HEADS}, "share": money(share)})
+                       **{head: money(getattr(bucket, head)) for head in HEADS}, "share": f"{share:.{share_places}f}"})
     return result
 
 
@@ -422,7 +422,7 @@ def ca_workbook(sales, purchases, *, firms, start, end, split=False, return_data
             for side, bills in (("sales", firm_sales), ("purchases", firm_purchases)):
                 selection = [bill for bill in bills if bill["date"].strftime("%Y-%m") == month]
                 monthly[side] = {"rows": _workbook_rows(selection, purchases=side == "purchases", closed_credit=closed_credit),
-                                 "totals": wire(amounts(selection)), "split": payment_split(selection) if split else []}
+                                 "totals": wire(amounts(selection)), "split": payment_split(selection, share_places=4) if split else []}
             sheet["months"].append(monthly)
             returns = return_data.get((firm["id"], month))
             if returns is not None:
