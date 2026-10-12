@@ -41,14 +41,16 @@ test('credit view includes an earlier FY, review clears, and old purchase links 
 });
 test('selected CSV and CA ZIP download the register and the original synthetic bill', async ({ page, request }, info) => {
   test.skip(info.project.name === 'phone', 'Selection exports belong to the desktop register.');
-  const { bill } = await newPurchase(client(request)); await attachPhoto(request, bill);
+  const { bill } = await newPurchase(client(request)); const attached = await attachPhoto(request, bill);
+  expect(attached.files).toHaveLength(1);
   await page.goto(`/purchases?firm=${bill.business}&q=${encodeURIComponent(bill.invoice_number)}`); await expect(page.getByText(new RegExp(esc(bill.invoice_number))).first()).toBeVisible(); await opened(page);
   await page.getByRole('checkbox', { name: `Tick ${bill.invoice_number}`, exact: true }).check();
   const selected = page.getByRole('region', { name: 'Ticked purchases' });
   const csvPromise = page.waitForEvent('download'); await selected.getByRole('button', { name: 'CSV', exact: true }).click(); const csv = await csvPromise;
   expect(await fs.readFile(await csv.path(), 'utf8')).toContain(bill.invoice_number);
   const zipPromise = page.waitForEvent('download'); await selected.getByRole('button', { name: 'For the CA', exact: true }).click(); const zip = await zipPromise;
-  const bytes = await fs.readFile(await zip.path()); expect(bytes.readUInt32LE(0)).toBe(0x04034b50); expect(bytes.toString('utf8')).toContain('synthetic-purchase.png'); expect(bytes.toString('utf8')).toContain('.xlsx');
+  // Storage may add a collision suffix when an earlier run kept the same upload name.
+  const bytes = await fs.readFile(await zip.path()); expect(bytes.readUInt32LE(0)).toBe(0x04034b50); expect(bytes.toString('utf8')).toContain(attached.files[0].name); expect(bytes.toString('utf8')).toContain('.xlsx');
 });
 test('delete moves the bill to its deleted page, then Restore returns the same lines and credit', async ({ page, request }) => {
   const api = client(request), { bill } = await newPurchase(api); await detail(page, bill);

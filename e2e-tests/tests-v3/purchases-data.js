@@ -47,5 +47,6 @@ async function attachPhoto(request, bill) {
     name: 'synthetic-purchase.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGO4tCUFAARGAes42ZwhAAAAAElFTkSuQmCC', 'base64'),
   } } });
   expect(response.ok(), `Attach synthetic purchase: ${response.status()}`).toBe(true);
+  return response.json();
 }
 module.exports = { client, firstFirm, today, number, supplier, newPurchase, notesPurchases, makesPurchases, attachPhoto };
