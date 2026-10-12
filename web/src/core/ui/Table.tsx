@@ -25,7 +25,7 @@ export function Table({ children, label, className, minWidth }: TableProps) {
     return () => { resized.disconnect(); changed.disconnect(); };
   }, []);
   return (
-    <div ref={viewport} className="relative scroll-x" role={overflow ? "region" : undefined} aria-label={overflow ? label : undefined} tabIndex={overflow ? 0 : undefined}>
+    <div ref={viewport} className="relative scroll-x" role="region" aria-label={label} tabIndex={overflow ? 0 : undefined}>
       <table aria-label={label} className={cn("w-full border-collapse text-left", className)} style={minWidth ? { minWidth } : undefined}>{children}</table>
     </div>
   );

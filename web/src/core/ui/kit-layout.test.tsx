@@ -39,11 +39,11 @@ test("a wide table without controls can be reached by keyboard to scroll", async
   } finally { width.mockRestore(); viewportWidth.mockRestore(); }
 });
 
-test("a table that fits has no extra Tab stop or named region", async () => {
+test("a table that fits keeps its named region without an extra Tab stop", async () => {
   wrap(<Table label="Bills"><tbody><Tr><Td><Button>Open bill</Button></Td></Tr></tbody></Table>);
   await userEvent.tab();
   expect(screen.getByRole("button", { name: "Open bill" })).toHaveFocus();
-  expect(screen.queryByRole("region", { name: "Bills" })).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Bills" })).not.toHaveAttribute("tabindex");
 });
 
 test("a table's keyboard scroll region follows viewport and content resizing", () => {
@@ -68,7 +68,7 @@ test("a table's keyboard scroll region follows viewport and content resizing", (
     viewportWidth = 480;
     act(() => observed.get(viewport)?.());
     expect(viewport).not.toHaveAttribute("tabindex", "0");
-    expect(screen.queryByRole("region", { name: "Bills" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Bills" })).not.toHaveAttribute("tabindex");
     contentWidth = 720;
     act(() => observed.get(table)?.());
     expect(viewport).toHaveAttribute("tabindex", "0");

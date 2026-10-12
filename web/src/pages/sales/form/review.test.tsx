@@ -34,7 +34,9 @@ test("Check and save shows exactly what will be saved; How was it paid? comes fi
   const user = fakeToday();
   const { calls, router, dialog } = await review(user);
   expect(dialog).toHaveTextContent("This is exactly what will be saved, to the paisa. Nothing on it is rounded.");
-  expect(within(dialog).getByRole("table", { name: "Items that will be saved" })).toHaveTextContent("Gold Pendant 22K");
+  const items = within(dialog).getByRole("region", { name: "Items that will be saved" });
+  expect(items).not.toHaveAttribute("tabindex");
+  expect(within(items).getByRole("table", { name: "Items that will be saved" })).toHaveTextContent("Gold Pendant 22K");
   expect(dialog).toHaveTextContent("It goes into October's GSTR-1 as a B2C sale as KGH/2026-27/34.");
   expect(dialog).toHaveTextContent("Eighty Seven Thousand Eighty Three Rupees and Twenty One Paise Only");
   expect(dialog).toHaveTextContent("Paid byNot picked yet");

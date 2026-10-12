@@ -439,9 +439,18 @@ const FORM_STATES = [
       await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
       const { dialog, title } = await openReview(page, project);
       await dialog.getByRole("radio", { name: "Cash", exact: true }).click();
-      // Desktop tables now receive keyboard focus; the phone's control-free body is its scrolling region.
+      // A table keeps its name but takes a Tab stop only when it overflows (X-80).
+      // Otherwise the control-free dialog body is the keyboard scrolling region, on either screen.
       const body = dialog.locator("[data-dialog-body]");
-      const scrolling = dialog.getByRole("region", { name: project === "phone" ? title : "Items that will be saved", exact: true });
+      const items = dialog.getByRole("region", { name: "Items that will be saved", exact: true });
+      let wideItems = false;
+      if (project === "desktop") {
+        await expect(items).toBeVisible();
+        wideItems = await items.evaluate(el => el.scrollWidth > el.clientWidth);
+        if (wideItems) await expect(items).toHaveAttribute("tabindex", "0");
+        else await expect(items).not.toHaveAttribute("tabindex");
+      }
+      const scrolling = wideItems ? items : dialog.getByRole("region", { name: title, exact: true });
       await expect(scrolling).toBeVisible();
       await dialog.getByRole("button", { name: "Close", exact: true }).focus();
       await page.keyboard.press("Tab");
