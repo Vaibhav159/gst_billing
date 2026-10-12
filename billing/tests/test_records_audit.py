@@ -161,15 +161,17 @@ class AuditActionsTest(TestCase):
         self.assertEqual(response.data["holder"], {"id": holder.pk, "name": "Other firm", "short": "Kiran"})
 
     def test_sale_restore_names_the_amendment_in_a_previously_filed_month(self):
-        from types import SimpleNamespace
-        from unittest.mock import patch
+        from django.utils import timezone
+
+        from billing.models import FilingMonth
 
         business = firm()
         bill = sale(business, self.customer, "18", "2026-10-02")
         entry = AuditLog.objects.create(user=self.owner, action="created", entity="invoice", entity_id=bill.pk, entity_name=bill.invoice_number, snapshot=snapshot_of(bill))
         deletion = self.client.post(f"/api/audit/{entry.pk}/undo/").data["new_entry"]["id"]
-        with patch("billing.period_lock.month_status", create=True, return_value=SimpleNamespace(unlocked=True)):
-            rows = self.client.get("/api/audit/").data["results"]
+        FilingMonth.objects.create(business=business, year=2026, month=10, unlocked_at=timezone.now(),
+                                   unlocked_by=self.owner, unlock_reason="Correct a bill")
+        rows = self.client.get("/api/audit/").data["results"]
         row = next(row for row in rows if row["id"] == deletion)
         self.assertIn(" October 2026 was filed before and is open for a correction, so this change needs an amendment in the next return.", row["can"]["effect"])
 

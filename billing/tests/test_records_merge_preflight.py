@@ -5,6 +5,7 @@ from django.test import TestCase
 
 from billing.models import AuditLog, BinnedInvoice, Customer, FiledPeriod, Invoice, LineItem, SaleDraft
 from billing.services.bin import bin_bill
+from billing.services.purchase_bin import bin_purchase, purchase_bin_row
 from billing.tests.v3_helpers import buyer, client_for, firm, person, sale
 
 
@@ -169,12 +170,11 @@ class MergeReviewTests(TestCase):
 
     def test_a_binned_purchase_names_the_kept_supplier(self):
         source, target = buyer("Old Supplier"), buyer("Kept Supplier")
-        binned, _entry = bin_bill(sale(self.business, source, "PUR-9", "2026-09-12", kind="inward"), self.owner,
-                                  check_month=False)
-        binned.data["supplier"] = {"id": source.pk, "name": source.name, "gst_number": "", "state_code": "08",
-                                   "state_name": "RAJASTHAN", "city": ""}
-        binned.save(update_fields=["data"])
+        # 2A's real bin_purchase writes the supplier card the merge must rewrite.
+        binned = bin_purchase(sale(self.business, source, "PUR-9", "2026-09-12", kind="inward"), self.owner)
+        self.assertEqual(binned.data["supplier"]["id"], source.pk)
         self.assertEqual(self.merge(source, target).status_code, 200)
         binned.refresh_from_db()
         self.assertEqual((binned.customer_id, binned.data["supplier"]["id"], binned.data["supplier"]["name"]),
                          (target.pk, target.pk, "Kept Supplier"))
+        self.assertEqual(purchase_bin_row(binned)["supplier"]["name"], "Kept Supplier")

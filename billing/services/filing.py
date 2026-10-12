@@ -648,7 +648,8 @@ def month_stages(business_ids, months, today=None):
     for key, value in blockers.items():
         if stages.get(key) == "ready" and value["count"]:
             stages[key] = "blocked"
-    return {"stages": stages, "latest_gstr1": latest}
+    # The grouped blocker counts ride along so callers reuse them instead of re-running the checks (P5-3).
+    return {"stages": stages, "latest_gstr1": latest, "blockers": blockers}
 
 
 def year_filings(business_ids, fy):

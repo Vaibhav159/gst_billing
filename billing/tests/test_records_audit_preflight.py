@@ -44,15 +44,20 @@ class AuditPageBudgetTest(TestCase):
         self.assertFalse(any('"billing_auditlog"."snapshot",' in q["sql"] for q in queries))
         self.assertFalse(any(', "billing_binnedinvoice"."data",' in q["sql"] for q in queries))
 
-    def test_month_status_is_shared_without_running_filing_checks(self):
-        status = SimpleNamespace(unlocked=True, sales_closed=False, credit_closed=False)
-        with patch("billing.period_lock.month_status", create=True, return_value=status) as reader:
+    def test_unlocked_month_comes_from_grouped_reads_without_filing_checks(self):
+        from django.utils import timezone
+
+        from billing.models import FilingMonth
+        FilingMonth.objects.create(business=self.business, year=2026, month=9, unlocked_at=timezone.now(),
+                                   unlocked_by=self.owner, unlock_reason="Correct a bill")
+        with patch("billing.period_lock.month_status", side_effect=AssertionError("Read every month in one go")), \
+                patch("billing.services.gst_checks.gstr1_blockers", side_effect=AssertionError("No GST checks")):
             response = self.client.get("/api/audit/")
         self.assertEqual(response.status_code, 200)
-        reader.assert_called_once_with(self.business.pk, 2026, 9, include_checks=False)
         restored = [row for row in response.data["results"] if row["can"]["kind"] == "restore"]
         self.assertEqual(len(restored), 6)
         self.assertTrue(all("needs an amendment" in row["can"]["effect"] for row in restored))
+        self.assertTrue(all(row["can"]["disabled"] == "" for row in restored))
 
     def test_restored_capture_reconnects_its_earlier_discarded_event(self):
         from django.utils import timezone
@@ -61,19 +66,20 @@ class AuditPageBudgetTest(TestCase):
         entry = AuditLog(action="discarded", entity="capture", entity_id=17, entity_name="Supplier photo",
                          user=self.owner, timestamp=timezone.now())
         entry.used = False
-        page = SimpleNamespace(records={}, bins={}, captures={17}, capture_has_discarded=True)
+        page = SimpleNamespace(records={}, bins={}, captures={17})
         self.assertEqual(entry_row(entry, page=page)["link"], "/purchases/inbox/17")
-        # Before 2A's discard column exists, the legacy action fallback still applies.
-        page.capture_has_discarded = False
+        page.captures = set()
         self.assertIsNone(entry_row(entry, page=page)["link"])
 
     def test_closed_month_uses_the_cached_state_for_both_action_words(self):
-        status = SimpleNamespace(unlocked=None, sales_closed=True, credit_closed=False, stage="gstr1")
-        with patch("billing.period_lock.month_status", create=True, return_value=status) as reader, \
+        from datetime import date
+
+        from billing.models import FilingRecord
+        FilingRecord.objects.create(business=self.business, year=2026, month=9, kind="gstr1", filed_on=date(2026, 10, 11))
+        with patch("billing.period_lock.month_status", side_effect=AssertionError("Read every month in one go")), \
                 patch("billing.period_lock.assert_sales_open", side_effect=AssertionError("Do not re-read a cached month")):
             response = self.client.get("/api/audit/")
         self.assertEqual(response.status_code, 200)
-        reader.assert_called_once_with(self.business.pk, 2026, 9, include_checks=False)
         rows = [row for row in response.data["results"] if row["entity"] == "invoice"]
         self.assertEqual(len(rows), 12)
         for row in rows:

@@ -1,28 +1,21 @@
-"""P4-7/X-40: run the Audit budget against real 3A closed-month state at landing."""
+"""P4-7: the Audit budget holds against real 3A closed-month state."""
 from datetime import date
 from unittest.mock import patch
 
-from django.apps import apps
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 
 from billing import period_lock
-from billing.models import FiledPeriod
+from billing.models import FiledPeriod, FilingRecord
 from billing.tests import test_records_audit_preflight as audit_fixture
 
 
 class AuditFilingPageBudgetTest(TestCase):
     def setUp(self):
-        try:
-            self.filing_model = apps.get_model("billing", "FilingRecord")
-        except LookupError:
-            self.skipTest("X-40: the real closed-month Audit budget requires 3A filing models.")
-        if not hasattr(period_lock, "month_status"):
-            self.skipTest("X-40: the real closed-month Audit budget requires 3A month_status.")
         # Reuse the 30-row fixture without inheriting and collecting its tests again.
         audit_fixture.AuditPageBudgetTest.setUp(self)
-        self.filing_model.objects.create(
+        FilingRecord.objects.create(
             business=self.business, year=2026, month=9, kind="gstr1", filed_on=date(2026, 10, 1),
         )
 
@@ -38,7 +31,7 @@ class AuditFilingPageBudgetTest(TestCase):
         self.assertEqual(len(response.data["results"]), 30)
         self.assertEqual(response.data["counts"]["all"], 30)
         self.assertLessEqual(len(queries), 15, "\n".join(query["sql"] for query in queries))
-        reader.assert_called_once_with(self.business.pk, 2026, 9, include_checks=False)
+        reader.assert_not_called()
         guard.assert_not_called()
         invoices = [row for row in response.data["results"] if row["entity"] == "invoice"]
         self.assertEqual(len(invoices), 12)
@@ -60,7 +53,7 @@ class AuditFilingPageBudgetTest(TestCase):
         self.assert_closed_page("gstr1")
 
     def test_real_filed_and_locked_month_keeps_the_mixed_audit_page_budget(self):
-        self.filing_model.objects.create(
+        FilingRecord.objects.create(
             business=self.business, year=2026, month=9, kind="gstr3b", filed_on=date(2026, 10, 2),
         )
         FiledPeriod.objects.create(business=self.business, year=2026, month=9)

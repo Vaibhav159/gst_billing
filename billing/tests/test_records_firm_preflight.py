@@ -1,7 +1,6 @@
 """P4-1/P4-2/P4-15: grouped filing carrier and immutable old bill identity."""
 from datetime import date
-from types import ModuleType
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from django.db.models import QuerySet
 from django.test import TestCase
@@ -22,20 +21,20 @@ class FirmPreflightTests(TestCase):
         self.customer = buyer()
 
     @patch("billing.services.firms.timezone.localdate", return_value=date(2026, 10, 8))
-    def test_optional_grouped_blockers_are_reused(self, today):
+    def test_grouped_blockers_from_month_stages_are_reused(self, today):
+        from billing.services import gst_checks
         from billing.services.firms import read_filings
 
         key = (self.business.pk, "2026-09")
-        filing, checks = ModuleType("billing.services.filing"), ModuleType("billing.services.gst_checks")
-        filing.month_stages = Mock(return_value={
-            "stages": {key: "blocked"}, "latest_gstr1": {self.business.pk: None},
-            "blockers": {key: {"count": 1, "first_two": ["A line needs its HSN"]}},
-        })
-        checks.gstr1_blockers = Mock(side_effect=AssertionError("Already read by the grouped helper"))
-        with patch.dict("sys.modules", {filing.__name__: filing, checks.__name__: checks}):
+        Invoice.objects.create(business=self.business, customer=self.customer, invoice_number="EMPTY",
+                               invoice_date=date(2026, 9, 1), type_of_invoice="outward")
+        with patch("billing.services.gst_checks.gstr1_blockers", wraps=gst_checks.gstr1_blockers) as checks:
             result = read_filings([self.business.pk], [key[1]])
-        self.assertEqual(result["blockers"], {key: "A line needs its HSN"})
-        checks.gstr1_blockers.assert_not_called()
+        # 3A's month_stages runs the grouped checks once; 4A reuses its answer for the words.
+        checks.assert_called_once_with([self.business.pk], ["2026-09"])
+        self.assertEqual(result["months"][key]["state"], "blocked")
+        self.assertEqual(result["blockers"], {key: gst_checks.gstr1_blockers(*checks.call_args.args)[key]["first_two"][0]})
+        self.assertTrue(result["blockers"][key])
 
     def test_v2_firm_undo_freezes_current_identity_before_reverting(self):
         before = snapshot_of(self.business)

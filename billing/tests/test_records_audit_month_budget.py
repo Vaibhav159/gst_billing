@@ -1,6 +1,5 @@
 """P4-7: legacy Audit month reads stay bounded across different months."""
 from datetime import date
-from unittest import skipUnless
 from unittest.mock import patch
 
 from django.db import connection
@@ -34,18 +33,17 @@ class AuditMonthBudgetTests(TestCase):
         return response, queries
 
     def test_thirty_distinct_open_months_use_one_legacy_period_read(self):
-        with patch("billing.period_lock.month_status", None, create=True):
-            response, queries = self.measured_page()
+        response, queries = self.measured_page()
         self.assertTrue(all(row["can"]["disabled"] == "" for row in response.data["results"]))
         reads = [query for query in queries if 'FROM "billing_filedperiod"' in query["sql"]]
+        # One grouped month read, however many months.
         self.assertEqual(len(reads), 1)
 
     def test_thirty_distinct_closed_months_keep_exact_words_without_guard_reads(self):
         FiledPeriod.objects.bulk_create([
             FiledPeriod(business=self.business, year=day.year, month=day.month) for day in self.days
         ])
-        with patch("billing.period_lock.month_status", None, create=True), \
-                patch("billing.period_lock.assert_sales_open", wraps=period_lock.assert_sales_open) as guard:
+        with patch("billing.period_lock.assert_sales_open", wraps=period_lock.assert_sales_open) as guard:
             response, queries = self.measured_page()
         expected = {
             f"{day:%B %Y} is filed and locked for {self.business.name}, so its bills can't be deleted. "
@@ -57,8 +55,6 @@ class AuditMonthBudgetTests(TestCase):
         reads = [query for query in queries if 'FROM "billing_filedperiod"' in query["sql"]]
         self.assertEqual(len(reads), 1)
 
-    @skipUnless(hasattr(period_lock, "month_status"),
-                "X-40: real 3A varied-month budget needs its grouped status integration after landing")
     def test_real_three_a_thirty_distinct_months_remain_bounded(self):
         # Deliberately uses the real helper: a fake constant state cannot prove its query budget.
         response, _queries = self.measured_page()

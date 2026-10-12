@@ -34,10 +34,6 @@ WALKIN_WORDS = "The walk-in record can't be merged. Put each bill in the buyer's
 PICK_TARGET = "Pick the customer to keep."
 
 
-def _has_column(model, name):
-    return any(field.name == name for field in model._meta.concrete_fields)
-
-
 def target_id(raw, source_id):
     if isinstance(raw, bool) or not isinstance(raw, (str, int)):
         raise ValidationError({"into": [PICK_TARGET]})
@@ -68,7 +64,7 @@ def duplicates():
 
 def _pair(source_id, into, lock=False):
     into = target_id(into, source_id)
-    fields = (*CUSTOMER_FIELDS, *(("is_supplier",) if _has_column(Customer, "is_supplier") else ()))
+    fields = (*CUSTOMER_FIELDS, "is_supplier")
     customers = uncached(Customer).filter(pk__in=(source_id, into)).only(*fields).order_by("pk")
     if lock:
         customers = customers.select_for_update()
@@ -79,7 +75,7 @@ def _pair(source_id, into, lock=False):
 
 
 def _bills(source, lock=False):
-    fields = (*BILL_FIELDS, *(("itc_month",) if _has_column(Invoice, "itc_month") else ()))
+    fields = (*BILL_FIELDS, "itc_month")
     rows = uncached(Invoice).filter(customer=source).select_related("business").only(*fields).order_by("invoice_date", "pk")
     if lock:
         rows = rows.select_for_update(of=("self",))
@@ -142,23 +138,9 @@ def _closed_bills(bills):
         month = bill.invoice_date.replace(day=1)
         try:
             if bill.type_of_invoice == INVOICE_TYPE_INWARD:
-                if _has_column(Invoice, "itc_month"):
-                    from billing.credit import credit_month_of
-                    month = credit_month_of(bill)
-                elif month < date(2025, 4, 1):
-                    month = None
-                guard = getattr(period_lock, "assert_purchase_open", None)
-                if guard is not None:
-                    guard(bill.business_id, month, "edit")
-                elif month is not None:
-                    # ponytail: part 2 supplies the credit guard; its stated fallback is FiledPeriod, not GSTR-1.
-                    period = period_lock.locked_period_or_none(bill.business_id, month)
-                    if period:
-                        label = month.strftime("%B %Y")
-                        raise Refusal(
-                            f"{label} is filed and locked for {period.business.name}, so its bills can't move to another customer. "
-                            f"Have the owner unlock {label} in GST returns first.", "month_closed",
-                            locked_period={"id": period.pk, "business": bill.business_id, "year": month.year, "month": month.month})
+                from billing.credit import credit_month_of
+                month = credit_month_of(bill)
+                period_lock.assert_purchase_open(bill.business_id, month, "edit")
             else:
                 assert_sales_open(bill.business_id, bill.invoice_date, "merge")
         except Refusal as refusal:
@@ -312,7 +294,7 @@ def merge_customers(source_id, into, user):
             draft.data = {**draft.data, "customer": {**draft.data["customer"], "id": target.pk, "name": target.name}}
             draft.save(update_fields=["data", "updated_at"])
         target.businesses.add(*(row["id"] for row in preview["firms_added"]))
-        if _has_column(Customer, "is_supplier") and source.is_supplier and not target.is_supplier:
+        if source.is_supplier and not target.is_supplier:
             target.is_supplier = True
             target.save(update_fields=["is_supplier", "updated_at"])
         moved_sales = len(bills) - preview["purchases"]

@@ -1,7 +1,6 @@
 """Firm records: narrow uncached reads, legal identity freezing and print settings."""
 from datetime import date
 
-from django.apps import apps
 from django.db.models import Count, F, Q, Sum, Window
 from django.db.models.functions import Round, RowNumber
 from django.utils import timezone
@@ -15,10 +14,14 @@ from billing.models import (
     BinnedInvoice,
     Business,
     FiledPeriod,
+    FilingMonth,
+    FilingRecord,
     Invoice,
     InwardCapture,
     ITCReclaimLedger,
     LineItem,
+    OpeningCredit,
+    ReturnDownload,
     SaleDraft,
     SavedDraft,
 )
@@ -83,48 +86,25 @@ def firm_numbers(business):
     return {"fy": fy_label(fy), "last": ref, "next": following, "full_number": full_number_on(business, today)}
 
 
-def optional_filing_model(name):
-    """Only absent part-3 models are optional; an installed model's database errors remain visible."""
-    try:
-        return apps.get_model("billing", name)
-    except LookupError:
-        return None
-
-
 def filing_dates(ids, months):
     """Narrow filing dates for the requested grid and each firm's latest filed month."""
-    model = optional_filing_model("FilingRecord")
-    if model is None or not months:
+    if not months:
         return {}
     where = Q()
     for label in months:
         year, month = map(int, label.split("-"))
         where |= Q(year=year, month=month)
     return {(pk, f"{year}-{month:02d}", kind): day.isoformat() for pk, year, month, kind, day in
-            uncached(model).filter(where, business_id__in=ids, kind__in=("gstr1", "gstr3b"))
+            uncached(FilingRecord).filter(where, business_id__in=ids, kind__in=("gstr1", "gstr3b"))
             .values_list("business_id", "year", "month", "kind", "filed_on")}
 
 
 def read_filings(ids, months):
     """One bulk stage call, one narrow date query and one grouped blocker call; no monthly query loop."""
-    from importlib import import_module
-    today = timezone.localdate()
+    from billing.services.filing import month_stages
     months = sorted(set(months))
-    grouped_blockers = None
-    try:
-        filing = import_module("billing.services.filing")
-    except ModuleNotFoundError as missing:
-        if missing.name != "billing.services.filing":
-            raise
-        # ponytail: only the absence of part 3 selects its explicitly approved v2-lock fallback.
-        closed = set(uncached(FiledPeriod).filter(business_id__in=ids).values_list("business_id", "year", "month"))
-        latest = {pk: max((f"{year}-{month:02d}" for firm, year, month in closed if firm == pk), default=None) for pk in ids}
-        stages = {(pk, label): "filed" if (pk, *map(int, label.split("-"))) in closed else "open"
-                  for pk in ids for label in months}
-    else:
-        result = filing.month_stages(ids, months, today=today)
-        stages, latest = result["stages"], result["latest_gstr1"]
-        grouped_blockers = result.get("blockers")
+    result = month_stages(ids, months, today=timezone.localdate())
+    stages, latest = result["stages"], result["latest_gstr1"]
     dates = filing_dates(ids, set(months) | {label for label in latest.values() if label})
     def dates_for(pk, label):
         return {"month": label, "gstr1_filed_on": dates.get((pk, label, "gstr1")),
@@ -133,10 +113,7 @@ def read_filings(ids, months):
     blocked = [(pk, label) for (pk, label), state in stages.items() if state == "blocked"]
     blockers = {}
     if blocked:
-        if grouped_blockers is None:
-            from billing.services.gst_checks import gstr1_blockers
-            grouped_blockers = gstr1_blockers(sorted({pk for pk, _ in blocked}), sorted({label for _, label in blocked}))
-        blockers = {key: (grouped_blockers.get(key, {}).get("first_two") or [""])[0] for key in blocked}
+        blockers = {key: (result["blockers"].get(key, {}).get("first_two") or [""])[0] for key in blocked}
     return {"months": shown, "last": {pk: dates_for(pk, label) if label else None for pk, label in latest.items()},
             "blockers": blockers}
 
@@ -186,13 +163,9 @@ def firm_uses(business):
         sales=Count("pk", filter=Q(type_of_invoice=INVOICE_TYPE_OUTWARD) & ~Q(status=BILL_CANCELLED)),
         cancelled=Count("pk", filter=Q(type_of_invoice=INVOICE_TYPE_OUTWARD, status=BILL_CANCELLED)),
         purchases=Count("pk", filter=Q(type_of_invoice=INVOICE_TYPE_INWARD)))
-    retained = {}
-    for key, name in (("filing_records", "FilingRecord"), ("filing_months", "FilingMonth"), ("opening_credits", "OpeningCredit")):
-        model = optional_filing_model(name)
-        retained[key] = uncached(model).filter(business_id=business.pk).count() if model is not None else 0
-    downloads = optional_filing_model("ReturnDownload")
-    if downloads is not None:
-        retained["filing_records"] += uncached(downloads).filter(business_id=business.pk).count()
+    retained = {key: sum(uncached(model).filter(business_id=business.pk).count() for model in models)
+                for key, models in (("filing_records", (FilingRecord, ReturnDownload)), ("filing_months", (FilingMonth,)),
+                                    ("opening_credits", (OpeningCredit,)))}
     retained["opening_credits"] += uncached(ITCReclaimLedger).filter(business_id=business.pk).count()
     retained["filed_periods"] = uncached(FiledPeriod).filter(business_id=business.pk).count()
     return {**counts, **retained, "bin": BinnedInvoice.objects.live().filter(business=business).count(),

@@ -14,6 +14,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from billing import period_lock
 from billing.api.customer_merge import CustomerDuplicatesView, CustomerMergeView
 from billing.models import AuditLog, Customer, FiledPeriod, Invoice, LineItem, SaleDraft
 from billing.refusals import Refusal
@@ -161,63 +162,44 @@ class MergeTests(TestCase):
 
     def test_part2_purchase_guard_is_the_integration_point(self):
         purchase = sale(self.firm, self.source, "P-1", "2026-09-12", kind="inward")
-
-        def purchase_guard(business, month, action):
-            # The published purchase guard indexes CREDIT_CLOSED_WORDS[action].
-            words = {"edit": "Credit month is filed"}[action]
-            raise Refusal(words, "month_closed", stage="filed",
-                          locked_period={"id": 17, "business": business, "year": month.year, "month": month.month})
-
-        with patch("billing.period_lock.assert_purchase_open", create=True, side_effect=purchase_guard) as guard:
+        closed = FiledPeriod.objects.create(business=self.firm, year=2026, month=9)
+        with patch("billing.period_lock.assert_purchase_open", wraps=period_lock.assert_purchase_open) as guard:
             self.assertEqual(self.preview().data["refusal"]["months"], ["2026-09"])
             response = self.merge()
             self.assertEqual(response.status_code, 409)
             self.assertEqual(response.data["detail"],
                              "September 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't move to another customer. "
                              "Have the owner unlock September 2026 in GST returns first.")
-            self.assertEqual(response.data["stage"], "filed")
-            self.assertEqual(response.data["locked_period"]["id"], 17)
+            self.assertEqual(response.data["locked_period"]["id"], closed.pk)
             guard.assert_called_with(self.firm.pk, date(2026, 9, 1), "edit")
         purchase.refresh_from_db()
         self.assertEqual(purchase.customer_id, self.source.pk)
         self.assertEqual(AuditLog.objects.count(), 0)
 
-    def test_preledger_purchase_fallback_ignores_legacy_lock_and_keeps_money(self):
+    def test_preledger_purchase_ignores_legacy_lock_and_keeps_money(self):
         purchase = sale(self.firm, self.source, "P-OLD", "2025-03-31", kind="inward")
         FiledPeriod.objects.create(business=self.firm, year=2025, month=3)
         before = list(LineItem.objects.filter(invoice=purchase).values_list("quantity", "rate", "cgst", "sgst", "igst", "amount"))
         total = purchase.total_amount
-        with patch("billing.services.customer_merge._has_column", return_value=False), \
-                patch("billing.period_lock.assert_purchase_open", None, create=True), \
-                patch("billing.period_lock.locked_period_or_none", side_effect=AssertionError("No credit month to lock")):
-            self.assertTrue(self.preview().data["can_merge"])
-            self.assertEqual(self.merge().status_code, 200)
+        self.assertTrue(self.preview().data["can_merge"])
+        self.assertEqual(self.merge().status_code, 200)
         purchase.refresh_from_db()
         self.assertEqual((purchase.customer_id, purchase.total_amount), (self.target.pk, total))
         self.assertEqual(list(LineItem.objects.filter(invoice=purchase).values_list("quantity", "rate", "cgst", "sgst", "igst", "amount")), before)
 
-    def test_purchase_fallback_starts_with_april_2025(self):
+    def test_purchase_credit_months_start_with_april_2025(self):
         sale(self.firm, self.source, "P-FIRST", "2025-04-01", kind="inward")
         FiledPeriod.objects.create(business=self.firm, year=2025, month=4)
-        with patch("billing.services.customer_merge._has_column", return_value=False), \
-                patch("billing.period_lock.assert_purchase_open", None, create=True):
-            self.assertEqual(self.preview().data["refusal"]["months"], ["2025-04"])
-            self.assertEqual(self.merge().status_code, 409)
+        self.assertEqual(self.preview().data["refusal"]["months"], ["2025-04"])
+        self.assertEqual(self.merge().status_code, 409)
 
     def test_purchase_guard_receives_no_month_before_ledger(self):
         sale(self.firm, self.source, "P-OLD", "2025-03-31", kind="inward")
-
-        def purchase_guard(business, month, action):
-            if month is not None:
-                raise Refusal("This month is filed", "month_closed")
-
-        with patch("billing.services.customer_merge._has_column", return_value=False), \
-                patch("billing.period_lock.assert_purchase_open", create=True, side_effect=purchase_guard) as guard:
+        with patch("billing.period_lock.assert_purchase_open", wraps=period_lock.assert_purchase_open) as guard:
             self.assertTrue(self.preview().data["can_merge"])
             self.assertEqual(self.merge().status_code, 200)
             guard.assert_called_with(self.firm.pk, None, "edit")
 
-    @skipUnless(hasattr(Invoice, "itc_month") and hasattr(Customer, "is_supplier"), "Requires part 2A purchase fields")
     def test_part2_credit_month_and_supplier_mark_survive_merge(self):
         self.source.is_supplier = True
         self.source.save(update_fields=["is_supplier"])
@@ -234,7 +216,6 @@ class MergeTests(TestCase):
         self.assertEqual(purchase.customer_id, self.target.pk)
         self.assertEqual(purchase.itc_month, date(2026, 9, 1))
 
-    @skipUnless(hasattr(Invoice, "itc_month") and hasattr(Customer, "is_supplier"), "Requires part 2A purchase fields")
     def test_part2_null_credit_month_obeys_ledger_floor_without_changing_it(self):
         old = sale(self.firm, self.source, "P-OLD", "2025-03-31", kind="inward", itc_month=None)
         current = sale(self.firm, self.source, "P-FIRST", "2025-04-01", kind="inward", itc_month=None)

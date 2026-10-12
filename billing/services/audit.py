@@ -189,12 +189,7 @@ def event_words(entry, kind, target_present):
 
 
 def capture_present(entry):
-    rows = uncached(InwardCapture).filter(pk=entry.entity_id)
-    if any(field.name == "discarded_at" for field in InwardCapture._meta.concrete_fields):
-        rows = rows.filter(discarded_at__isnull=True)
-    elif entry.action == "discarded":
-        return False
-    return rows.exists()
+    return uncached(InwardCapture).filter(pk=entry.entity_id, discarded_at__isnull=True).exists()
 
 
 def changed_fields(entry, obj):
@@ -239,8 +234,16 @@ def uses_for(obj):
 
 def use_counts(entity):
     """Correlated grouped counts stay in the page's one record query per model."""
-    from billing.models import FiledPeriod, ITCReclaimLedger, SaleDraft, SavedDraft
-    from billing.services.firms import optional_filing_model
+    from billing.models import (
+        FiledPeriod,
+        FilingMonth,
+        FilingRecord,
+        ITCReclaimLedger,
+        OpeningCredit,
+        ReturnDownload,
+        SaleDraft,
+        SavedDraft,
+    )
 
     key = "business_id" if entity == "business" else "customer_id"
 
@@ -260,19 +263,16 @@ def use_counts(entity):
     else:
         counts.update(drafts=count(uncached(SaleDraft).exclude(pk__in=SavedDraft.objects.values("pk"))),
                       captures=count(uncached(InwardCapture)), filed_periods=count(uncached(FiledPeriod)),
-                      opening_credits=count(uncached(ITCReclaimLedger)))
-        from django.db.models import Value
-        for name, model_name in (("filing_records", "FilingRecord"), ("filing_months", "FilingMonth"),
-                                 ("opening_credits", "OpeningCredit"), ("filing_records", "ReturnDownload")):
-            model = optional_filing_model(model_name)
-            counts[name] = counts.get(name, Value(0)) + (count(uncached(model)) if model else Value(0))
+                      opening_credits=count(uncached(ITCReclaimLedger)) + count(uncached(OpeningCredit)),
+                      filing_records=count(uncached(FilingRecord)) + count(uncached(ReturnDownload)),
+                      filing_months=count(uncached(FilingMonth)))
     return {"use_" + name: expression for name, expression in counts.items()}
 
 
 class AuditPage:
     """Request-local records, counts and month checks; never cache write decisions."""
     def __init__(self, entries):
-        self.records, self.bins, self.uses, self.statuses, self.refusals = {}, {}, {}, {}, {}
+        self.records, self.bins, self.uses, self.refusals = {}, {}, {}, {}
         for entity, model in MODEL_MAP.items():
             selected = [entry for entry in entries if entry.entity == entity]
             if not selected:
@@ -301,75 +301,66 @@ class AuditPage:
                 restore_credit_month=F("data__invoice__itc_month"))
             self.bins = {row.audit_log_id: row for row in rows}
         captures = [e.entity_id for e in entries if e.entity == "capture"]
-        rows = uncached(InwardCapture).filter(pk__in=captures)
-        self.capture_has_discarded = any(f.name == "discarded_at" for f in InwardCapture._meta.concrete_fields)
-        if self.capture_has_discarded:
-            rows = rows.filter(discarded_at__isnull=True)
+        rows = uncached(InwardCapture).filter(pk__in=captures, discarded_at__isnull=True)
         self.captures = set(rows.values_list("pk", flat=True)) if captures else set()
-        from billing import period_lock
+        from django.db.models import CharField, Value
+
+        from billing.models import FiledPeriod, FilingMonth, FilingRecord
         business_ids = {obj.business_id for (entity, _pk), obj in self.records.items() if entity == "invoice"}
         business_ids.update(row.business_id for row in self.bins.values())
-        self.legacy_periods = None
         self.firm_names = {pk: obj.name for (entity, pk), obj in self.records.items() if entity == "business"}
-        if getattr(period_lock, "month_status", None):
-            missing_firms = business_ids - self.firm_names.keys()
-            if missing_firms:
-                self.firm_names.update(uncached(Business).filter(pk__in=missing_firms).values_list("pk", "name"))
-        else:
-            from billing.models import FiledPeriod
-            self.legacy_periods = {(pk, year, month): name for pk, year, month, name in
-                                   uncached(FiledPeriod).filter(business_id__in=business_ids)
-                                   .values_list("business_id", "year", "month", "business__name")}
+        missing_firms = business_ids - self.firm_names.keys()
+        if missing_firms:
+            self.firm_names.update(uncached(Business).filter(pk__in=missing_firms).values_list("pk", "name"))
+        # One grouped read answers every row's month, however many months the page spans (P4-7): the v2/GSTR-3B
+        # locks that close credit, filed GSTR-1s and open unlocks. Sales close as period_lock.closed_months says.
+        rows = {"lock": set(), "gstr1": set(), "unlocked": set()}
+        if business_ids:
+            def tagged(query, kind):
+                return query.filter(business_id__in=business_ids).annotate(
+                    tag=Value(kind, output_field=CharField())).order_by().values_list("business_id", "year", "month", "tag")
+            locks = tagged(uncached(FiledPeriod), "lock")
+            filed = tagged(uncached(FilingRecord).filter(kind="gstr1"), "gstr1")
+            unlocked = tagged(uncached(FilingMonth).filter(unlocked_at__isnull=False), "unlocked")
+            for business_id, year, month, tag in locks.union(filed, unlocked, all=True):
+                rows[tag].add((business_id, year, month))
+        self.locks, self.unlocked = rows["lock"], rows["unlocked"]
+        self.sales_closed = self.locks | (rows["gstr1"] - self.unlocked)
 
-    def status(self, business_id, day):
-        from billing import period_lock
-        key = (business_id, day.year, day.month)
-        if key not in self.statuses:
-            reader = getattr(period_lock, "month_status", None)
-            self.statuses[key] = reader(*key, include_checks=False) if reader else None
-        return self.statuses[key]
+    def unlocked_month(self, business_id, day):
+        return (business_id, day.year, day.month) in self.unlocked
 
-    def refusal(self, business_id, day, action, purchase=False):
-        from billing.period_lock import assert_sales_open
-        if day is None:
-            return ""
-        key = (business_id, day.year, day.month, action, purchase)
+    def refusal(self, business_id, day, action, purchase=False, legacy_days=()):
+        key = (business_id, day and (day.year, day.month), action, purchase,
+               tuple((legacy.year, legacy.month) for legacy in legacy_days))
         if key not in self.refusals:
-            self.refusals[key] = ""
-            if self.legacy_periods is not None and not purchase:
-                name = self.legacy_periods.get((business_id, day.year, day.month))
-                if name is not None:
-                    from billing.period_lock import CLOSED_WORDS
-                    month = day.strftime("%B %Y")
-                    self.refusals[key] = (
-                        f"{month} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
-                        f"Have the owner unlock {month} in GST returns first.")
-                return self.refusals[key]
-            state = self.status(business_id, day)
-            if state is not None and not purchase:
-                if getattr(state, "sales_closed", False):
-                    from billing.period_lock import CLOSED_WORDS
-                    month, name = day.strftime("%B %Y"), self.firm_names.get(business_id, "")
-                    # The shared guard's published words, using the state already read above.
-                    if state.stage == "gstr1":
-                        self.refusals[key] = (
-                            f"{month}'s GSTR-1 is filed for {name}, so {CLOSED_WORDS[action]}. "
-                            f"Have the owner unlock {month}'s sales bills in GST returns first.")
-                    else:
-                        self.refusals[key] = (
-                            f"{month} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
-                            f"Have the owner unlock {month} in GST returns first.")
-                return self.refusals[key]
-            if state is None or getattr(state, "credit_closed" if purchase else "sales_closed", True):
-                try:
-                    if purchase:
-                        from billing.period_lock import assert_purchase_open
+            words = ""
+            if purchase:
+                if day is not None and (business_id, day.year, day.month) in self.locks:
+                    from billing.period_lock import assert_purchase_open
+                    try:
                         assert_purchase_open(business_id, day, action)
-                    else:
-                        assert_sales_open(business_id, day, action)
-                except Refusal as refused:
-                    self.refusals[key] = refused.detail["detail"]
+                    except Refusal as refused:
+                        words = refused.detail["detail"]
+                locked = [legacy for legacy in legacy_days if (business_id, legacy.year, legacy.month) in self.locks]
+                if not words and locked:
+                    words = closed_words(locked[0], self.firm_names.get(business_id, ""), action, gstr1=False)
+            elif day is not None and (business_id, day.year, day.month) in self.sales_closed:
+                # The shared guard's published words, from the state already read above.
+                words = closed_words(day, self.firm_names.get(business_id, ""), action,
+                                     gstr1=(business_id, day.year, day.month) not in self.locks)
+            self.refusals[key] = words
         return self.refusals[key]
+
+
+def closed_words(day, name, action, gstr1):
+    from billing.period_lock import CLOSED_WORDS
+    month = day.strftime("%B %Y")
+    if gstr1:
+        return (f"{month}'s GSTR-1 is filed for {name}, so {CLOSED_WORDS[action]}. "
+                f"Have the owner unlock {month}'s sales bills in GST returns first.")
+    return (f"{month} is filed and locked for {name}, so {CLOSED_WORDS[action]}. "
+            f"Have the owner unlock {month} in GST returns first.")
 
 
 def entry_rows(entries):
@@ -378,9 +369,13 @@ def entry_rows(entries):
 
 
 def invoice_guard(kind, obj, binned, purchase):
-    """The firm, guarded day and action one bill door checks; purchases use their credit month."""
+    """The firm, guarded day, action and v2-locked days one bill door checks; purchases use their credit month.
+
+    A purchase restore goes through 2A's Audit door, which also refuses a v2-locked bill month or credit month,
+    even for a pre-ledger bill with no credit month; those days are offered and enforced here too.
+    """
     record = binned if kind == "restore" else obj
-    day = record.invoice_date
+    day, legacy_days = record.invoice_date, ()
     if purchase:
         from datetime import date
         from types import SimpleNamespace
@@ -389,14 +384,21 @@ def invoice_guard(kind, obj, binned, purchase):
         raw = (binned.restore_credit_month if hasattr(binned, "restore_credit_month") else binned.data.get("invoice", {}).get("itc_month")) if kind == "restore" else getattr(obj, "itc_month", None)
         month = date.fromisoformat(raw) if isinstance(raw, str) else raw
         day = credit_month_of(SimpleNamespace(invoice_date=record.invoice_date, itc_month=month))
-    return record, day, "restore" if kind == "restore" else "delete"
+        if kind == "restore":
+            legacy_days = tuple(value for value in (record.invoice_date, month) if value)
+    return record, day, "restore" if kind == "restore" else "delete", legacy_days
 
 
 def assert_invoice_open(kind, obj, binned, purchase):
     # The same guard the list offers is enforced by the action, whatever the door's own service checks.
     from billing import period_lock
-    record, day, action = invoice_guard(kind, obj, binned, purchase)
+    record, day, action, legacy_days = invoice_guard(kind, obj, binned, purchase)
     (period_lock.assert_purchase_open if purchase else period_lock.assert_sales_open)(record.business_id, day, action)
+    for legacy in legacy_days:
+        period = period_lock.locked_period_or_none(record.business_id, legacy)
+        if period is not None:
+            raise Refusal(closed_words(legacy, period.business.name, action, gstr1=False), "month_closed", stage="filed",
+                          locked_period={"id": period.pk, "business": period.business_id, "year": period.year, "month": period.month})
 
 
 def available(entry, obj=None, binned=None, page=None):
@@ -412,13 +414,6 @@ def available(entry, obj=None, binned=None, page=None):
     if kind is None:
         return None
     purchase = entry.entity == "invoice" and kind_for(entry, obj, binned) == "purchases"
-    if purchase:
-        try:
-            from billing.credit import credit_month_of  # noqa: F401
-            from billing.period_lock import assert_purchase_open  # noqa: F401
-        except ImportError:
-            # X-40: the real purchase actions activate only after predecessor 2A lands.
-            return None
     disabled, effect = "", ""
     if kind == "revert":
         bad = changed_fields(entry, obj)
@@ -435,9 +430,9 @@ def available(entry, obj=None, binned=None, page=None):
         elif any(uses.values()):
             disabled = f"{entry.entity_name} is in use, so it can’t be deleted."
     if entry.entity == "invoice":
-        record, day, action = invoice_guard(kind, obj, binned, purchase)
+        record, day, action, legacy_days = invoice_guard(kind, obj, binned, purchase)
         if page:
-            disabled = page.refusal(record.business_id, day, action, purchase)
+            disabled = page.refusal(record.business_id, day, action, purchase, legacy_days)
         else:
             try:
                 assert_invoice_open(kind, obj, binned, purchase)
@@ -454,11 +449,10 @@ def available(entry, obj=None, binned=None, page=None):
             tax = sums(lines)["tax"] if lines else Decimal("0")
             firm_name = binned.restored_business_name if hasattr(binned, "restored_business_name") else binned.data.get("business_name", "")
             effect = f"{firm_name}'s {binned.invoice_date.strftime('%B')} sales go up by {inr(binned.total_amount)} and its tax by {inr(tax)}."
-            from billing import period_lock
-            status_reader = getattr(period_lock, "month_status", None)
-            state = page.status(binned.business_id, binned.invoice_date) if page else (
-                status_reader(binned.business_id, binned.invoice_date.year, binned.invoice_date.month, include_checks=False) if status_reader else None)
-            if state and state.unlocked:
+            from billing.period_lock import month_status
+            day = binned.invoice_date
+            if page.unlocked_month(binned.business_id, day) if page else month_status(
+                    binned.business_id, day.year, day.month, include_checks=False).unlocked:
                 effect += f" {binned.invoice_date.strftime('%B %Y')} was filed before and is open for a correction, so this change needs an amendment in the next return."
     label = {"undo": "Undo…", "revert": "Revert…", "restore": "Restore…"}[kind]
     hint = {"undo": "Shows what is removed before anything changes", "revert": "Shows what goes back before anything changes", "restore": "Shows what comes back before anything changes"}[kind]
@@ -469,7 +463,7 @@ def entry_row(entry, actions=True, page=None):
     obj = (page.records.get((entry.entity, entry.entity_id)) if page else record_for(entry)) if actions else None
     binned = (page.bins.get(entry.pk) if page else binned_for(entry)) if actions and entry.entity == "invoice" and obj is None else None
     kind = kind_for(entry, obj, binned)
-    present = (entry.entity_id in page.captures and (page.capture_has_discarded or entry.action != "discarded") if page else capture_present(entry)) if actions and entry.entity == "capture" else obj is not None
+    present = (entry.entity_id in page.captures if page else capture_present(entry)) if actions and entry.entity == "capture" else obj is not None
     words, link = event_words(entry, kind, present)
     result = ("restored" if entry.action == "deleted" else "reverted" if entry.action in {"updated", "reverted"} else "undone") if entry.used else None
     return {"id": entry.pk, "at": stamp(entry.timestamp), "by": person(entry.user), "action": entry.action, "entity": entry.entity,
