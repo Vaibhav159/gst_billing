@@ -44,7 +44,7 @@ export function PhoneShell({ children, easy, openPalette }: { children: ReactNod
       <nav aria-label="Tabs" className="phone-tabs shrink-0 border-t border-rule bg-bar grid grid-cols-5 pb-[env(safe-area-inset-bottom,0px)]">
         {tabs.map((t) => {
           const on = t.tab === cur;
-          const b = badgeState?.firm === firmId ? badgeState.badges[t.tab] : undefined;
+          const b = badgeState?.easy === easy && (easy || badgeState.firm === firmId) ? badgeState.badges[t.tab] : undefined;
           return (
             <Link key={t.to} to={t.to} replace aria-current={on ? "page" : undefined} aria-label={b ? `${t.label}, ${b.words}` : undefined}
               className={cn("flex flex-col items-center justify-center gap-1 min-h-[60px] transition-colors active:scale-[0.96] duration-150", easy ? "text-[14px] leading-[18px]" : "text-2xs", on ? "text-brand font-semibold" : "text-muted hover:text-fg2")}>
@@ -74,7 +74,7 @@ export function PhoneShell({ children, easy, openPalette }: { children: ReactNod
         </PhoneSearchContext.Provider></HideNavContext.Provider>
       </NotchClearedContext.Provider>
       <div ref={setBarSlot} className="shrink-0" />
-      {hide ? null : <>{tabsNav}<AttentionBoundary><Suspense fallback={null}><TabBadges firm={firmId} onBadges={setBadgeState} /></Suspense></AttentionBoundary></>}
+      {hide ? null : <>{tabsNav}<AttentionBoundary><Suspense fallback={null}><TabBadges easy={easy} firm={firmId} onBadges={setBadgeState} /></Suspense></AttentionBoundary></>}
     </div>
   );
 }
