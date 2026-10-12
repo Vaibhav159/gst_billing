@@ -52,14 +52,15 @@ function FiledBeforeRow({ firm }: { firm: FirmRow }) {
   };
   return <>
     <Row label="Filed before the app: up to" htmlFor={`set-filed-${firm.id}`} description={firm.name} stack>
-      <Input id={`set-filed-${firm.id}`} aria-label={`Filed before the app: up to · ${firm.name}`} type="month" min="2025-04" max={lastMonth}
+      <Input id={`set-filed-${firm.id}`} aria-label={`Filed before the app: up to · ${firm.name}`} aria-describedby={`set-filed-help-${firm.id}`} type="month" min="2025-04" max={lastMonth}
         value={upTo} disabled={save.isPending} invalid={Boolean(upTo) && !valid} onChange={(event) => {
           if (!active.current) { setUpTo(event.target.value); setCount(null); save.reset(); }
         }} />
       <Button disabled={!valid || save.isPending} aria-label={`Preview filed months for ${firm.name}`} onClick={ask}>Preview</Button>
+      <p id={`set-filed-help-${firm.id}`} className="w-full text-sm text-muted">Choose a completed month from April 2025 to {monthLabel(lastMonth, { long: true })}.</p>
       <span role="status" className="text-sm">{count === null ? null : count === 0 ? `No new months were marked for ${firm.name}.` : `${plural(count, "month")} marked as filed before the app for ${firm.name}.`}</span>
     </Row>
-    <ConfirmDialog open={preview !== null} onClose={() => setPreview(null)} onConfirm={commit} title="Mark months filed before the app?"
+    <ConfirmDialog open={preview !== null} onClose={() => { if (!active.current) setPreview(null); }} onConfirm={commit} title="Mark months filed before the app?"
       record={preview ? [["Firm", firm.name], ["Months", `April 2025 to ${monthLabel(preview, { long: true })}, inclusive`]] : null}
       confirmLabel={save.isError ? "Try again" : "Mark as filed"} confirmDisabled={!can("settings.edit")} busy={save.isPending}>
       <p>This marks eligible months as filed and locks them. Confirm only months already filed on the GST portal.</p>

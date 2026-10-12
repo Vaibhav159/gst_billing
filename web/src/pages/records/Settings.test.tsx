@@ -4,6 +4,7 @@ import { messageLength, messageProblem } from "./settingsModel";
 import { mount, VIEWER } from "@/pages/customers/testing";
 import { serve, type Answer, type Call, type Reply } from "@/test/server";
 import permissions from "@/core/auth/perms.json";
+import type { Action } from "@/core/auth/permissions";
 import { DEFAULT_SHARE_MESSAGE } from "@/core/sales/share";
 import { MORE_NAV } from "@/core/shell/nav";
 import { formServer, mountForm } from "@/pages/sales/form/testing";
@@ -228,6 +229,7 @@ test.each([false, true])("filed-before has one owner control per firm and previe
     expect(input).toHaveAttribute("min", "2025-04");
     expect(input).toHaveAttribute("max", "2026-09");
     expect(input).toHaveValue("");
+    expect(input).toHaveAccessibleDescription("Choose a completed month from April 2025 to September 2026.");
   }
   const dialog = await previewFiled(FIRMS[1]);
   expect(within(dialog).getByText(FIRMS[1].name)).toBeInTheDocument();
@@ -241,7 +243,7 @@ test.each([false, true])("filed-before has one owner control per firm and previe
 });
 
 test.each(["accountant", "staff", "viewer"] as const)("%s cannot mark months filed before the app", async (role) => {
-  const calls = server(); mountSettings({ me: { role, permissions: permissions.perms[role] } });
+  const calls = server(); mountSettings({ me: { role, permissions: permissions.perms[role] as Action[] } });
   await screen.findByLabelText("Copies to print");
   expect(screen.queryByLabelText(/Filed before the app: up to/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Preview filed months/ })).not.toBeInTheDocument();
@@ -285,8 +287,9 @@ test("filed-before keeps a pending confirmation open and sends duplicate presses
   mountSettings();
   const dialog = await previewFiled();
   const confirm = within(dialog).getByRole("button", { name: "Mark as filed" });
-  act(() => { fireEvent.click(confirm); fireEvent.click(confirm); });
+  act(() => { fireEvent.click(confirm); fireEvent.click(confirm); fireEvent.click(within(dialog).getByRole("button", { name: "Close" })); });
   await waitFor(() => expect(release).toBeDefined());
+  expect(screen.getByRole("dialog", { name: "Mark months filed before the app?" })).toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Saving…" })).toHaveAttribute("aria-busy", "true");
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
