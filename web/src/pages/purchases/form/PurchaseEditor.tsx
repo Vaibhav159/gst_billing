@@ -225,7 +225,7 @@ export function PurchaseEditor({ initial, original, read: initialRead, capture, 
 }
 function fieldId(key: string) { return ({ business: 'pf-firm', supplier: 'pf-supplier', invoice_number: 'pf-billno', invoice_date: 'pf-date', buyer_gstin: 'pf-buyer', itc_month: 'pf-credit' } as Record<string, string>)[key] ?? `pf-${key.replace(/\./g, '-')}`; }
 function PurchaseLine({ line, index, supplier, errors, disabled, noGstin, change, remove }: { line: FormLine; index: number; supplier: number; errors: Record<string, string>; disabled: boolean; noGstin: boolean; change: (patch: Partial<FormLine>) => void; remove: () => void }) {
-  const products = useSaleProducts(); const [query, setQuery] = useState(line.product_name);
+  const products = useSaleProducts(true, { forSale: false }); const [query, setQuery] = useState(line.product_name);
   useEffect(() => setQuery(line.product_name), [line.product_name]);
   const debouncedName = useDebounced(line.product_name);
   const usual = useUsualRate(!disabled && line.product_name && debouncedName === line.product_name ? { product_name: debouncedName, unit: line.unit, supplier_id: supplier || undefined } : null);

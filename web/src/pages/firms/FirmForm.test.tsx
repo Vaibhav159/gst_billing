@@ -203,10 +203,12 @@ test("pasted bank and PIN numbers are kept whole, so a digit too many is refused
   expect(screen.getByLabelText("PIN code")).toHaveValue("3130011");
 });
 test("opening the edit form never fills it from the registry, so nothing changes until the owner types", async () => {
+  handClock();
   const calls = server({ "GET firms/3/": { ...FIRM_DETAIL, city: "", pin_code: "" }, "GET registry/08VRHFA2322D1ZI/": { gstin: "08VRHFA2322D1ZI", status: "found", registry: { active: true, legal_name: "KIRAN GOLD HOUSE", address: "x", city: "Jaipur", pin_code: "302003" } } });
   mount(routes, ["/firms/3/edit"]);
-  expect(await screen.findByLabelText("City")).toHaveValue("");
-  await new Promise((done) => setTimeout(done, 700));
+  await pass(1);
+  expect(screen.getByLabelText("City")).toHaveValue("");
+  await pass(700);
   expect(screen.getByLabelText("City")).toHaveValue("");
   expect(screen.getByLabelText("PIN code")).toHaveValue("");
   expect(calls.some((c) => c.url.startsWith("registry/"))).toBe(false);

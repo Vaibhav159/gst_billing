@@ -38,7 +38,7 @@ test('detail handles a deleted 404 as the purchase bin and keeps ordinary 404 as
 test('create caches its answer and invalidates purchases, suppliers, captures, customer and search figures', async () => {
   const calls = serve({ 'POST purchases/': purchaseDetailWire() });
   const { wrapper, qc } = setup();
-  const roots = ['purchases', 'suppliers', 'captures', 'customers', 'search', 'dashboard', 'gst'];
+  const roots = ['purchases', 'suppliers', 'captures', 'customers', 'search', 'dashboard', 'gst', 'catalog', 'firms'];
   roots.forEach((r) => qc.setQueryData([r, 'other'], 'old'));
   const { result } = renderHook(() => useCreatePurchase(), { wrapper });
   await act(async () => { await result.current.mutateAsync(body); });

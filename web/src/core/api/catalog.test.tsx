@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { testQueryClient } from "@/test/render";
 import { serve } from "@/test/server";
-import { toProduct, useCatalog, useProduct, useSaveProduct } from "./catalog";
+import { toProduct, toProductDetail, useCatalog, useProduct, useSaveProduct } from "./catalog";
 import { useRegistry } from "./registry";
 import { useSetup } from "./setup";
 
@@ -69,4 +69,12 @@ test("setup preserves permission-hidden people and absent backup", async () => {
 test("catalog preserves the stored kind separately from the server's effective classification", () => {
   expect(toProduct({ ...raw, kind: null, kind_effective: "diamond", purity: "VVS" })).toMatchObject({ kind: null, kind_effective: "diamond", purity: "VVS" });
   expect(toProduct({ ...raw, kind: "packing", kind_effective: "packing" })).toMatchObject({ kind: "packing", kind_effective: "packing" });
+});
+
+
+test("by-firm figures preserve the narrower contract without inventing tax or other-unit quantities", () => {
+  const small = { bills: 2, quantity: "1.000", taxable: "125.00" };
+  const result = toProductDetail({ ...raw, bought: raw.sold, by_firm: [{ business: { id: 3, name: "Kiran", short: "Kiran" }, sold: small, bought: small }], lines: [] });
+  expect(result.by_firm[0].sold).toEqual({ bills: 2, quantity: "1.000", taxable: 12500 });
+  expect(result.by_firm[0].bought).toEqual({ bills: 2, quantity: "1.000", taxable: 12500 });
 });

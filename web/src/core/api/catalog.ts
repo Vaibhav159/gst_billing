@@ -32,6 +32,7 @@ export type RecordRef = { id: number; name: string };
 export type FirmRef = RecordRef & { short: string };
 export type Change = { key: string; field: string; from: string; to: string };
 export type ProductFigures = { bills: number; quantity: string; other_units: { unit: string; quantity: string }[]; taxable: number; tax: number; cancelled?: number };
+export type FirmProductFigures = Pick<ProductFigures, "bills" | "quantity" | "taxable">;
 export type Product = ProductTraits & {
   id: number; name: string; hsn_code: string; hsn_text: string; gst_percent: string; slab_ok: boolean;
   unit: string;
@@ -39,7 +40,7 @@ export type Product = ProductTraits & {
 };
 export type ProductDetail = Product & {
   sold: ProductFigures; bought: ProductFigures; average_rate: string | null; line_count: number; earlier_names: string[]; updated_at: string;
-  by_firm: { business: FirmRef; sold: ProductFigures; bought: ProductFigures }[];
+  by_firm: { business: FirmRef; sold: FirmProductFigures; bought: FirmProductFigures }[];
   lines: { bill: BillRef; business: FirmRef; quantity: string; unit: string; rate: string; taxable: number }[];
   hsn_on_bills: { lines: number; groups: { hsn_code: string; matches: boolean; lines: number; sales: BillRef[]; purchases: { id: number; bill_no: string }[] }[]; blocking: { bill: BillRef; business: FirmRef; month: string }[] };
   uses: { sales: number; cancelled: number; purchases: number; bin: number }; changes?: Change[];
@@ -47,20 +48,22 @@ export type ProductDetail = Product & {
 export type ProductBody = { name: string; hsn_code: string; gst_percent: string; unit: string; kind: ProductKind | null; purity: string; usual_rate: string | null; purchase_only: boolean; description: string };
 export type CatalogPage = { count: number; next: string | null; previous: string | null; results: Product[]; total_products: number; twins: RecordRef[][]; summary?: { taxable: number; bills: number; cancelled: number; no_items: BillRef[]; no_items_count: number } };
 type WireFigures = Omit<ProductFigures, "taxable" | "tax"> & { taxable: string; tax: string };
+type WireFirmFigures = Omit<FirmProductFigures, "taxable"> & { taxable: string };
 type WireProduct = Omit<Product, "sold"> & { sold?: WireFigures };
 type WireDetail = Omit<ProductDetail, "sold" | "bought" | "by_firm" | "lines"> & {
-  sold: WireFigures; bought: WireFigures; by_firm: { business: FirmRef; sold: WireFigures; bought: WireFigures }[];
+  sold: WireFigures; bought: WireFigures; by_firm: { business: FirmRef; sold: WireFirmFigures; bought: WireFirmFigures }[];
   lines: (Omit<ProductDetail["lines"][number], "taxable"> & { taxable: string })[];
 };
 const money = (s: string) => toPaise(s) ?? 0;
 const figures = (v: WireFigures): ProductFigures => ({ ...v, other_units: v.other_units ?? [], taxable: money(v.taxable), tax: money(v.tax) });
+const firmFigures = (v: WireFirmFigures): FirmProductFigures => ({ bills: v.bills, quantity: v.quantity, taxable: money(v.taxable) });
 export function toProduct(raw: unknown): Product {
   const d = raw as WireProduct;
   return { ...d, ...productTraits(d), sold: d.sold ? figures(d.sold) : undefined };
 }
 export function toProductDetail(raw: unknown): ProductDetail {
   const d = raw as WireDetail;
-  return { ...d, ...productTraits(d), sold: figures(d.sold), bought: figures(d.bought), by_firm: d.by_firm.map((r) => ({ ...r, sold: figures(r.sold), bought: figures(r.bought) })), lines: d.lines.map((l) => ({ ...l, taxable: money(l.taxable) })) };
+  return { ...d, ...productTraits(d), sold: figures(d.sold), bought: figures(d.bought), by_firm: d.by_firm.map((r) => ({ ...r, sold: firmFigures(r.sold), bought: firmFigures(r.bought) })), lines: d.lines.map((l) => ({ ...l, taxable: money(l.taxable) })) };
 }
 export function toCatalogPage(raw: unknown): CatalogPage {
   const d = raw as Omit<CatalogPage, "results" | "summary"> & { results: WireProduct[]; summary?: Omit<NonNullable<CatalogPage["summary"]>, "taxable"> & { taxable: string } };

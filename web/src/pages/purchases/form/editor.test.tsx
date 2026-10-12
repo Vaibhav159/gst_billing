@@ -208,3 +208,18 @@ test('Ctrl+Enter confirms the amounts through the latest confirmation handler', 
   fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
   expect(seen).toEqual([1]);
 });
+
+
+test('bought-only products can be selected on a purchase with their HSN and unit', async () => {
+  server({ 'GET products/': [{ id: 82, name: 'Gold bullion', hsn_code: '7108', default_unit: 'gms', gst_tax_rate: '0.03', purchase_only: true }] });
+  mount();
+  const item = await screen.findByRole('combobox', { name: 'Item' });
+  fireEvent.change(item, { target: { value: 'bullion' } });
+  fireEvent.focus(item);
+  const option = await screen.findByRole('option', { name: /Gold bullion/ });
+  await tick(400);
+  fireEvent.click(option);
+  expect(item).toHaveValue('Gold bullion');
+  expect(screen.getByLabelText('HSN code')).toHaveValue('7108');
+  expect(screen.getByLabelText('Unit for item 1')).toHaveValue('gms');
+});

@@ -70,7 +70,7 @@ export function useUsualRate(args: UsualRateArgs | null) {
 }
 export function invalidatePurchases(qc: QueryClient, keep?: number): void {
   void qc.invalidateQueries({ queryKey: purchasesKeys.all, predicate: (q) => !(keep !== undefined && q.queryKey[1] === 'bill' && q.queryKey[2] === keep) });
-  for (const queryKey of [['suppliers'], ['captures'], ['customers'], ['search'], ['dashboard'], ['gst']]) void qc.invalidateQueries({ queryKey });
+  for (const queryKey of [['suppliers'], ['captures'], ['customers'], ['search'], ['dashboard'], ['gst'], ['catalog'], ['firms']]) void qc.invalidateQueries({ queryKey });
 }
 function keepPurchase(qc: QueryClient, purchase: PurchaseDetail): void {
   const outcome: PurchaseOutcome = { kind: 'purchase', purchase };

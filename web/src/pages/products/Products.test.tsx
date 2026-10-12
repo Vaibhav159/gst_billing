@@ -4,6 +4,7 @@ import { CATALOG, PRODUCT, PRODUCT_DETAIL, recordsServer } from "@/test/records"
 import type { Call } from "@/test/server";
 import Products from "./Products";
 import ProductDetail from "./ProductDetail";
+import { handClock, pass } from "@/test/clock";
 import { markSaved } from "@/pages/customers/lib";
 
 const routes = [{ path: "/products", element: <Products /> }, { path: "/products/:id", element: <ProductDetail /> }];
@@ -98,11 +99,12 @@ test("export follows the server's reports.export permission", async () => {
   expect(screen.getByRole("button", { name: "Export 17 products" })).toBeDisabled();
 });
 test("a just-saved product already on the page is not fetched again", async () => {
+  handClock();
   markSaved("product", 12);
   const calls = recordsServer();
   mount(routes, ["/products"]);
-  expect(await screen.findByText("Gold necklace 22K")).toBeInTheDocument();
-  await new Promise((done) => setTimeout(done, 50));
+  await pass(50);
+  expect(screen.getByText("Gold necklace 22K")).toBeInTheDocument();
   expect(calls.some((c) => c.url === "catalog/12/")).toBe(false);
 });
 test("a just-saved product from a later page flashes first without hiding a loaded row", async () => {
@@ -119,4 +121,14 @@ test("showing all lines keeps the page and the focus while the lines load", asyn
   button.focus();
   fireEvent.click(button);
   await waitFor(() => expect(screen.getByRole("button", { name: "Show the latest 8" })).toHaveFocus());
+});
+
+
+test.each([false, true])("by-firm quantities name their own unit while values include every unit, phone=%s", async (phone) => {
+  (window as unknown as { __phone: boolean }).__phone = phone;
+  const small = { bills: 2, quantity: "1.000", taxable: "125.00" };
+  recordsServer({ "GET catalog/12/": { ...PRODUCT_DETAIL, by_firm: [{ business: { id: 3, name: "Kiran", short: "Kiran" }, sold: small, bought: small }] } });
+  mount(routes, ["/products/12"]);
+  expect(await screen.findByText("Quantities in gms only; values include all units.")).toBeInTheDocument();
+  expect(screen.getAllByText("₹125.00").length).toBeGreaterThan(0);
 });

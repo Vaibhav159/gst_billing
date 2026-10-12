@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { useSaveFirm, useSignature, firmKeys, toFirmDetail } from "./firms";
+import { FIRM_DETAIL } from "@/test/firmRecords";
+import { firmBody } from "@/pages/firms/form";
+import { serve } from "@/test/server";
 import { useSetup } from "./setup";
 import { useSaveCustomer } from "./customers";
 import { useCreateBill, useCancelBill } from "./sales";
@@ -33,3 +37,21 @@ test("customer and bill writes refresh setup and bill figures only after the wri
   hooks.unmount(); qc.clear();
 });
 
+test("firm saves and signature changes accept persisted fields without annual detail figures", async () => {
+  const { numbers: _numbers, figures: _figures, months: _months, uses: _uses, recent: _recent, plain_after_full_date: _plain, ...saved } = FIRM_DETAIL;
+  const calls = serve({ "POST firms/": saved, "PUT firms/3/": { ...saved, changes: [], frozen_bills: 2 }, "PUT firms/3/signature/": saved, "DELETE firms/3/signature/": saved });
+  const qc = testQueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  const hooks = renderHook(() => ({ save: useSaveFirm(), signature: useSignature() }), { wrapper });
+  const body = firmBody(toFirmDetail(FIRM_DETAIL));
+  qc.setQueryData(firmKeys.one(3, "2026-27"), toFirmDetail(FIRM_DETAIL));
+  await act(async () => {
+    expect(await hooks.result.current.save.mutateAsync({ body })).toEqual(saved);
+    expect(await hooks.result.current.save.mutateAsync({ id: 3, body })).toMatchObject({ id: 3, frozen_bills: 2 });
+    expect(await hooks.result.current.signature.mutateAsync({ id: 3, image: new File(["image"], "signature.png", { type: "image/png" }) })).toEqual(saved);
+    expect(await hooks.result.current.signature.mutateAsync({ id: 3, image: null })).toEqual(saved);
+  });
+  expect(qc.getQueryState(firmKeys.one(3, "2026-27"))?.isInvalidated).toBe(true);
+  expect(calls.map(c => c.method)).toEqual(["POST", "PUT", "PUT", "DELETE"]);
+  hooks.unmount(); qc.clear();
+});

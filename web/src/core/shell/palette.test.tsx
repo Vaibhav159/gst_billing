@@ -200,11 +200,9 @@ test("each record says what it is: a mobile in two groups, else as typed, else t
       { id: 4, name: "Anil Kumar", mobile_number: "", gst_number: "", state_name: "", recent_invoices: [] },
     ],
     invoices: [],
-    products: [],
-  } : config.url?.startsWith("catalog/") ? {
-    results: [
-      { id: 5, name: "Anklet", hsn_code: "7113", gst_percent: "3" }, { id: 6, name: "Anklet, kids", hsn_code: "7113", gst_percent: "3" },
-      { id: 7, name: "Anklet, silver", hsn_code: "7113", gst_percent: "3" }, { id: 8, name: "Anklet, toe", hsn_code: "7113", gst_percent: "3" },
+    products: [
+      { id: 5, name: "Anklet", hsn_code: "7113", gst_tax_rate: "0.0300" }, { id: 6, name: "Anklet, kids", hsn_code: "7113", gst_tax_rate: "0.0300" },
+      { id: 7, name: "Anklet, silver", hsn_code: "7113", gst_tax_rate: "0.0300" }, { id: 8, name: "Anklet, toe", hsn_code: "7113", gst_tax_rate: "0.0300" },
     ],
   } : config.url?.startsWith("firms/") ? { results: [
     { id: 3, name: "ANIL JEWELLERS", gst_number: "08BBBBB0000B1Z5", state_name: "RAJASTHAN" },
@@ -221,7 +219,7 @@ test("each record says what it is: a mobile in two groups, else as typed, else t
   expect(screen.getByRole("option", { name: "Anil & Sons 0141 2345678" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "Anil Traders 08CCCCC0000C1Z5" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "Anil Kumar Customer" })).toBeInTheDocument();
-  // up to five catalog products
+  // products from the quick-search answer
   expect(screen.getAllByRole("option", { name: /^Anklet.* HSN 7113 · GST 3%$/ })).toHaveLength(4);
   expect(screen.getByRole("option", { name: /^Anklet, toe/ })).toBeInTheDocument();
   // firms are the app's own list, matched here by name or GSTIN: no request for them
@@ -267,7 +265,7 @@ test("sales bills: by number and from each customer found, sales only, each once
 }, 15_000); // a typed search and many role queries: past 5 s on a busy 2-CPU machine
 
 test("a product from a server that doesn't send its rate shows its HSN alone, never “GST NaN%”", async () => {
-  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? NOTHING : config.url?.startsWith("catalog/") ? { results: [{ id: 5, name: "Anklet", hsn_code: "7113" }] } : { results: [] })) as AxiosAdapter;
+  api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("search/quick/") ? { ...NOTHING, products: [{ id: 5, name: "Anklet", hsn_code: "7113" }] } : { results: [] })) as AxiosAdapter;
   const user = typingClock();
   mount();
   await user.type(screen.getByRole("combobox"), "ank");
@@ -410,7 +408,8 @@ function serve() {
   api.defaults.adapter = ((config) => answer(config, config.url?.startsWith("preferences/") ? { data: { phoneMode: "expert" } }
     : config.url === "setup/" ? { firms: { count: 1, names: ["KIRAN GOLD HOUSE (SANDBOX)"] }, customers: { count: 0, names: [] }, products: { count: 0, names: [] }, bills: { count: 0, cancelled: 0 }, people: 1, last_backup_at: null }
     : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
-      : config.url?.startsWith("search/quick/") ? MEENA : {})) as AxiosAdapter;
+      : config.url?.startsWith("search/quick/") ? MEENA
+      : config.url === "customers/duplicates/" ? { groups: [] } : { results: [] })) as AxiosAdapter;
 }
 function inApp(router: DataRouter) {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);

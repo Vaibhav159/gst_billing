@@ -33,10 +33,10 @@ export function toSaleProduct(raw: unknown): SaleProduct {
 
 export const productKeys = { all: ["products"] as const, forSale: () => ["products", "for-sale"] as const };
 
-/** Every page, kept for 30 minutes. Bought-only products never enter a new line; saved lines stay as written. */
-export function useSaleProducts(enabled = true) {
+/** Every page, kept for 30 minutes. Sales hide bought-only products; purchases keep them. */
+export function useSaleProducts(enabled = true, { forSale = true }: { forSale?: boolean } = {}) {
   return useQuery({
-    queryKey: productKeys.forSale(), staleTime: 30 * 60_000, enabled,
+    queryKey: forSale ? productKeys.forSale() : [...productKeys.all, "for-purchase"], staleTime: 30 * 60_000, enabled,
     queryFn: async ({ signal }) => {
       const rows = new Map<number, SaleProduct>();
       // 100 pages of 1,000 is far past any shop; a server that keeps naming a next page fails here instead of looping
@@ -44,7 +44,7 @@ export function useSaleProducts(enabled = true) {
         // Only our own endpoint receives the JWT, never the host named by a next URL.
         const d = (await api.get("products/", { params: { page_size: 1000, ordering: "name", ...(page > 1 ? { page } : {}) }, signal })).data as { results?: Raw[]; next?: string | null } | Raw[] | null;
         for (const raw of Array.isArray(d) ? d : d?.results ?? []) {
-          if (raw.purchase_only === true) continue;
+          if (forSale && raw.purchase_only === true) continue;
           const p = toSaleProduct(raw); rows.set(p.id, p);
         }
         if (Array.isArray(d) || !d?.next) return [...rows.values()];

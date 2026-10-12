@@ -25,6 +25,7 @@ export type FirmDetail = FirmRow & FirmBody & {
   uses: { sales: number; cancelled: number; purchases: number; bin: number; drafts: number; captures: number; filing_records: number; filing_months: number; filed_periods: number; opening_credits: number };
   plain_after_full_date: number; updated_at: string; changes?: Change[]; frozen_bills?: number;
 };
+export type FirmSaved = Omit<FirmDetail, "numbers" | "figures" | "recent" | "months" | "uses" | "plain_after_full_date">;
 export function toFirmDetail(raw: unknown): FirmDetail {
   const f = raw as Omit<FirmDetail, "figures" | "recent"> & { figures: WireFigures; recent: (Omit<FirmDetail["recent"][number], "total_amount"> & { total_amount: string })[] };
   return { ...f, figures: figures(f.figures), recent: f.recent.map((b) => ({ ...b, total_amount: toPaise(b.total_amount) ?? 0 })) };
@@ -40,14 +41,14 @@ export function invalidateFirms(qc: QueryClient) {
 }
 export function useSaveFirm() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, body }: { id?: number; body: FirmBody }) => toFirmDetail((await (id ? api.put(`firms/${id}/`, body) : api.post("firms/", body))).data), onSuccess: () => invalidateFirms(qc) });
+  return useMutation({ mutationFn: async ({ id, body }: { id?: number; body: FirmBody }) => (await (id ? api.put<FirmSaved>(`firms/${id}/`, body) : api.post<FirmSaved>("firms/", body))).data, onSuccess: () => invalidateFirms(qc) });
 }
 export function useSignature() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async ({ id, image }: { id: number; image: File | null }) => {
-    if (!image) return toFirmDetail((await api.delete(`firms/${id}/signature/`)).data);
+    if (!image) return (await api.delete<FirmSaved>(`firms/${id}/signature/`)).data;
     const data = new FormData(); data.append("image", image);
-    return toFirmDetail((await api.put(`firms/${id}/signature/`, data)).data);
+    return (await api.put<FirmSaved>(`firms/${id}/signature/`, data)).data;
   }, onSuccess: () => invalidateFirms(qc) });
 }
 export function useDeleteFirm() {

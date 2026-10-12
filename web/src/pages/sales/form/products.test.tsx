@@ -111,3 +111,12 @@ test("a server that never stops naming a next page is read to a cap, then the li
   await waitFor(() => expect(result.current.isError).toBe(true));
   expect(calls).toHaveLength(100);
 });
+
+
+test("sales and purchase pickers keep separate cached lists for bought-only products", async () => {
+  salesServer([["GET", "products/", () => ({ next: null, results: [RING, { ...DIAMOND, purchase_only: true }] })]]);
+  const { result } = renderHook(() => ({ sales: useSaleProducts(), purchases: useSaleProducts(true, { forSale: false }) }), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.purchases.data).toHaveLength(2));
+  expect(result.current.sales.data?.map(p => p.id)).toEqual([RING.id]);
+  expect(result.current.purchases.data?.map(p => p.id)).toEqual([RING.id, DIAMOND.id]);
+});
