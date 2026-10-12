@@ -8,7 +8,7 @@ import { Button, ButtonLink, Checkbox, Dialog, DL, Money } from '@/core/ui';
 import { hasContent } from '@/pages/sales/form/model';
 import { perWord } from '@/pages/sales/form/rules';
 import type { BillFormApi } from '@/pages/sales/form/useBillForm';
-export type ReviewForm=Pick<BillFormApi,'reviewOpen'|'closeReview'|'saving'|'saveError'|'numberText'|'stored'|'waitingForNext'|'numberError'|'dateError'|'f'|'firmName'|'cust'|'figs'|'tt'|'cashOver'>;
+export type ReviewForm=Pick<BillFormApi,'reviewOpen'|'closeReview'|'saving'|'saveError'|'numberText'|'stored'|'waitingForNext'|'numberError'|'dateError'|'f'|'firmName'|'cust'|'figs'|'tt'>;
 export type ReviewCheck={id:string;text:string;tick?:string};
 export type BillReviewProps={F:ReviewForm;paymentWords:string;checks:ReviewCheck[];offline:boolean;canSave:boolean;visitOnly?:boolean;whyNot?:string;onSave:(number?:string)=>void;onFullView:()=>void};
 // The route supplies 6B's shared payment words.
@@ -24,7 +24,7 @@ export function BillReview({F,paymentWords,checks,offline,canSave,visitOnly=fals
  const offer=error?.kind==='clash'&&error.next&&!F.f.numberTyped?((counterOf(F.stored)??0)>(counterOf(error.next)??0)?F.stored:error.next):'';
  const no=counterOf(offer||F.numberText)??(offer||F.numberText);
  const final=['draft_saved','cancelled','gone','replaces'].includes(error?.kind??'');
- const denied=offline||!canSave||F.saving||F.waitingForNext||!all||F.cashOver||F.f.payment===null||F.f.payment===''||(F.cust?.type==='walkin'&&F.f.payment==='credit');
+ const denied=offline||!canSave||F.saving||F.waitingForNext||!all||F.f.payment===null||F.f.payment===''||(F.cust?.type==='walkin'&&F.f.payment==='credit');
  const disabled=denied||Boolean(F.numberError)||Boolean(F.dateError)||final;
  const lines=F.f.lines.filter(hasContent);
  const savedLink=error?.link?.to.replace(/^\/sales\/(\d+)(?:\?.*)?$/,'/e/bill/$1');

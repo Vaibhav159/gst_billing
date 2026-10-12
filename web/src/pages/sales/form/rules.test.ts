@@ -131,13 +131,13 @@ test("the lines check beside the total flags a line exactly when the line's own 
 });
 
 test("the income-tax checks, an address for a business, and a bill maybe made twice", () => {
-  const cash = { kind: "cash_limit" as const, short: "", text: "" };
+  const cash = { kind: "cash_limit" as const, short: "Cash ≥ ₹2 lakh", text: "₹2,67,800.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST)." };
   const pan = { kind: "pan" as const, short: "", text: "" };
   const addr = { kind: "b2b_address" as const, short: "", text: "" };
   const c = checksOf(input({ itax: [cash, pan, addr], f: form({ customer: ANIL, lines: [ring], payment: "cash" }), twin: { invoice_number: "KGH/2026-27/31", total: 8708321 } }));
   expect(c.filter((x) => x.ok === "warn").map((x) => [x.key, x.text, x.fix])).toEqual([
     ["addr", "Anil Gupta has no address on record. A B2B bill must show it (CGST Rule 46).", "address"],
-    ["cash", "Cash of ₹2,00,000 or more from one person isn't allowed (Income Tax Sec 269ST). Take part of it by UPI or bank.", undefined],
+    ["cash", cash.text, undefined],
     ["pan", "Over ₹2,00,000: Income Tax Rule 114B needs Anil Gupta's PAN (or Form 60).", "pan"],
     ["twin", "Anil Gupta already has a bill today for ₹87,083.21 (KGH/2026-27/31). Making it twice?", undefined],
   ]);

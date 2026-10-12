@@ -90,9 +90,9 @@ export function unusual(form: FormState, { total, inter = false, twin = "", itax
     const gst = line.gst === null || line.gst === "" ? null : Number(line.gst) / 100;
     if (expected !== null && gst !== null && gst !== expected) notes.push({ id: `gst-${line.key}`, text: `${line.name} has GST ${pct(gst)}; HSN ${hsn} uses GST ${pct(expected)}.`, tick: `Yes, GST ${pct(gst)} is right for ${line.name}` });
   }
-  if (form.payment === "mixed" && total >= 20000000) notes.push({ id: "cash-part", text: "The total is over ₹2,00,000, so the cash part must stay under ₹2,00,000 (income-tax rules).", tick: "The cash taken is under ₹2,00,000" });
+  if (form.payment === "mixed" && total >= 20000000) notes.push({ id: "cash-part", text: "The total is over ₹2,00,000, so the cash part must stay under ₹2,00,000 (income-tax rules)." });
   if (twin) notes.push({ id: "twin", text: twin, tick: "Yes, this is another bill" });
-  for (const flag of itax) if (["pan", "walkin_limit", "b2b_address", "b2c_address"].includes(flag.kind)) notes.push({ id: flag.kind, text: flag.text, tone: "brand" });
+  for (const flag of itax) if (["cash_limit", "pan", "walkin_limit", "b2b_address", "b2c_address"].includes(flag.kind)) notes.push({ id: flag.kind, text: flag.text, tone: "brand" });
   if (inter) notes.push({ id: "igst", text: "IGST, sale to another state", tone: "brand" });
   return notes;
 }

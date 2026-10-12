@@ -910,7 +910,8 @@
     ],
     "file": "tests-v3/easy.spec.js",
     "line": 331,
-    "label": "E06: cash over the limit is stopped with the amount to take by UPI"
+    "label": "X-82: cash over the limit can proceed to Check and save",
+    "amendment": "X-82: Sec 269ST is a warning and never holds Save, including mixed payments."
   },
   {
     "sourceLine": 333,
@@ -921,7 +922,8 @@
     ],
     "file": "tests-v3/easy.spec.js",
     "line": 333,
-    "label": "and Check and save doesn't open the sheet"
+    "label": "X-82: the review shows the cash flag words",
+    "amendment": "X-82: Sec 269ST is a warning and never holds Save, including mixed payments."
   },
   {
     "sourceLine": 335,
@@ -932,7 +934,8 @@
     ],
     "file": "tests-v3/easy.spec.js",
     "line": 335,
-    "label": "Choose Part cash: now Check and save"
+    "label": "X-82: cash Save is enabled without a cash acknowledgement",
+    "amendment": "X-82: Sec 269ST is a warning and never holds Save, including mixed payments."
   },
   {
     "sourceLine": 340,
@@ -943,7 +946,8 @@
     ],
     "file": "tests-v3/easy.spec.js",
     "line": 340,
-    "label": "E-B3: the check sheet asks for a tick on the cash part; Save waits"
+    "label": "X-82: mixed cash is a warning and Save stays enabled",
+    "amendment": "X-82: Sec 269ST is a warning and never holds Save, including mixed payments."
   },
   {
     "sourceLine": 341,
@@ -965,7 +969,8 @@
     ],
     "file": "tests-v3/easy.spec.js",
     "line": 343,
-    "label": "after the tick, Save lights up"
+    "label": "X-82: mixed cash needs no acknowledgement",
+    "amendment": "X-82: Sec 269ST is a warning and never holds Save, including mixed payments."
   },
   {
     "sourceLine": 353,

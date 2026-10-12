@@ -355,16 +355,23 @@ test('Full view receives the existing id with the latest values after a filed-mo
   expect(posts(calls)).toHaveLength(1);
 });
 
-test('cash at exactly two lakh has no force-save path', async () => {
-  const large = data({ payment: 'cash', lines: [{ ...data().lines[0], productId: null, name: 'Other item', hsn: '9988', gst: '0', qty: 1, rate: '200000', custom: true }] });
+test.each(['cash', 'mixed'] as const)('%s at exactly two lakh warns without holding review or Save', async (payment) => {
+  const large = data({ payment, lines: [{ ...data().lines[0], productId: null, name: 'Other item', hsn: '9988', gst: '0', qty: 1, rate: '200000', custom: true }] });
   const { calls } = serve([], [row(large)]); draw(`/e/new/items?draft=${ID}`);
-  await shown(() => screen.getByText("Cash can't be ₹2 lakh or more on one bill. Take at least ₹0.01 by UPI and choose Part cash."));
-  fireEvent.click(screen.getByRole('button', { name: 'Next: how they paid' }));
-  expect(screen.getByRole('radio', { name: 'Cash' })).toHaveFocus();
-  expect(screen.queryByRole('dialog', { name: 'Check the bill' })).not.toBeInTheDocument();
-  expect(screen.queryByText(/all cash anyway/i)).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Save bill/ })).not.toBeInTheDocument();
-  expect(posts(calls)).toEqual([]);
+  await shown(() => screen.getByText('No. 34 · the number on the paper bill'));
+  expect(screen.getByRole('button', { name: 'Check and save' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Choose Part cash' })).not.toBeInTheDocument();
+  const dialog = await review();
+  expect(dialog).toHaveTextContent(payment === 'cash'
+    ? '₹2,00,000.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).'
+    : 'The total is over ₹2,00,000, so the cash part must stay under ₹2,00,000 (income-tax rules).');
+  expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
+  const save = within(dialog).getByRole('button', { name: 'Save bill 34' });
+  expect(save).toBeEnabled();
+  fireEvent.click(save);
+  await shown(() => screen.getByRole('heading', { name: 'Saved destination' }));
+  expect(posts(calls)).toHaveLength(1);
+  expect(posts(calls)[0].body).toMatchObject({ payment_mode: payment });
 });
 
 test('a first-save field refusal returns focus to that field and preserves every typed value', async () => {

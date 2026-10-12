@@ -102,23 +102,23 @@ test("Easy: the paper rate stays blank until typed and saves the server's exact 
   await expect(page.getByRole("button", { name: "Make another bill" })).toBeVisible();
 });
 
-test("Easy: exactly two lakh in cash is stopped and Part cash needs its confirmation", async ({ page, request }) => {
+test("Easy: exactly two lakh in cash warns and saves with the server flag", async ({ page, request }) => {
   const { api, customer } = await records(page, request);
   await begin(page, customer); await pickProduct(page, api);
   // Taxable 194174.76 + 3% split tax 5825.24 = 200000.00, using the shared server rounding.
   await fillGrams(page, "1.000", "194174.757");
   await page.getByRole("radio", { name: "Cash", exact: true }).click();
-  await expect(page.getByText("Cash can't be ₹2 lakh or more on one bill. Take at least ₹0.01 by UPI and choose Part cash.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Check and save", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Choose Part cash", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Choose Part cash", exact: true })).toHaveCount(0);
   const sheet = await review(page);
-  await acknowledge(sheet, "The cash taken is under ₹2,00,000");
-  const submit = sheet.getByRole("button", { name: /^Save bill / });
-  await expect(submit).toBeDisabled();
-  await sheet.getByRole("checkbox", { name: "The cash taken is under ₹2,00,000" }).check();
-  await expect(submit).toBeEnabled();
+  const warning = "₹2,00,000.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).";
+  await expect(sheet.getByText(warning, { exact: true })).toBeVisible();
+  await expect(sheet.getByRole("checkbox", { name: /cash/i })).toHaveCount(0);
+  // A rate-slip acknowledgement remains independent of the cash warning.
+  await acknowledge(sheet);
+  await expect(sheet.getByRole("button", { name: /^Save bill / })).toBeEnabled();
   const bill = await save(page, sheet, api);
-  expect(bill).toMatchObject({ total_amount: "200000.00", payment_mode: "mixed" });
+  expect(bill).toMatchObject({ total_amount: "200000.00", payment_mode: "cash" });
+  expect(bill.itax).toContainEqual({ kind: "cash_limit", short: "Cash ≥ ₹2 lakh", text: warning });
 });
 
 test("Easy: an earlier paper day drives the number, historical board, draft resume and save", async ({ page, request }) => {

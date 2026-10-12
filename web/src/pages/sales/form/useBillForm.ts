@@ -40,7 +40,7 @@ import { changesOf, checkedNumber, checksOf, dateProblem, dateWarning, errorOrde
  * no Try again (Ruling 1D-12).
  */
 export type SaveError = FailText & {
-  kind: "payment" | "cash" | "clash" | "filed" | "offline" | "failed" | "draft_saved" | "cancelled" | "gone" | "replaces";
+  kind: "payment" | "clash" | "filed" | "offline" | "failed" | "draft_saved" | "cancelled" | "gone" | "replaces";
   next?: string;
   link?: { label: string; to: string };
 };
@@ -112,7 +112,6 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
   // A failed refresh cannot overrule a save's refusal. Keep it with the number or month it names.
   const [numberRefusal, setNumberRefusal] = useState<{ business: number | null; fy: string; number: string; message: string } | null>(null);
   const [monthRefusal, setMonthRefusal] = useState<{ business: number | null; month: string; message: string } | null>(null);
-  const [cashAnyway, setCashAnyway] = useState(false);
   const [newKeys, setNewKeys] = useState<Set<string>>(() => new Set());
   const [draftId, setDraftId] = useState<string | null>(start.draftId);
   const [bookDate, setBookDate] = useState(start.bookDate);
@@ -331,7 +330,6 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
   /* ── income tax, a bill maybe made twice, and the checks beside the total ── */
   const itax = cust ? itaxFlags({ status: "active", payment_mode: f.payment ?? "", total: figs.total, taxable: figs.taxable, customer: { name: cust.name, type: cust.type, pan: cust.pan, gst_number: cust.gst_number, address: cust.address } }) : [];
   const cashOver = itax.some((x) => x.kind === "cash_limit");
-  const cashBlock = cashOver && !cashAnyway;
   const twinAsked = !edit && Boolean(cust) && cust?.type !== "walkin" && figs.total > 0 && Boolean(f.date) && !dateError;
   const sameDay = useSalesPage(f.firmId, { customer_id: cust?.id, start_date: f.date, end_date: f.date, summary: 0 }, 10, twinAsked && reading);
   const twinRow = twinAsked ? (sameDay.data?.results ?? []).find((b) => b.status !== "cancelled" && b.total_amount === figs.total) : undefined;
@@ -368,7 +366,6 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
     if (syncDay()) return { ok: false, first: "number" };
     setTried(true);
     if (firstError) return { ok: false, first: firstError };
-    setCashAnyway(false);
     setSaveError(null);
     setReviewOpen(true);
     return { ok: true };
@@ -390,7 +387,6 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
       : k === "date" && refusedDate && saveError ? false : errors[k]);
     if (first) { setReviewOpen(false); return { refused: first }; }
     if (f.payment == null) { setSaveError({ kind: "payment", title: "How was it paid?", body: "Pick one above: it goes on the bill and in your cash and bank split." }); return none; }
-    if (cashBlock) { setSaveError({ kind: "cash", title: "Cash of ₹2,00,000 or more", body: "Switch to Part cash, part UPI, or tick that you're saving it as all cash anyway." }); return none; }
     // only an edit gets here offline: a new bill's review turns Save off and says where the bill is kept (offlineNew)
     if (net === "offline") { setSaveError({ kind: "offline", ...failText({ kind: "offline", message: "" }) }); return none; }
     const number = numberOverride ?? numberText;
@@ -493,7 +489,7 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
     firm, firmName, firmState, firms, firmHint: hint, cust, auto, pos, tt, filled, figs, lineFig, newKeys,
     paper: f.paper && !edit, book, lastPaperDay, keep, moved, next, suggestion, numberText, stored, numberError, numberNote, numberState, waitingForNext,
     today, dateError, dateWarn, offReason, touched, setTouched, tried, errors, serverErrors, showErr, firstError,
-    itax, cashOver, cashBlock, cashAnyway, setCashAnyway, twin, checks, canMove, whyNot, dirty, changes, sentNote,
+    itax, cashOver, twin, checks, canMove, whyNot, dirty, changes, sentNote,
     reviewOpen, openReview, closeReview, save, saving, saveError, savedTo, saveEnd, draftId, setDraftId,
   };
 }

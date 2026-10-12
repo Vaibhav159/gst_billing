@@ -1,17 +1,17 @@
 // "Check the bill before saving" (PROTO pages/sales/BillForm.jsx:783-927): exactly what will be saved, to the paisa. How
-// it was paid is asked here when nothing is picked; cash of ₹2,00,000 or more waits for Part cash or a tick (Income Tax
-// Sec 269ST); a failed save says why first, with what to do. Sending isn't here: the saved bill's page offers Send on
+// it was paid is asked here when nothing is picked; cash of ₹2,00,000 or more is a warning (X-82).
+// A failed save says why first, with what to do. Sending isn't here: the saved bill's page offers Send on
 // WhatsApp, focused, one press after Save (a browser blocks a chat opened after the save's wait; plan 1B's call 7).
 import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
 import { keepsOnDevice } from "@/core/deviceDrafts";
-import { amountInWords, date, inr, monthLabel, monthOf, qty as qtyLabel } from "@/core/format";
+import { amountInWords, date, monthLabel, monthOf, qty as qtyLabel } from "@/core/format";
 import { counterOf } from "@/core/sales/numbers";
 import { SEGMENTS, segmentOf, stateNameOf } from "@/core/sales/pos";
 import { PAY, rateText, taxLines } from "@/core/sales/words";
-import { Button, ButtonLink, Checkbox, Dialog, DL, FailNote, Money, Spinner } from "@/core/ui";
+import { Button, ButtonLink, Dialog, DL, FailNote, Money, Spinner } from "@/core/ui";
 import { useView } from "@/core/view";
 import { customerLine } from "@/pages/customers/forBills";
 import { ItemsTable, type ItemLine } from "@/pages/sales/bill/ItemsTable";
@@ -44,11 +44,11 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
   const backRef = useRef<HTMLButtonElement>(null);
   const wayRef = useRef<HTMLAnchorElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  // after the change has drawn: Save may only now be enabled (cash under the limit), and a box that held focus may be gone
+  // after the payment choice has drawn, its box may be gone
   const focusSave = () => setTimeout(() => saveRef.current?.focus(), 0);
   const edit = F.edit;
   const err = F.saveError;
-  const failed = Boolean(err && err.kind !== "payment" && err.kind !== "cash");
+  const failed = Boolean(err && err.kind !== "payment");
   const clash = err?.kind === "clash";
   // a refusal saving again can't change (Ruling 1D-12): the bill a draft became, a bill cancelled or deleted meanwhile, or
   // a remake refused. No Try again: the way on is that bill (its link), else only back to the form
@@ -100,7 +100,7 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
   // the paper bill's own number never changes by itself: a typed number that's taken is changed by hand
   const changeNumber = onChangeNumber ?? (() => { F.closeReview(); focusSoon(numberId, true); });
   const primary = clash ? (offer ? () => onSave(offer) : changeNumber) : () => onSave();
-  const blocked = noChange || waits || offlineNew || F.cashBlock;
+  const blocked = noChange || waits || offlineNew;
   const total = (
     <div className={cn("flex flex-col min-w-0", isPhone ? "" : "mr-auto")}>
       <span className="flex items-baseline gap-2"><span className="text-sm text-fg2">Total</span><Money value={F.figs.total} size="2xl" tone="sale" /></span>
@@ -123,7 +123,7 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
   // the lines exactly as they're sent, from the save's own body (toBillInput), each beside its figures to the paisa
   const sent = toBillInput(F.f, { mode: F.mode, pos: F.pos, number: sending, draftId: null, replaces: F.start.replaces }).lines;
   const items: ItemLine[] = sent.map((l, i) => ({ ...l, id: F.filled[i].key, taxable: F.figs.lines[i]?.taxable ?? 0, tax: F.figs.lines[i]?.tax ?? 0 }));
-  const warn = checks.filter((x) => x.ok === "warn" && x.key !== "cash");
+  const warn = checks.filter((x) => x.ok === "warn");
   const paidBy = F.f.payment == null ? <span className="text-brand">Not picked yet</span> : PAY[F.f.payment];
   // a browser that refuses storage keeps it only while the page is open, never "on this device" (Task 1's review)
   const keptOffline = keepsOnDevice() ? "It's kept on this device as an unfinished bill." : VISIT_ONLY;
@@ -145,16 +145,6 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
             <p id="rv-pay-label" className="font-semibold">How was it paid?</p>
             <PayPicker id="rv-pay" labelledBy="rv-pay-label" describedBy="rv-pay-note" value={F.f.payment} autoFocus onChange={(v) => { F.setPayment(v); focusSave(); }} invalid={err?.kind === "payment"} />
             <p id="rv-pay-note" role={err?.kind === "payment" ? "alert" : undefined} className={cn("text-sm", err?.kind === "payment" ? "text-neg" : "text-fg2")}>{err?.kind === "payment" ? "Pick one to save. It goes on the bill and in your cash and bank split." : "Nothing is picked for you. One tap, then Save."}</p>
-          </div>
-        ) : null}
-        {F.cashOver ? (
-          <div className={cn("rounded-ctl border px-4 py-3 flex flex-col gap-2 anim-rise", err?.kind === "cash" ? "border-neg-line bg-neg-tint" : "border-brand-line bg-brand-tint")}>
-            <p className="font-semibold">{inr(F.figs.total)} in cash from one person isn&apos;t allowed</p>
-            <p className="text-sm text-fg2">Income Tax Sec 269ST: no one may take ₹2,00,000 or more in cash for one sale; the penalty equals the cash taken. Take part of it by UPI or bank.</p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <Button size="sm" variant="primary" onClick={() => { F.setPayment("mixed"); focusSave(); }}>Change to Part cash, part UPI</Button>
-              <Checkbox label="Save it as all cash anyway" checked={F.cashAnyway} onChange={F.setCashAnyway} />
-            </div>
           </div>
         ) : null}
         <Changes F={F} />
@@ -194,7 +184,7 @@ export function Review({ F, checks, numberId, onSave, onChangeNumber, waiting = 
           </div>
         ) : <div className="rounded-ctl border border-line pt-1"><ItemsTable bill={{ lines: items, igst: F.figs.igst, cgst: F.figs.cgst, sgst: F.figs.sgst, interstate: F.tt.inter }} label="Items that will be saved" /></div>}
         <div className={cn("grid gap-5", isPhone ? "grid-cols-1" : "grid-cols-2")}>
-          {!isPhone ? <div><p className="caps mb-2">Checked</p><CheckList checks={checks.filter((x) => x.key !== "tax" && x.key !== "pay" && x.key !== "cash")} label="Checked before saving" /></div> : null}
+          {!isPhone ? <div><p className="caps mb-2">Checked</p><CheckList checks={checks.filter((x) => x.key !== "tax" && x.key !== "pay")} label="Checked before saving" /></div> : null}
           {/* the total itself sits in the footer, next to Save (said once) */}
           <DL rows={[["Taxable value", <Money key="tx" value={F.figs.taxable} />], ...taxLines({ ...F.figs, interstate: F.tt.inter }).map((t) => [t.label, <Money key={t.key} value={t.value} />] as const)]} />
         </div>

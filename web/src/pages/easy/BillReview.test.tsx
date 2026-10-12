@@ -8,7 +8,7 @@ import { BillReview, type ReviewForm } from './BillReview';
 const form=():ReviewForm=>({
  reviewOpen:true, closeReview:vi.fn(), saving:false, saveError:null, numberText:'34', stored:'KGH/2026-27/34',waitingForNext:false,numberError:'',dateError:'',
  f:{firmId:3,customer:null,date:'2026-10-08',number:'',numberTyped:false,paper:false,posOverride:null,payment:'bank',notes:'',lines:[{...blankLine(),name:'Gold ring',hsn:'7113',gst:'3',qty:12.345,rate:'6512.50'}]},
- firmName:'KIRAN GOLD HOUSE',cust:null,figs:billFigures([{quantity:'12.345',rate:'6512.50',gst_percent:'3'}],false),tt:{inter:false,short:'CGST + SGST',why:''},cashOver:false,
+ firmName:'KIRAN GOLD HOUSE',cust:null,figs:billFigures([{quantity:'12.345',rate:'6512.50',gst_percent:'3'}],false),tt:{inter:false,short:'CGST + SGST',why:''},
 });
 beforeEach(()=>vi.useFakeTimers({toFake:['Date','setTimeout','clearTimeout']}));
 afterEach(()=>vi.useRealTimers());
@@ -22,11 +22,21 @@ it('shows exact paise and requires every red acknowledgement',()=>{
  expect(screen.getByText(/as on the paper bill\./)).toBeVisible();
 });
 it('disables offline saves and never offers the cash override',()=>{
- const f={...form(),cashOver:true};f.f.payment='cash';
+ const f=form();f.f.payment='cash';
  renderApp(<BillReview paymentWords="paid by UPI" F={f} checks={[]} offline canSave onSave={vi.fn()} onFullView={vi.fn()}/>);
  opened();expect(screen.getByRole('button',{name:'Save bill 34'})).toBeDisabled();
  expect(screen.getByText("You're offline. Your bill is kept on this phone; save it when the internet is back.")).toBeVisible();
  expect(screen.queryByText('Save it as all cash anyway')).toBeNull();
+});
+it('cash warnings do not hold an online save',()=>{
+ const f=form();f.f.payment='cash';
+ const save=vi.fn();
+ const warning='₹2,00,000.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).';
+ renderApp(<BillReview paymentWords="paid in cash" F={f} checks={[{id:'cash_limit',text:warning}]} offline={false} canSave onSave={save} onFullView={vi.fn()}/>);
+ opened();expect(screen.getByText(warning)).toBeVisible();
+ expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+ const button=screen.getByRole('button',{name:'Save bill 34'});expect(button).toBeEnabled();
+ fireEvent.click(button);expect(save).toHaveBeenCalledTimes(1);
 });
 it('revokes acknowledgements when the checked values change',()=>{
  function Harness(){const [f,set]=useState(form());return <><button onClick={()=>set({...f,numberText:'35'})}>Changed elsewhere</button><BillReview paymentWords="paid by UPI" F={f} checks={[{id:'slip',text:'Check this rate',tick:'The rate is right'}]} offline={false} canSave onSave={vi.fn()} onFullView={vi.fn()}/></>;}

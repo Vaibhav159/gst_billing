@@ -11,7 +11,7 @@ import { ANIL, BIG, formServer, fakeToday, mountForm, settle, wireNext } from ".
 // whole flows through the form, a step at a time: a busy runner takes longer than vitest's 5 s for one
 vi.setConfig({ testTimeout: 20_000 });
 
-beforeEach(() => { localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
+beforeEach(() => { (window as Window & { __phone?: boolean }).__phone = false; localStorage.clear(); __resetDeviceDrafts(); __resetDrafts(); });
 afterEach(() => { vi.useRealTimers(); act(() => __setNetState("online")); takeFresh(); });
 
 const where = (router: { state: { location: { pathname: string; search: string } } }) => router.state.location.pathname + router.state.location.search;
@@ -53,32 +53,23 @@ test("Check and save shows exactly what will be saved; How was it paid? comes fi
   expect(takeFresh([501])).toEqual(new Set([501]));
 });
 
-test("cash of ₹2,00,000 or more doesn't save in one press: Part cash, or a tick that it's all cash anyway; the PAN check offers Add PAN", async () => {
+test.each([false, true])("cash over ₹2,00,000 is a warning and saves unchanged without acknowledgement (phone: %s)", async (phone) => {
+  (window as Window & { __phone?: boolean }).__phone = phone;
   const user = fakeToday();
-  formServer([["GET", "sales/412/", () => wireDetail({ lines: BIG })]]);
-  mountForm("/sales/new?from=412");
+  const { calls } = formServer([["GET", "sales/412/", () => wireDetail({ lines: BIG })]]);
+  const { router } = mountForm("/sales/new?from=412");
   await screen.findByText("Copied from KGH/2026-27/31");
-  const checks = within(screen.getByRole("complementary", { name: "Bill summary" })).getByRole("list", { name: "Checks on this bill" });
-  expect(checks).toHaveTextContent("Over ₹2,00,000: Income Tax Rule 114B needs Anil Gupta's PAN (or Form 60).");
-  await user.click(within(checks).getByRole("button", { name: "Add PAN" }));
-  expect(await screen.findByRole("dialog", { name: "Anil Gupta's PAN" })).toBeInTheDocument();
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Anil Gupta's PAN" })).not.toBeInTheDocument());
   await user.keyboard("{Control>}s{/Control}");
-  const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
+  const dialog = await screen.findByRole("dialog", { name: phone ? "Check the bill" : "Check the bill before saving" });
   act(() => { vi.advanceTimersByTime(400); });
   await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
-  expect(dialog).toHaveTextContent("₹2,67,800.00 in cash from one person isn't allowed");
+  expect(dialog).toHaveTextContent("₹2,67,800.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).");
+  expect(within(dialog).queryByRole("checkbox", { name: "Save it as all cash anyway" })).not.toBeInTheDocument();
   const save = within(dialog).getByRole("button", { name: "Save bill" });
-  expect(save).toBeDisabled();
-  await user.click(within(dialog).getByRole("checkbox", { name: "Save it as all cash anyway" }));
   expect(save).toBeEnabled();
-  await user.click(within(dialog).getByRole("checkbox", { name: "Save it as all cash anyway" }));
-  expect(save).toBeDisabled();
-  await user.click(within(dialog).getByRole("button", { name: "Change to Part cash, part UPI" }));
-  expect(dialog).toHaveTextContent("Paid byPart cash, part UPI");
-  expect(save).toBeEnabled();
-  await waitFor(() => expect(save).toHaveFocus());
+  await user.click(save);
+  await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ payment_mode: "cash", invoice_number: "34" });
 });
 
 test("Ctrl S in the review presses Save, but not in its first moments: the key that opened it, pressed again at once or held down, doesn't save a bill unseen", async () => {
@@ -103,7 +94,7 @@ test("Ctrl S in the review presses Save, but not in its first moments: the key t
   expect(posts(calls)).toEqual(["34"]);
 });
 
-test("Ctrl S saves from the review only while it's on top and Save is on: not while all cash over the limit holds it, and not from a PAN sheet opened over it", async () => {
+test("Ctrl S saves a cash-warning review only while it is on top, never from a PAN sheet opened over it", async () => {
   const user = fakeToday();
   const { calls } = formServer([["GET", "sales/412/", () => wireDetail({ lines: BIG })]]);
   const { router } = mountForm("/sales/new?from=412");
@@ -113,11 +104,7 @@ test("Ctrl S saves from the review only while it's on top and Save is on: not wh
   await user.keyboard("{Control>}s{/Control}");
   const dialog = await screen.findByRole("dialog", { name: "Check the bill before saving" });
   act(() => { vi.advanceTimersByTime(400); });
-  expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeDisabled();
-  await user.keyboard("{Control>}s{/Control}");
-  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-  expect(posts(calls)).toEqual([]);
-  await user.click(within(dialog).getByRole("button", { name: "Change to Part cash, part UPI" }));
+  expect(within(dialog).getByRole("button", { name: "Save bill" })).toBeEnabled();
   // the PAN, added from the review's own checks: its sheet opens over the review, and Ctrl S there is the sheet's
   const checked = within(dialog).getByRole("list", { name: "Checked before saving" });
   expect(checked).toHaveTextContent("Over ₹2,00,000: Income Tax Rule 114B needs Anil Gupta's PAN (or Form 60).");
@@ -134,7 +121,7 @@ test("Ctrl S saves from the review only while it's on top and Save is on: not wh
   // the review on top again: Ctrl S saves it
   await user.keyboard("{Control>}s{/Control}");
   await waitFor(() => expect(where(router)).toBe("/sales/501?saved=new"));
-  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ payment_mode: "mixed", invoice_number: "34" });
+  expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ payment_mode: "cash", invoice_number: "34" });
 });
 
 test("a PAN added from the review's own checks: the check and its Add PAN go, and the cursor is back in the review, never on the page behind it (T5 review)", async () => {

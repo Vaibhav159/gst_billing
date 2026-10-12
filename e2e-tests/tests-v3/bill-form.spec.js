@@ -45,6 +45,37 @@ test("desktop: a counter bill by keyboard alone, from the customer box to Save",
   await expect(page.getByText(`Saved ${bill.invoice_number}`, { exact: true })).toBeVisible();
 });
 
+test("desktop: large cash warns before saving and keeps the server flag on the bill", async ({ page, request }, info) => {
+  test.skip(info.project.name !== "desktop", "the keyboard flow is the desktop's");
+  const api = client(request);
+  const customer = await someCustomer(api);
+  const product = await aProduct(api);
+  notesSavedBills(page);
+  await page.goto("/sales/new");
+  await expect(page.getByRole("combobox", { name: /^Customer/ })).toBeFocused();
+  await opened(page);
+  await typeBill(page, { customer, product });
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("textbox", { name: /^Line 1 rate per / })).toBeFocused();
+  await page.keyboard.type("100000");
+  await page.keyboard.press("Control+s");
+  const review = page.getByRole("dialog", { name: "Check the bill before saving" });
+  await expect(review).toBeVisible(); await afterDialog(page);
+  await review.getByRole("radio", { name: "Cash", exact: true }).click();
+  const total = 20000000 + Math.round(20000000 * Number(product.gst_tax_rate));
+  const amount = (total / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const warning = `₹${amount} taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).`;
+  await expect(review.getByText(warning, { exact: true })).toBeVisible();
+  await expect(review.getByRole("checkbox", { name: "Save it as all cash anyway" })).toHaveCount(0);
+  await expect(review.getByRole("button", { name: "Save bill", exact: true })).toBeEnabled();
+  await review.getByRole("button", { name: "Save bill", exact: true }).click();
+  const id = await savedId(page);
+  const bill = await api.get(`sales/${id}/`);
+  expect(bill).toMatchObject({ payment_mode: "cash", total_amount: (total / 100).toFixed(2) });
+  expect(bill.itax).toContainEqual({ kind: "cash_limit", short: "Cash ≥ ₹2 lakh", text: warning });
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+});
+
 test("desktop: three paper bills in a run, from the paper book: Enter bill, then Save and Next paper bill", async ({ page, request }, info) => {
   test.skip(info.project.name !== "desktop", "the keyboard run is the desktop's");
   test.slow(); // three bills, each saved through the server

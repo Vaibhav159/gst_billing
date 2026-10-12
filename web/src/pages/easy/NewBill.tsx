@@ -19,7 +19,7 @@ import { BillReview } from './BillReview';
 import { LeaveBillDialog } from './BillLeave';
 import { NewItemSheet, type EasyNewItem } from './NewItem';
 import { billRateNotices } from './billRates';
-import { cashWords, nextBillStep } from './flow';
+import { nextBillStep } from './flow';
 import { EasyPage, FirmPill, PayChoice } from './parts';
 import { useEasyProducts } from './queries';
 import { maskPhone, paidWords, unusual, weightSlip } from './state';
@@ -152,7 +152,7 @@ export function ItemsRoute() {
     ];
   }
   const checks = unusual(F.f, { total: F.figs.total, inter: F.tt.inter, twin: F.checks.find(check => check.key === 'twin')?.text ?? '', itax: F.itax, rates: rate.ratesByLine });
-  const step = nextBillStep(F.f.lines, F.f.payment, F.figs.total);
+  const step = nextBillStep(F.f.lines, F.f.payment);
   const goPay = () => document.querySelector<HTMLElement>('[role="radiogroup"][aria-labelledby="easy-paid-t"] [role="radio"]:not([disabled])')?.focus();
   const refused = (key: string) => {
     if (key === 'customer') { navigate('/e/new'); return; }
@@ -196,7 +196,6 @@ export function ItemsRoute() {
     <QueryView query={products} what="the item list">{list => <BillItems lines={F.f.lines} products={list} canEditProducts={can('product.edit')} errors={errors} notices={notices} references={rate.references} copied={copied} focus={focus} onChange={F.setLine} onAdd={line => F.addLine(false, line)} onRemove={line => F.removeLine(line.key)} onNew={() => setNewItem(true)} />}</QueryView>
     <section className="card p-4 flex flex-col gap-3"><h2 id="easy-paid-t" className="text-lg font-semibold">How did they pay?</h2><PayChoice value={F.f.payment} onChange={F.setPayment} disabled={{ credit: F.cust?.type === 'walkin' }} />
       {F.cust?.type === 'walkin' && <p className="text-md text-muted">Udhaar needs the customer's name and phone. <Button onClick={() => navigate('/e/new/customer')}>Add them.</Button></p>}
-      {F.cashOver && <div role="alert"><p>{cashWords(F.figs.total)}</p><Button onClick={() => F.setPayment('mixed')}>Choose Part cash</Button></div>}
     </section>
     <BillNumber F={F} focus={numberFocus} />
     {offline && <p role="status">{!keepsOnDevice() ? "This browser doesn't store unfinished bills, so this one lasts only while this page is open." : "You're offline. Your bill is kept on this phone; save it when the internet is back."}</p>}
