@@ -84,6 +84,15 @@ def test_hsn_side_and_writes_are_refused(user_client):
     assert response.status_code == 403
 
 
+@pytest.mark.parametrize("path", ["sales", "purchases", "tax", "hsn", "months", "customers", "products", "ca-workbook"])
+def test_every_report_kind_refuses_an_odd_side(user_client, path):
+    with patch("billing.api.reports_v3.report_payload") as report:
+        response = user_client.get(f"/api/reports/{path}/", {"from": "2026-09-01", "to": "2026-09-30", "side": "both"})
+    assert response.status_code == 400
+    assert response.json() == {"side": ["Choose sales or purchases."]}
+    report.assert_not_called()
+
+
 def test_legacy_report_route_keeps_its_owner():
     from django.urls import resolve
 

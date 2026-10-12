@@ -37,6 +37,14 @@ def report_split(params):
     return raw == "1"
 
 
+def report_side(params):
+    """Only the HSN report reads it, but every kind refuses an odd value rather than ignoring it."""
+    side = params.get("side", "sales")
+    if side not in ("sales", "purchases"):
+        raise ValidationError({"side": ["Choose sales or purchases."]})
+    return side
+
+
 def report_range(params, *, today=None):
     today = today or timezone.localdate()
     start = date(2022, 4, 1)

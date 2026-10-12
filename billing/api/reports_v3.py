@@ -1,11 +1,11 @@
 """Part 3B's reads; v2 reports/generate and reconciliation stay untouched."""
 
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from billing.api.permissions import V3Permission
-from billing.api.report_params import report_firm, report_fy, report_range, report_split
+from billing.api.report_params import report_firm, report_fy, report_range, report_side, report_split
 
 KINDS = frozenset(("sales", "purchases", "tax", "hsn", "months", "customers", "products", "ca-workbook"))
 
@@ -54,10 +54,7 @@ class ReportView(APIView):
         params = request.query_params
         business = report_firm(params)
         start, end = report_range(params)
-        side = params.get("side", "sales")
-        if kind == "hsn" and side not in ("sales", "purchases"):
-            raise ValidationError({"side": ["Choose sales or purchases."]})
-        return Response(report_payload(kind, business, start, end, split=report_split(params), side=side))
+        return Response(report_payload(kind, business, start, end, split=report_split(params), side=report_side(params)))
 
 
 class CAWorkbookView(ReportView):
