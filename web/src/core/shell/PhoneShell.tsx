@@ -51,7 +51,7 @@ export function PhoneShell({ children, easy, openPalette }: { children: ReactNod
               <span className="relative grid place-items-center w-14 h-8">
                 <span aria-hidden="true" className={cn("absolute inset-0 rounded-full bg-brand-tint border border-brand-line transition-[transform,opacity] duration-200 ease-out", on ? "opacity-100 scale-100" : "opacity-0 scale-x-50")} />
                 <t.icon size={easy ? 24 : 22} aria-hidden="true" strokeWidth={on ? 2.25 : 2} className="relative" />
-                {b ? <span aria-hidden="true" className={b.dot ? "absolute top-0 right-3 w-2.5 h-2.5 rounded-full bg-neg border-2 border-bar" : "absolute -top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-onbrand text-2xs font-bold grid place-items-center tnum"}>{b.count}</span> : null}
+                {b?.mark}
               </span>
               <span className="tab-label">{t.label}</span>
             </Link>
