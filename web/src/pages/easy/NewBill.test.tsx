@@ -364,7 +364,7 @@ test.each(['cash', 'mixed'] as const)('%s at exactly two lakh warns without hold
   const dialog = await review();
   expect(dialog).toHaveTextContent(payment === 'cash'
     ? '₹2,00,000.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).'
-    : 'The total is over ₹2,00,000, so the cash part must stay under ₹2,00,000 (income-tax rules).');
+    : 'The total is ₹2,00,000 or more, so the cash part must stay under ₹2,00,000 (income-tax rules).');
   expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
   const save = within(dialog).getByRole('button', { name: 'Save bill 34' });
   expect(save).toBeEnabled();

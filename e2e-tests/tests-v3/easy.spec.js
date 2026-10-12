@@ -265,7 +265,7 @@ test('Easy acceptance: custom materials, walk-in send, offline cancel, remake an
   await H.tap(review.getByRole('button', { name: 'Change something' }));
   await H.tap(page.getByRole('radio', { name: /^Part cash/ }));
   review = await H.review(page);
-  await H.check(340, async () => { await expect(review.getByRole('button', { name: /^Save bill / })).toBeEnabled(); await expect(review.getByText('The total is over ₹2,00,000, so the cash part must stay under ₹2,00,000 (income-tax rules).')).toBeVisible(); });
+  await H.check(340, async () => { await expect(review.getByRole('button', { name: /^Save bill / })).toBeEnabled(); await expect(review.getByText('The total is ₹2,00,000 or more, so the cash part must stay under ₹2,00,000 (income-tax rules).')).toBeVisible(); });
   await H.check(341, () => expect(review.getByText(/PAN/)).toBeVisible());
   await H.check(343, () => expect(review.getByRole('checkbox', { name: 'The cash taken is under ₹2,00,000' })).toHaveCount(0));
   await H.tap(review.getByRole('button', { name: 'Change something' })); await H.leave(page, 'Throw it away');

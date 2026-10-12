@@ -243,12 +243,12 @@ export function checksOf(c: CheckInput): Check[] {
 }
 
 /** The note under Paid by (PROTO BillForm.jsx:554-562). */
-export function paymentNote(payment: FormState["payment"], cashOver: boolean): string {
+export function paymentNote(payment: FormState["payment"], cashWarning: string): string {
   if (payment == null) return "Pick one; nothing is chosen for you. Check and save asks if you haven't.";
   if (payment === "credit") return "Billed on udhaar. The app doesn't record payments received, so it never shows a balance.";
   if (payment === "mixed") return "The bill shows the total; how it was split isn't recorded.";
   if (payment === "") return "This bill came in without a payment mode. Pick one if you know it.";
-  if (cashOver) return "Cash of ₹2,00,000 or more from one person isn't allowed (Income Tax Sec 269ST). Choose Part cash, part UPI.";
+  if (payment === "cash") return cashWarning;
   return "";
 }
 

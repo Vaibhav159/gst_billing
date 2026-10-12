@@ -89,7 +89,7 @@ describe("Easy state", () => {
     form.lines = [{ ...blankLine(), key: "a", name: "Ring", hsn: "7113", gst: "0.25", qty: 12345 }];
     const notes = unusual(form, { total: 20000000, inter: true, twin: "Same total on this day", itax: [{ kind: "b2c_address", short: "Address", text: "Name and address needed" }], rates: { a: { text: "Rates here are per gram", tick: "Yes, this rate is right" } } });
     expect(notes.filter(n => n.tick).map(n => n.id)).toEqual(["rate-a", "weight-a", "gst-a", "twin"]);
-    expect(notes.find(n => n.id === "cash-part")).toMatchObject({ text: "The total is over ₹2,00,000, so the cash part must stay under ₹2,00,000 (income-tax rules)." });
+    expect(notes.find(n => n.id === "cash-part")).toMatchObject({ text: "The total is ₹2,00,000 or more, so the cash part must stay under ₹2,00,000 (income-tax rules)." });
     expect(notes.find(n => n.id === "cash-part")?.tick).toBeUndefined();
     expect(notes.find(n => n.id === "b2c_address")?.tick).toBeUndefined();
     expect(notes.find(n => n.id === "igst")?.tick).toBeUndefined();

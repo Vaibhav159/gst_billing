@@ -161,12 +161,14 @@ test("a name before 's follows possessive: Kulkarni Jewellers' PAN, never Jewell
 });
 
 test("the note under Paid by", () => {
-  expect(paymentNote(null, false)).toBe("Pick one; nothing is chosen for you. Check and save asks if you haven't.");
-  expect(paymentNote("credit", false)).toBe("Billed on udhaar. The app doesn't record payments received, so it never shows a balance.");
-  expect(paymentNote("cash", true)).toBe("Cash of ₹2,00,000 or more from one person isn't allowed (Income Tax Sec 269ST). Choose Part cash, part UPI.");
-  expect(paymentNote("mixed", false)).toBe("The bill shows the total; how it was split isn't recorded.");
-  expect(paymentNote("", false)).toBe("This bill came in without a payment mode. Pick one if you know it.");
-  expect(paymentNote("bank", false)).toBe("");
+  expect(paymentNote(null, "")).toBe("Pick one; nothing is chosen for you. Check and save asks if you haven't.");
+  expect(paymentNote("credit", "")).toBe("Billed on udhaar. The app doesn't record payments received, so it never shows a balance.");
+  const cashWarning = "₹2,00,000.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).";
+  expect(paymentNote("cash", cashWarning)).toBe(cashWarning);
+  expect(paymentNote("cash", "")).toBe("");
+  expect(paymentNote("mixed", "")).toBe("The bill shows the total; how it was split isn't recorded.");
+  expect(paymentNote("", "")).toBe("This bill came in without a payment mode. Pick one if you know it.");
+  expect(paymentNote("bank", "")).toBe("");
 });
 
 test("what an edit changes, old to new, for the review", () => {

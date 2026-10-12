@@ -117,7 +117,7 @@ export function DesktopForm({ F, drafts, children }: { F: BillFormApi; drafts: D
               <div className="flex flex-col gap-1.5">
                 <span id="bf-pay-label" className="text-sm font-medium text-fg2">Paid by</span>
                 <PayPicker id="bf-pay" labelledBy="bf-pay-label" value={F.f.payment} onChange={F.setPayment} allowNotRecorded={edit && F.bill?.payment_mode === ""}
-                  describedBy={paymentNote(F.f.payment, F.cashOver) ? "bf-pay-note" : undefined} />
+                  describedBy={paymentNote(F.f.payment, F.cashWarning) ? "bf-pay-note" : undefined} />
                 <PaymentNote F={F} id="bf-pay-note" />
               </div>
               <Field label="Note on the bill" htmlFor="bf-notes" hint="Optional. Printed under the items, for example an order number." error={F.showErr("notes")}>

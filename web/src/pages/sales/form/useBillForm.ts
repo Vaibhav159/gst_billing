@@ -329,7 +329,7 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
 
   /* ── income tax, a bill maybe made twice, and the checks beside the total ── */
   const itax = cust ? itaxFlags({ status: "active", payment_mode: f.payment ?? "", total: figs.total, taxable: figs.taxable, customer: { name: cust.name, type: cust.type, pan: cust.pan, gst_number: cust.gst_number, address: cust.address } }) : [];
-  const cashOver = itax.some((x) => x.kind === "cash_limit");
+  const cashWarning = itax.find((x) => x.kind === "cash_limit")?.text ?? "";
   const twinAsked = !edit && Boolean(cust) && cust?.type !== "walkin" && figs.total > 0 && Boolean(f.date) && !dateError;
   const sameDay = useSalesPage(f.firmId, { customer_id: cust?.id, start_date: f.date, end_date: f.date, summary: 0 }, 10, twinAsked && reading);
   const twinRow = twinAsked ? (sameDay.data?.results ?? []).find((b) => b.status !== "cancelled" && b.total_amount === figs.total) : undefined;
@@ -489,7 +489,7 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
     firm, firmName, firmState, firms, firmHint: hint, cust, auto, pos, tt, filled, figs, lineFig, newKeys,
     paper: f.paper && !edit, book, lastPaperDay, keep, moved, next, suggestion, numberText, stored, numberError, numberNote, numberState, waitingForNext,
     today, dateError, dateWarn, offReason, touched, setTouched, tried, errors, serverErrors, showErr, firstError,
-    itax, cashOver, twin, checks, canMove, whyNot, dirty, changes, sentNote,
+    itax, cashWarning, twin, checks, canMove, whyNot, dirty, changes, sentNote,
     reviewOpen, openReview, closeReview, save, saving, saveError, savedTo, saveEnd, draftId, setDraftId,
   };
 }

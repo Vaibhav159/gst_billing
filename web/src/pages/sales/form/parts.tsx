@@ -152,12 +152,12 @@ export function PlaceOfSupply({ F, id }: P) {
   );
 }
 
-/** The note under Paid by: nothing chosen for you, udhaar, part cash, or cash over the limit (PROTO BillForm.jsx:554-568). */
+/** The note under Paid by: nothing chosen for you, udhaar, part cash, or the income-tax cash warning (PROTO BillForm.jsx:554-568). */
 export function PaymentNote({ F, id }: P) {
-  const text = paymentNote(F.f.payment, F.cashOver);
+  const text = paymentNote(F.f.payment, F.cashWarning);
   if (!text) return null;
   // no entrance animation: it's there from the first draw, and a fading note reads as low contrast
-  return <p id={id} className={F.cashOver && F.f.payment === "cash" ? "text-sm text-brand" : "text-sm text-muted"}>{text}</p>;
+  return <p id={id} className={F.cashWarning && F.f.payment === "cash" ? "text-sm text-brand" : "text-sm text-muted"}>{text}</p>;
 }
 
 /**

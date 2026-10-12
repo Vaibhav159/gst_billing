@@ -59,11 +59,15 @@ test.each([false, true])("cash over ₹2,00,000 is a warning and saves unchanged
   const { calls } = formServer([["GET", "sales/412/", () => wireDetail({ lines: BIG })]]);
   const { router } = mountForm("/sales/new?from=412");
   await screen.findByText("Copied from KGH/2026-27/31");
+  const cashWarning = "₹2,67,800.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).";
+  const paid = screen.getByRole("radiogroup", { name: "Paid by" });
+  await user.click(within(paid).getByRole("radio", { name: "Cash" }));
+  expect(paid).toHaveAccessibleDescription(cashWarning);
+  expect(screen.queryByText(/isn't allowed|Choose Part cash/)).not.toBeInTheDocument();
   await user.keyboard("{Control>}s{/Control}");
   const dialog = await screen.findByRole("dialog", { name: phone ? "Check the bill" : "Check the bill before saving" });
   act(() => { vi.advanceTimersByTime(400); });
-  await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
-  expect(dialog).toHaveTextContent("₹2,67,800.00 taken in cash is at or over the ₹2,00,000 limit for one bill (Income Tax Sec 269ST).");
+  expect(dialog).toHaveTextContent(cashWarning);
   expect(within(dialog).queryByRole("checkbox", { name: "Save it as all cash anyway" })).not.toBeInTheDocument();
   const save = within(dialog).getByRole("button", { name: "Save bill" });
   expect(save).toBeEnabled();

@@ -115,7 +115,7 @@ export function PhoneForm({ F, drafts, children }: { F: BillFormApi; drafts: Dra
 
         <section aria-labelledby="bfp-pay-h" className="flex flex-col gap-2">
           <h2 id="bfp-pay-h" className="caps px-1">Paid by</h2>
-          <PayPicker labelledBy="bfp-pay-h" value={F.f.payment} onChange={F.setPayment} allowNotRecorded={edit && F.bill?.payment_mode === ""} describedBy={paymentNote(F.f.payment, F.cashOver) ? "bfp-pay-note" : undefined} />
+          <PayPicker labelledBy="bfp-pay-h" value={F.f.payment} onChange={F.setPayment} allowNotRecorded={edit && F.bill?.payment_mode === ""} describedBy={paymentNote(F.f.payment, F.cashWarning) ? "bfp-pay-note" : undefined} />
           <PaymentNote id="bfp-pay-note" F={F} />
         </section>
 
