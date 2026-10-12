@@ -165,6 +165,14 @@ test('the discard dialog warns that typed details are not kept only after typing
   expect(within(dialog).getByText('What you typed here is not kept.')).toBeVisible();
 });
 
+test("the fill page's one-column overrides still find the 2B editor's grid and sticky summary", async () => {
+  server(); const view = mount(); await ready();
+  const wrapper = view.container.querySelector('[class*="[&>div.grid]:grid-cols-1"]');
+  expect(wrapper).toBeInstanceOf(HTMLElement);
+  expect(wrapper!.querySelector(':scope > div.grid')).toBeInstanceOf(HTMLElement);
+  expect(wrapper!.querySelector(':scope > div.grid > div.sticky')).toBeInstanceOf(HTMLElement);
+});
+
 test('discard after typing uses immediate DELETE, leaves without another guard and offers restore Undo', async () => {
   const calls = server(readyCapture(), { 'DELETE captures/12/': captureFixture({ status: 'discarded' }), 'POST captures/12/restore/': readyCapture() });
   mount(); await ready(); fireEvent.change(screen.getByLabelText("Supplier's bill number"), { target: { value: 'TYPED' } });
