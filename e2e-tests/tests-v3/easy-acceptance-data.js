@@ -40,6 +40,28 @@ async function scenario(request) {
   expect(firm, '6A/3A sandbox seed includes KIRAN').toBeTruthy();
   return { api, me, firm, firms: firms.results };
 }
+// Discover the combined seed by state: GST's filed Kiran month takes precedence
+// over Easy's duplicate bill, while another firm still exercises the blocked view.
+async function blockedFirm(api, firms) {
+  const [year, number] = today().slice(0, 7).split('-').map(Number);
+  const month = `${number === 1 ? year - 1 : year}-${String(number === 1 ? 12 : number - 1).padStart(2, '0')}`;
+  for (const firm of firms) {
+    const gst = await api.get('gst/month/', { business_id: firm.id, month });
+    if (gst.stage === 'blocked') return { firm, gst };
+  }
+  throw new Error('The combined acceptance seed needs a blocked previous-month return.');
+}
+async function earlierOpenDay(api, firm) {
+  const [y, m, d] = today().split('-').map(Number);
+  const cursor = new Date(Date.UTC(y, m - 1, d - 1));
+  for (let n = 0; n < 24; n += 1) {
+    const day = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}-${String(cursor.getUTCDate()).padStart(2, '0')}`;
+    const book = await api.get('sales/paper-book/', { business_id: firm.id, month: day.slice(0, 7) });
+    if (!book.locked) return day;
+    cursor.setUTCDate(0);
+  }
+  throw new Error('The acceptance firm needs an unlocked earlier paper day.');
+}
 const aiGuardedPages = new WeakSet();
 async function preventRealAI(page) {
   if (aiGuardedPages.has(page)) return;
@@ -123,7 +145,7 @@ async function sendBill(page) {
     await tap(share.getByRole('button', { name: 'Share', exact: true }));
   }
 }
-function png() { return Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'); }
+function png() { return Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64'); }
 const clockPages = new WeakSet();
 async function waitIdleWithoutRequests(page, milliseconds = 60_000) {
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
@@ -136,4 +158,4 @@ async function waitIdleWithoutRequests(page, milliseconds = 60_000) {
   page.off('request', record);
   expect(requests, 'an idle phone never polls the API').toEqual([]);
 }
-module.exports = { money, monthName, date, fy, fyStart, text, tab, bar, salesCard, gstCard, toast, tap, go, check, checkGroup, scenario, preventRealAI, easyStorage, customer, chooseBuyer, item, weight, rate, fillLine, review, save, leave, sendBill, png, waitIdleWithoutRequests };
+module.exports = { money, monthName, date, fy, fyStart, text, tab, bar, salesCard, gstCard, toast, tap, go, check, checkGroup, scenario, blockedFirm, earlierOpenDay, preventRealAI, easyStorage, customer, chooseBuyer, item, weight, rate, fillLine, review, save, leave, sendBill, png, waitIdleWithoutRequests };

@@ -110,6 +110,7 @@ test.describe('The actual owner, accountant, counter-staff and viewer sessions',
       test.setTimeout(90_000);
       expect(hasLogin(role), `Acceptance requires LOGINS_FILE with ${role}; CI's one user is not a four-role pass`).toBe(true);
       const owner = await H.scenario(request);
+      const { firm: blocked } = await H.blockedFirm(owner.api, owner.firms);
       const bill = await newBill(owner.api, { firm: owner.firm });
       await page.goto('/login'); await opened(page); await signIn(page, role); await page.waitForURL((u) => u.pathname !== '/login');
       const token = await page.evaluate(() => localStorage.getItem('gst_access_token'));
@@ -117,7 +118,7 @@ test.describe('The actual owner, accountant, counter-staff and viewer sessions',
       const meResponse = await request.get('/api/me/', { headers }); expect(meResponse.ok()).toBe(true); const me = await meResponse.json();
       expect(me.role).toBe(role);
       await easyIfExpertSaved(request, token);
-      await page.evaluate(({ id, firm }) => { localStorage.setItem(`gst3.easy.firm.${id}`, String(firm)); localStorage.removeItem(`gst3.easy.welcomed.${id}`); }, { id: me.id, firm: owner.firm.id });
+      await page.evaluate(({ id, firm }) => { localStorage.setItem(`gst3.easy.firm.${id}`, String(firm)); localStorage.removeItem(`gst3.easy.welcomed.${id}`); }, { id: me.id, firm: blocked.id });
       const errors = []; page.on('pageerror', (error) => errors.push(error.message));
       await H.go(page, '/e');
       const mayBill = role === 'owner' || role === 'staff';
@@ -133,6 +134,10 @@ test.describe('The actual owner, accountant, counter-staff and viewer sessions',
       await H.go(page, '/e/gst');
       await expect(page.getByRole('button', { name: 'Share these figures with your CA' })).toBeEnabled();
       if (role !== 'owner') await H.check(556, async () => { await expect(page.getByText(/^Tell the owner:/).first()).toBeVisible(); await expect(page.getByRole('button', { name: 'Fix it in the full view' })).toHaveCount(0); });
+      const captures = await owner.api.get('captures/', { status: 'waiting' });
+      const ready = captures.results.find(capture => capture.status === 'ready' && capture.business);
+      expect(ready, 'The purchase seed supplies a ready capture for the role action').toBeTruthy();
+      await page.evaluate(({ id, firm }) => localStorage.setItem(`gst3.easy.firm.${id}`, String(firm)), { id: me.id, firm: ready.business });
       await H.go(page, '/e/capture');
       const photo = page.getByLabel('Take a photo', { exact: true });
       await expect(photo)[role === 'viewer' ? 'toBeDisabled' : 'toBeEnabled']();

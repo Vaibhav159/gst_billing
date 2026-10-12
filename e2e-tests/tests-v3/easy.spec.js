@@ -1,14 +1,27 @@
 const { test, expect } = require('@playwright/test');
 const { opened } = require('./session');
-const { today, esc, makesBills, newBill, afterDialog, walkIn } = require('./sales-data');
+const { client, today, esc, makesBills, newBill, afterDialog, walkIn } = require('./sales-data');
 const { monthBefore, startsDrafts, notesSavedBills } = require('./bill-form-data');
 const H = require('./easy-acceptance-data');
 
+let customerSaves = [];
 startsDrafts(test);
 makesBills(test);
 test.beforeEach(async ({ page }, info) => {
   test.skip(info.project.name !== 'phone', 'Easy is phone-only; desktop redirects have their own shell test');
   notesSavedBills(page);
+  customerSaves = [];
+  page.on('response', response => {
+    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/customers/' || response.status() !== 201) return;
+    const saved = response.json();
+    saved.catch(() => {}); // Observe immediately; afterEach still reports a failed read.
+    customerSaves.push(saved);
+  });
+});
+test.afterEach(async ({ page, request }) => {
+  await page.context().setOffline(false);
+  const api = client(request);
+  for (const customer of await Promise.all(customerSaves)) await api.del(`customers/${customer.id}/`);
 });
 
 test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one send', async ({ page, request }) => {
@@ -70,8 +83,8 @@ test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one se
   await H.check(129, async () => expect(await page.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('radio'));
   await H.check(130, () => expect(page.getByRole('dialog', { name: 'Check the bill' })).toHaveCount(0));
   await H.weight(page).fill('12345');
-  await H.check(137, () => expect(page.getByText('12,345.000 g is more than 12 kg. Did you mean 12.345 g?')).toBeVisible());
-  await H.tap(page.getByRole('button', { name: 'Use 12.345 g', exact: true }));
+  await H.check(137, () => expect(page.getByText('12,345.000 gms is more than 12 kg. Did you mean 12.345 gms?')).toBeVisible());
+  await H.tap(page.getByRole('button', { name: 'Use 12.345 gms', exact: true }));
   await H.check(140, async () => { await expect(H.weight(page)).toHaveValue('12.345'); await expect(H.bar(page)).toContainText('₹82,808.71'); });
   await H.tap(page.getByRole('radio', { name: 'Cash', exact: true }));
   await H.check(142, () => expect(H.bar(page).getByRole('button').last()).toHaveText('Check and save'));
@@ -84,7 +97,7 @@ test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one se
   await afterDialog(page);
   await H.check(154, async () => { const a = await dialog.getByRole('button', { name: /^Save bill / }).boundingBox(); const b = await dialog.getByRole('button', { name: 'Change something' }).boundingBox(); expect(a.y).toBeLessThan(b.y); });
   await H.check(156, async () => { await expect(dialog).toContainText(buyer.name); await expect(dialog).toContainText('₹82,808.71'); await expect(dialog).toContainText(/from Kiran/i); await expect(dialog).toContainText(`Bill number ${next.counter}, as on the paper bill.`); });
-  await H.check(157, () => expect(dialog.getByText('12.345 g × ₹6,512.50 a gram')).toBeVisible());
+  await H.check(157, () => expect(dialog.getByText('12.345 gms × ₹6,512.50 a gram')).toBeVisible());
   await page.context().setOffline(true);
   await H.check(161, () => expect(page.getByText(/^You're offline\./).first()).toBeVisible());
   await H.check(164, async () => { await expect(dialog.getByRole('button', { name: /^Save bill / })).toBeDisabled(); await expect(dialog).toContainText(/kept on this phone|safe on this phone/); });
@@ -99,7 +112,7 @@ test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one se
   const saved = await H.save(page, await H.review(page));
   expect(saved.total_amount).toBe('82808.71');
   await H.check(190, async () => { await expect(page.locator('h1 + p')).toContainText(buyer.name); await expect(page.locator('h1 + p')).toContainText('₹82,808.71'); });
-  await H.check(192, async () => { const paper = page.locator('figure'); await expect(paper).toContainText(saved.invoice_number); await expect(paper).toContainText('12.345 g × 6,512.50'); await expect(paper).toContainText('2,411.90'); await expect(paper).not.toContainText(/making/i); });
+  await H.check(192, async () => { const paper = page.locator('figure'); await expect(paper).toContainText(saved.invoice_number); await expect(paper).toContainText('12.345 gms × 6,512.50'); await expect(paper).toContainText('2,411.90'); await expect(paper).not.toContainText(/making/i); });
   await H.check(195, () => expect(page.locator('main')).toContainText(buyer.mobile_number.slice(-5)));
   await H.tap(page.getByRole('link', { name: new RegExp(`Change ${esc(buyer.name)}'s number or details`) }));
   await H.check(199, async () => expect((await page.getByLabel('Mobile number').inputValue()).replace(/\D/g, '')).toBe(buyer.mobile_number));
@@ -131,9 +144,10 @@ test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one se
   await H.check(233, () => expect(page.locator('main li').first()).toContainText(`No. ${saved.counter}`));
   await H.go(page, '/e/gst');
   await H.check(247, () => expect(page.locator('main')).toContainText(H.money(monthAfter.summary.tax)));
-  const gst = await s.api.get('gst/month/', { business_id: s.firm.id, month: monthBefore(today()) });
-  expect(gst.stage, '6A/3A seed provides a blocked Kiran month').toBe('blocked');
-  await H.check(248, async () => { await expect(page.getByText(`Until it's fixed, your CA can't file ${H.monthName(gst.month)}'s return.`, { exact: false })).toBeVisible(); await expect(page.getByRole('button', { name: 'Fix it in the full view' }).first()).toBeVisible(); });
+  const { firm: blocked, gst } = await H.blockedFirm(s.api, s.firms);
+  await page.evaluate(({ id, firm }) => localStorage.setItem(`gst3.easy.firm.${id}`, String(firm)), { id: s.me.id, firm: blocked.id });
+  await H.go(page, '/e/gst');
+  await H.check(248, async () => { await expect(page.getByText(`Until it's fixed, your CA can't file ${H.monthName(gst.month)}'s return.`, { exact: false }).first()).toBeVisible(); await expect(page.getByRole('button', { name: 'Fix it in the full view' }).first()).toBeVisible(); });
 });
 
 test('Easy acceptance: typed-rate slips, current-year reads and the older-day twin', async ({ page, request }) => {
@@ -142,7 +156,12 @@ test('Easy acceptance: typed-rate slips, current-year reads and the older-day tw
   const buyer = await H.customer(s.api, s.firm);
   const board = await s.api.get('rates/', { date: today() });
   expect(board.in_force?.per_gram['gold-22K'], '5A seed has a gold 22K reference board').toBeTruthy();
-  await H.chooseBuyer(page, buyer); await H.item(page);
+  const products = await s.api.get('catalog/', { page_size: 100 });
+  const gold = products.results.find(p => p.kind_effective === 'gold' && p.purity === '22K' && !p.purchase_only);
+  expect(gold, 'The rate-warning fixture must be a catalog Gold 22K item, not a custom line').toBeTruthy();
+  await H.chooseBuyer(page, buyer);
+  await H.tap(page.getByRole('button', { name: 'Something else', exact: true }));
+  await H.tap(page.getByRole('button', { name: gold.name, exact: true }));
   const reference = Number(board.in_force.per_gram['gold-22K']);
   await H.fillLine(page, '12.345', String(reference * 10));
   await H.check(133, () => expect(page.getByText(/Rates here are per gram/)).toBeVisible());
@@ -184,7 +203,7 @@ test('Easy acceptance: typed-rate slips, current-year reads and the older-day tw
   const number = page.getByRole('dialog', { name: 'Bill number', exact: true });
   await afterDialog(page);
   await number.getByRole('switch', { name: 'A bill from an earlier day', exact: true }).click();
-  const earlier = `${monthBefore(today())}-15`;
+  const earlier = await H.earlierOpenDay(s.api, s.firm);
   await number.getByLabel('Date on the paper bill', { exact: true }).fill(`${earlier.slice(8)}/${earlier.slice(5, 7)}/${earlier.slice(0, 4)}`);
   await number.getByLabel('Date on the paper bill', { exact: true }).press('Tab');
   await expect(number.getByLabel('Number on the paper bill', { exact: true })).not.toHaveValue('');
@@ -251,7 +270,7 @@ test('Easy acceptance: custom materials, walk-in send, offline cancel, remake an
   await H.check(343, () => expect(review.getByRole('button', { name: /^Save bill / })).toBeEnabled());
   await H.tap(review.getByRole('button', { name: 'Change something' })); await H.leave(page, 'Throw it away');
   const draft = page.locator(`section[aria-label="Unfinished bill for ${buyer.name}"]`);
-  await H.check(353, async () => { await expect(draft).toHaveCount(0); await expect(H.toast(page)).toContainText("wasn't saved"); });
+  await H.check(353, async () => { await expect(draft).toHaveCount(0); await expect(H.toast(page)).toContainText("The unfinished bill is gone."); await expect(H.toast(page).getByRole("button", { name: "Undo", exact: true })).toBeVisible(); });
   await H.tap(H.toast(page).getByRole('button', { name: 'Undo', exact: true }).last());
   await H.check(356, () => expect(draft).toBeVisible());
   await H.tap(draft.getByRole('button', { name: /^Remove/ }));
@@ -271,7 +290,7 @@ test('Easy acceptance: customer creation, duplicate phone, GSTIN, offline values
   await H.check(370, () => expect(page.getByText(new RegExp(`${esc(buyer.name)}'s number`))).toBeVisible());
   await mobile.fill(`96${String(Date.now()).slice(-8)}`);
   const gstin = page.getByLabel('GST number · only for shops and companies'); await gstin.fill('27AAPFR4418K1ZQ'); await gstin.blur();
-  await H.check(375, () => expect(page.getByText("The last character doesn't match the rest, so one letter or digit is probably mistyped. Check it again.")).toBeVisible());
+  await H.check(375, () => expect(page.getByText("The last character doesn't match, so you may have mistyped one character. It saves as you typed it, and bills to them still go to GSTR-1 as B2B. Check it against their GST certificate.")).toBeVisible());
   await gstin.fill('27AAPFR4418K1ZP');
   await H.check(377, () => expect(page.getByText(/Looks right: a shop in Maharashtra\. Bills to it charge IGST/)).toBeVisible());
   await page.context().setOffline(true); await H.tap(page.getByRole('button', { name: 'Save and continue the bill' }));
@@ -377,8 +396,9 @@ test('Easy acceptance: capture type checks, retained upload, upload then read an
   await page.context().setOffline(true); await gallery.setInputFiles({ name: 'synthetic-bill.png', mimeType: 'image/png', buffer: H.png() });
   await H.check(414, async () => { await expect(page.getByText("Not uploaded yet: you're offline.")).toBeVisible(); await expect(page.getByText('synthetic-bill.png')).toBeVisible(); });
   expect(calls.filter((c) => c === 'POST /api/captures/')).toHaveLength(0);
-  await page.context().setOffline(false); await H.tap(page.getByRole('button', { name: 'Try again', exact: true }));
+  await page.context().setOffline(false);
   await H.check(418, () => expect(page.getByText("We're reading it", { exact: true })).toBeVisible());
+  await expect.poll(() => calls.includes('POST /api/captures/')).toBe(true);
   const uploadAt = calls.indexOf('POST /api/captures/'); expect(uploadAt).toBeGreaterThanOrEqual(0);
   await expect.poll(() => calls.some((c, index) => index > uploadAt && /^POST \/api\/captures\/\d+\/read\/$/.test(c))).toBe(true);
   releaseRead();
@@ -389,7 +409,7 @@ test('Easy acceptance: capture type checks, retained upload, upload then read an
   await H.tap(H.toast(page).getByRole('button', { name: 'Undo', exact: true }).last());
   await H.check(426, async () => { await expect(row).toBeVisible(); expect(calls.some((c) => /^POST \/api\/captures\/\d+\/restore\/$/.test(c))).toBe(true); });
   await page.getByLabel('Take it again').setInputFiles({ name: 'replacement.png', mimeType: 'image/png', buffer: H.png() });
-  await H.check(429, async () => { await expect(page.getByText(/^Couldn't read this photo/)).toHaveCount(0); expect(calls).toContain(`DELETE /api/captures/${failed.id}/`); expect(calls.filter((c) => c === 'POST /api/captures/')).toHaveLength(2); });
+  await H.check(429, async () => { await expect(page.getByText(/^Couldn't read this photo/)).toHaveCount(0); expect(calls).toContain(`DELETE /api/captures/${failed.id}/`); await expect.poll(() => calls.filter((c) => c === 'POST /api/captures/').length).toBe(2); });
 });
 
 test('Easy acceptance: End of the day uses server figures and stale rates never nag', async ({ page, request }) => {
