@@ -228,9 +228,9 @@ test("Easy: a synthetic viewer cannot pick a customer or start a write", async (
   await page.addInitScript(() => localStorage.removeItem("gst3.me"));
   page.on("request", (r) => { const path = new URL(r.url()).pathname; if (r.method() !== "GET" && (/^\/api\/(sales|drafts|customers|products)\//).test(path)) writes.push(path); });
   await page.goto("/e/new");
-  await expect(page.getByRole("heading", { name: "Who is buying?" })).toBeVisible();
-  await opened(page);
-  await expect(page.getByRole("button", { name: /^Walk-in customer/ })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "New bill", exact: true })).toBeVisible();
+  await expect(page.getByText("Only the owner and counter staff can make bills. Ask the owner if you need it.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Walk-in customer/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New customer", exact: true })).toHaveCount(0);
   expect(writes).toEqual([]);
 });
