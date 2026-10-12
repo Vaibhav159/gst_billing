@@ -67,7 +67,7 @@ const STATES = [
   {
     name: "Easy's More (/e/more)", on: ["phone"], path: "/e/more",
     async show(page) {
-      await expect(page.getByRole("button", { name: /^Switch to Expert/ })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Switch to the full view/ })).toBeVisible();
     },
   },
   {

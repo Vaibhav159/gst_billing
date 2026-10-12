@@ -73,7 +73,7 @@ test.describe(() => {
       await expect(tabs.getByRole("link", { name: tab })).toHaveAttribute("aria-current", "page");
     }
     await opened(page);
-    await page.getByRole("button", { name: /switch to expert/i }).click();
+    await page.getByRole("button", { name: /^Switch to the full view/ }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(tabs.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
     // Back returns to the link that opened the page, with focus on it
