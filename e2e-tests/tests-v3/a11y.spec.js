@@ -245,8 +245,8 @@ for (const theme of ["obsidian", "pearl"]) {
 // entered yet and a cancelled bill, as the sandbox's KIRAN has, else the fullest there is: bookToMeasure, and the test
 // notes which) and the form its Enter bill opens; Check and save on a copy of a bill made for it; the date's calendar
 // (F14); the customer box while it searches and with no match (Ruling 1C-20a: web has no axe of its own); the review once
-// how it was paid is picked, with nothing left in its body to focus, so the body itself takes the keyboard (Ruling
-// 1D-18), measured where it scrolls: a 1280×720 desktop and a phone; the desktop's sheet for an item that isn't in
+// how it was paid is picked, reaching the desktop table or the phone's scrolling body by keyboard (Ruling 1D-18),
+// measured at a 1280×720 desktop and a phone; the desktop's sheet for an item that isn't in
 // Products; the phone's item sheet, step by step; a filed month's bill on its edit page; and the review refusing a save
 // (1D-20): a number just taken, and a filed month. An unfinished bill a check leaves is deleted after it (startsDrafts).
 /** The form itself, not its placeholders: the desktop's customer box has the cursor; a phone's offers to choose one. */
@@ -439,13 +439,13 @@ const FORM_STATES = [
       await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
       const { dialog, title } = await openReview(page, project);
       await dialog.getByRole("radio", { name: "Cash", exact: true }).click();
-      // A table supplies its own keyboard target; otherwise the overflowing
-      // dialog body supplies one. Verify that either target lets arrows scroll.
+      // Desktop tables now receive keyboard focus; the phone's control-free body is its scrolling region.
       const body = dialog.locator("[data-dialog-body]");
-      const target = dialog.getByRole("region", { name: title }).or(body.locator('[tabindex="0"]')).first();
-      await expect(target).toBeVisible();
-      await target.focus();
-      await expect(target).toBeFocused();
+      const scrolling = dialog.getByRole("region", { name: project === "phone" ? title : "Items that will be saved", exact: true });
+      await expect(scrolling).toBeVisible();
+      await dialog.getByRole("button", { name: "Close", exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(scrolling).toBeFocused();
       const before = await body.evaluate(el => el.scrollTop);
       await page.keyboard.press("ArrowDown");
       await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(before);
