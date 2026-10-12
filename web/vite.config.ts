@@ -39,7 +39,7 @@ export default defineConfig({
     modulePreload: {
       // These routes open only on demand. Their ESM imports load JavaScript dependencies;
       // keep CSS preloads, without embedding each new route's dependency list in the entry (X-47).
-      resolveDependencies: (filename, dependencies) => /(?:^|\/)(?:Suppliers|ImportPage|PhotoPage)-[^/]+\.js$/.test(filename)
+      resolveDependencies: (filename, dependencies) => /(?:^|\/)(?:Suppliers|ImportPage|PhotoPage|Home|Bills|BillDetail|CustomerRoutes|BillFlow)-[^/]+\.js$/.test(filename)
         ? dependencies.filter(file => file.endsWith('.css'))
         : dependencies,
     },

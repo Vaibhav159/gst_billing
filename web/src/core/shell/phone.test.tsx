@@ -6,6 +6,7 @@ import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
 import { wireDashboard, wireDue } from "@/core/dashboard/fixtures";
+import { FIRM, wireDetail, wirePage } from "@/core/sales/fixtures";
 import { wireRates } from "@/core/rates/testing";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { ToastProvider } from "@/core/ui";
@@ -36,8 +37,7 @@ beforeAll(async () => { await import("@/pages/core/DashboardPage"); });
 const SETUP = { firms:{count:0,names:[]}, customers:{count:0,names:[]}, products:{count:0,names:[]}, bills:{count:0,cancelled:0}, people:1, last_backup_at:null };
 
 function mount(path: string, prefs: Record<string, unknown> = {}) {
-  api.defaults.adapter = ((config) => Promise.resolve({ status: 200, statusText: "", headers: {}, config,
-    data: config.url === "setup/" ? SETUP : config.url?.startsWith("preferences/") ? { data: prefs } : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {} })) as AxiosAdapter;
+  server({ prefs });
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={auth}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
   return router;
@@ -104,7 +104,10 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
     if (config.url === "dashboard/") return Promise.resolve(answer(wireDashboard()));
     if (config.url === "due-next/") return Promise.resolve(answer(wireDue()));
     if (config.url === "rates/") return Promise.resolve(answer(wireRates()));
-    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {}));
+    if (config.url === "sales/") return Promise.resolve(answer(wirePage([])));
+    if (config.url?.match(/^sales\/\d+\/$/)) return Promise.resolve(answer(wireDetail({ id: Number(config.url.split("/")[1]) })));
+    if (config.url === "customers/duplicates/") return Promise.resolve(answer({ groups: [] }));
+    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [{ ...FIRM, short: "Kiran" }] } : { count: 0, next: null, results: [] }));
     if (config.method === "patch") {
       if (patchFail) return down();
       const save = () => { stored = { ...stored, ...body }; return answer({ data: stored }); };
@@ -299,7 +302,7 @@ test("a phone kept on Easy opens on Easy at once, before the server answers, as 
   const router = open("/");
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
   expect(s.pending()).toBe(1); // the kept setting decided; the server hasn't answered
-  const h1 = await screen.findByRole("heading", { level: 1, name: "Easy" });
+  const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
   expect(frame()).toHaveClass("h-full", { exact: true });
   await wait(200);
   expect(h1).not.toHaveFocus();
@@ -322,9 +325,9 @@ test("an Easy person tapping Home on a full-view page goes to Easy's home, greet
   await screen.findByRole("link", { name: /back to easy/i }); // the setting is in: Easy
   await userEvent.click(within(screen.getByRole("navigation", { name: /tabs/i })).getByRole("link", { name: "Home" }));
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
-  const h1 = await screen.findByRole("heading", { level: 1, name: "Easy" });
+  const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
   await waitFor(() => expect(h1).toHaveFocus());
-  await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy"));
+  await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy mode · Home"));
 });
 
 test("a setting that arrives late still opens the phone on Easy, as if the app had opened there", async () => {
@@ -335,7 +338,7 @@ test("a setting that arrives late still opens the phone on Easy, as if the app h
   await s.release();
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
   expect(router.state.historyAction).toBe("REPLACE"); // home isn't left behind for Back
-  const h1 = await screen.findByRole("heading", { level: 1, name: "Easy" });
+  const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
   expect(frame()).toHaveClass("h-full", { exact: true });
   await wait(200);
   expect(h1).not.toHaveFocus();
@@ -394,9 +397,9 @@ test("on a phone, signing in goes on to Easy with focus on its title and its nam
     server();
     const router = await signIn();
     await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
-    const h1 = await screen.findByRole("heading", { level: 1, name: "Easy" });
+    const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
     await waitFor(() => expect(h1, kept ? "kept" : "not kept").toHaveFocus());
-    await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy"));
+    await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy mode · Home"));
     cleanup();
   }
   queryClient.clear();
@@ -420,7 +423,8 @@ test("a first sign-in on a phone, its setting slow to come, greets only the home
       expect(heard.said).toEqual([]);
       await s.release();
       await pass(); // deliver React Query's notification before starting the page's clock
-      const name = mode === "easy" ? "Easy" : "Today";
+      const name = mode === "easy" ? FIRM.name : "Today";
+      const announcement = mode === "easy" ? "Easy mode · Home" : "Today";
       const h1 = screen.getByRole("heading", { level: 1, name });
       await pass(89);
       expect(h1, mode).not.toHaveFocus();
@@ -428,10 +432,10 @@ test("a first sign-in on a phone, its setting slow to come, greets only the home
       await pass(1);
       expect(h1, mode).toHaveFocus();
       await pass(16); // announce() writes on the next animation frame
-      expect(document.getElementById("route-announcer")).toHaveTextContent(name);
+      expect(document.getElementById("route-announcer")).toHaveTextContent(announcement);
       await pass(150);
       expect(heard.focused).toEqual([name]);
-      expect(heard.said).toEqual([name]);
+      expect(heard.said).toEqual([announcement]);
     } finally {
       heard.stop();
       cleanup();
@@ -480,11 +484,11 @@ test("More explains the GSTR-1A correction before GSTR-3B using the contract's l
   expect(within(dialog).queryByText(/next month's GSTR-1/)).not.toBeInTheDocument();
 });
 
-test("Switch to Expert keeps the choice for this person and opens the Expert home, and the phone stays there", async () => {
+test("Switch to the full view keeps the choice for this person and opens the Expert home, and the phone stays there", async () => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   const s = server();
   const router = open("/e/more");
-  const button = await screen.findByRole("button", { name: /switch to expert/i });
+  const button = await screen.findByRole("button", { name: /switch to the full view/i });
   await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
   afterADoubleTap();
   await userEvent.click(button);
@@ -507,7 +511,7 @@ test("Switch to Easy keeps the choice and opens Easy's home", async () => {
   afterADoubleTap();
   await userEvent.click(button);
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
-  await screen.findByRole("heading", { level: 1, name: "Easy" });
+  await screen.findByRole("heading", { level: 1, name: FIRM.name });
   expect(s.calls).toContainEqual({ method: "patch", url: "preferences/", body: { phoneMode: "easy" } });
   expect(within(screen.getByRole("navigation", { name: /tabs/i })).getByRole("link", { name: "More" })).toHaveAttribute("href", "/e/more");
   expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument(); // already there
@@ -709,7 +713,7 @@ test("while a phone waits for its setting, the banner still says what's wrong, a
   // Offline shows the Expert shell; the unread firm list cannot yet establish which home is safe.
   const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
   try {
-    act(() => { window.dispatchEvent(new Event("offline")); });
+    await act(async () => { window.dispatchEvent(new Event("offline")); });
     await screen.findByRole("navigation", { name: /tabs/i });
     expect(screen.queryByRole("heading", { level: 1, name: "Today" })).not.toBeInTheDocument();
     expect(document.querySelectorAll("[role=status][data-offline]")).toHaveLength(1);
@@ -717,7 +721,7 @@ test("while a phone waits for its setting, the banner still says what's wrong, a
     expect(document.querySelectorAll("#app-main")).toHaveLength(1);
   } finally {
     onLine.mockRestore();
-    act(() => { window.dispatchEvent(new Event("online")); }); // TanStack's own online state too
+    await act(async () => { window.dispatchEvent(new Event("online")); }); // TanStack's own online state too
   }
 });
 

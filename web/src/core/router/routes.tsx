@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { Navigate, useLocation, useParams, type RouteObject } from "react-router";
 import { RequireAuth } from "@/core/auth/RequireAuth";
 import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
@@ -9,6 +9,7 @@ import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 import { capturePages, captureRoutes } from "@/pages/purchases/capture/routes";
 import { customerPages, customerRoutes } from "@/pages/customers/routes";
+import { easyEverydayPages, easyEverydayRoutes } from "@/pages/easy/routes";
 import { part2dRoutes } from "@/pages/imports/routes";
 import { firmPages, firmRoutes } from "@/pages/firms/routes";
 import { productPages, productRoutes } from "@/pages/products/routes";
@@ -26,7 +27,7 @@ const ChoosePassword = lazyPage(() => import("@/pages/people/ChoosePassword"));
 const Login = lazyPage(() => import("@/pages/core/Login"));
 const More = lazyPage(() => import("@/pages/core/More"));
 
-const EasyBillFlow = lazy(() => import("@/pages/easy/BillFlow"));
+const EasyBillFlow = lazyPage(() => import("@/pages/easy/BillFlow"));
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -45,7 +46,7 @@ const Audit = lazyPage(() => import("@/pages/records/Audit"));
 const Backup = lazyPage(() => import("@/pages/records/Backup"));
 const DashboardPage = lazyPage(() => import("@/pages/core/DashboardPage"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, DashboardPage, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, DashboardPage, EasyBillFlow, ...easyEverydayPages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -70,8 +71,7 @@ const PAGES: Record<string, string[]> = {
     "/settings", "/setup",
   ],
   easy: [
-    "/e", "/e/bills", "/e/saved/:id", "/e/bill/:id", "/e/capture", "/e/customers", "/e/customers/new", "/e/customers/:id/edit",
-    "/e/gst", "/e/profile",
+    "/e/saved/:id", "/e/capture", "/e/gst",
   ],
 };
 
@@ -131,6 +131,7 @@ export const appRoutes: RouteObject[] = [{
           { path: "customer", element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
         ] },
         { path: "/e/bill/:id/print", element: <PrintPage />, handle: { hideNav: true } },
+        ...easyEverydayRoutes,
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,
         ...captureRoutes,
@@ -169,9 +170,8 @@ export const appRoutes: RouteObject[] = [{
         ...Object.entries(PAGES).flatMap(([area, paths]) => paths.map((path): RouteObject => ({
           path, element: <Placeholder {...PARTS[area]} phoneSearch={path === "/"} />, handle: HIDE_NAV.has(path) ? { hideNav: true } : undefined,
         }))),
-        // the phone's More tab, in Expert and in Easy (part 6 brings Easy's own)
+        // Expert's More tab; Easy's own is in easyEverydayRoutes above
         { path: "/more", element: <More /> },
-        { path: "/e/more", element: <More /> },
         { path: "*", element: <NotFound /> },
       ],
     },

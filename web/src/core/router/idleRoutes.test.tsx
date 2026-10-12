@@ -11,6 +11,7 @@ import { Page, ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { appRoutes } from "./routes";
 import { part2dRoutes } from "@/pages/imports/routes";
+import { easyEverydayPages } from "@/pages/easy/routes";
 
 type Code = { load: () => Promise<unknown> };
 const { queues, rendererLoaded, passwordCode } = vi.hoisted(() => {
@@ -49,6 +50,9 @@ test("the real routes warm every other lazy screen (GST returns, reports, audit 
     expect(owned).toHaveLength(4);
     for (const route of part2dRoutes) expect(all(appRoutes).find(r => r.path === route.path)?.element).toBe(route.element);
     expect(pages).toEqual(expect.arrayContaining(capturePages));
+    expect(pages).toEqual(expect.arrayContaining(easyEverydayPages));
+    const billFlow = all(appRoutes).find(route => route.path === "/e/new")?.element;
+    expect(isValidElement(billFlow) && typeof billFlow.type !== "string" && "load" in billFlow.type).toBe(true);
     // parts 3C and 3D's GST returns and report pages, and 4E's audit and backup, are warmed with the rest
     for (const path of ["/gst", "/reports", "/reports/:kind", "/audit", "/backup"]) {
       const element = all(appRoutes).find(r => r.path === path)?.element;
@@ -62,7 +66,7 @@ test("the real routes warm every other lazy screen (GST returns, reports, audit 
     for (const page of owned) expect(queues[0]).not.toContain(page);
     expect(queues).toHaveLength(1);
     expect(queues[0]).toHaveLength(expected.length);
-    for (const page of expected) expect(queues[0]).toContain(page);
+    expect(new Set(queues[0])).toEqual(new Set(expected));
     const loads = expected.map((page) => vi.spyOn(page, "load").mockResolvedValue({}));
     const onDemandLoads = owned.map((page) => vi.spyOn(page, "load").mockResolvedValue({}));
     const { calls } = salesServer();
@@ -92,15 +96,18 @@ test("the real routes warm every other lazy screen (GST returns, reports, audit 
   }
 });
 
-test("More shares one lazy chunk between its two phone addresses and warming its code fetches no data", async () => {
+test("Expert and Easy More have their own lazy chunks and warming either fetches no data", async () => {
   const more = all(appRoutes).find(({ path }) => path === "/more")?.element;
   const easy = all(appRoutes).find(({ path }) => path === "/e/more")?.element;
   if (!isValidElement(more) || !isValidElement(easy)) throw new Error("Both More routes must have a page.");
   expect(more.type).toHaveProperty("load", expect.any(Function));
-  expect(easy.type).toBe(more.type);
+  expect(easy.type).toHaveProperty("load", expect.any(Function));
+  expect(easy.type).not.toBe(more.type);
+  expect(queues[0]).toContain(easy.type);
   expect(queues[0]).toContain(more.type);
   const { calls } = salesServer();
   await (more.type as unknown as Code).load();
+  await (easy.type as unknown as Code).load();
   expect(calls).toHaveLength(0);
   expect(rendererLoaded).not.toHaveBeenCalled();
 });
