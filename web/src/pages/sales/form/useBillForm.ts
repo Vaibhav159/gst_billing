@@ -99,7 +99,9 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
   const edit = start.mode === "edit";
   const bill = start.bill;
 
-  const [f, setF] = useState<FormState>(start.form);
+  const [form, setF] = useState<FormState>(start.form);
+  const dateFields = chosenDateFields(form.date, today);
+  const f = paperByDate && form.paper !== dateFields.paper ? { ...form, ...dateFields } : form;
   const fRef = useRef(f);
   fRef.current = f;
   const [tried, setTried] = useState(start.tried);
@@ -350,14 +352,27 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
   const sentNote = edit && bill?.sent && changes.length > 0 && bill.total_amount !== figs.total ? bill : null;
 
   /* ── review and save ── */
+  // An idle form can cross IST midnight without rendering. Refresh its paper book before reviewing or saving;
+  // the caller must return so yesterday's closure cannot submit yesterday's number.
+  const syncDay = useCallback(() => {
+    const current = todayIST();
+    if (!paperByDate || current === today) return false;
+    flushSync(() => {
+      setF((o) => ({ ...o, ...chosenDateFields(o.date, current) }));
+      setReviewOpen(false);
+      setSaveError(null);
+    });
+    return true;
+  }, [paperByDate, today]);
   const openReview = useCallback((): { ok: true } | { ok: false; first: string } => {
+    if (syncDay()) return { ok: false, first: "number" };
     setTried(true);
     if (firstError) return { ok: false, first: firstError };
     setCashAnyway(false);
     setSaveError(null);
     setReviewOpen(true);
     return { ok: true };
-  }, [firstError]);
+  }, [firstError, syncDay]);
   const closeReview = useCallback(() => { if (saving) return; setReviewOpen(false); setSaveError(null); }, [saving]);
   const setPayment = useCallback((p: PaymentMode) => set({ payment: p }), [set]);
   const create = useCreateBill();
@@ -365,7 +380,9 @@ export function useBillForm(start: Start, formKey?: string, opts: BillFormOption
   /** Saves from the review. Resolves with the first field the server refused, for the form to take the person to (null otherwise). */
   const save = async ({ numberOverride }: { numberOverride?: string } = {}): Promise<{ refused: string | null }> => {
     const none = { refused: null };
-    if (saving || !reviewOpen || waitingForNext) return none;
+    if (saving || !reviewOpen) return none;
+    if (syncDay()) return { refused: "number" };
+    if (waitingForNext) return none;
     // The offered next number replaces only the old number's error. A deliberate retry can ask whether the owner unlocked a refused month.
     const override = numberOverride === undefined ? null : storedFor(next.data, numberOverride);
     const first = errorOrder(f.lines).find((k) => k === "number" && override !== null

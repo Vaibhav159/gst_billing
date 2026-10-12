@@ -112,6 +112,42 @@ test("returning to today clears Easy's paper flag; Expert's date setter leaves i
   expect(F.f).toMatchObject({ date: EARLIER, paper: false });
 });
 
+test.each(["line change", "review", "save"] as const)("Easy reconciles an open bill across IST midnight on %s without polling", async action => {
+  vi.setSystemTime(new Date("2026-10-08T23:59:50+05:30"));
+  const { calls } = server(); mount(); await pass(100); fill(); await pass(1500);
+  expect(F.f).toMatchObject({ date: TODAY, paper: false });
+  expect(F.suggestion).toBe("34");
+  if (action === "save") act(() => expect(F.openReview()).toEqual({ ok: true }));
+  const reads = calls.filter(c => c.method === "GET").length;
+  vi.setSystemTime(new Date("2026-10-09T00:00:01+05:30"));
+  await pass(1000);
+  expect(calls.filter(c => c.method === "GET")).toHaveLength(reads);
+  if (action === "line change") act(() => F.setLine(F.f.lines[0].key, { qty: 4.6 }));
+  else if (action === "review") act(() => expect(F.openReview()).toEqual({ ok: false, first: "number" }));
+  else await act(async () => { expect(await F.save()).toEqual({ refused: "number" }); });
+  expect(calls.filter(c => c.method === "POST" && c.url === "sales/")).toHaveLength(0);
+  expect(F.reviewOpen).toBe(false);
+  await pass(1300);
+  expect(F.f).toMatchObject({ date: TODAY, paper: true });
+  expect(F.suggestion).toBe("38");
+  expect(calls).toContainEqual(expect.objectContaining({ url: "sales/paper-book/", params: expect.objectContaining({ month: "2026-10" }) }));
+  expect(keptDraft(F.draftId!)?.data).toMatchObject({ date: TODAY, paper: true });
+  act(() => expect(F.openReview()).toEqual({ ok: true }));
+  await act(async () => { await F.save(); }); await pass();
+  expect(calls.find(c => c.method === "POST" && c.url === "sales/")?.body).toMatchObject({ invoice_date: TODAY, paper: true, invoice_number: "38" });
+});
+
+test("Expert keeps its chosen counter mode when an open bill crosses IST midnight", async () => {
+  const { calls } = server(); mount(undefined, {}); await pass(100); fill(); await pass(1500);
+  vi.setSystemTime(new Date("2026-10-09T00:00:01+05:30"));
+  act(() => F.setLine(F.f.lines[0].key, { qty: 4.6 })); await pass(400);
+  expect(F.f).toMatchObject({ date: TODAY, paper: false });
+  expect(calls.some(c => c.url === "sales/paper-book/")).toBe(false);
+  act(() => expect(F.openReview()).toEqual({ ok: true }));
+  await act(async () => { await F.save(); }); await pass();
+  expect(calls.find(c => c.method === "POST" && c.url === "sales/")?.body).toMatchObject({ invoice_date: TODAY, paper: false, invoice_number: "34" });
+});
+
 test("Easy's start and remake accept a chosen date, while omitted dates keep today's Expert defaults", () => {
   expect(startNew({ firmId: 3, firmSource: "mine", today: TODAY, date: EARLIER }).form).toMatchObject({ date: EARLIER, paper: true });
   expect(startNew({ firmId: 3, firmSource: "mine", today: TODAY }).form).toMatchObject({ date: TODAY, paper: false });
