@@ -301,6 +301,20 @@ describe("durable capture queue", () => {
     expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
   });
 
+  it("pressing Try now twice for one row during a pass sends it once after the pass", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf")], options); f.online();
+    f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();
+    const [failed] = f.store.rows;
+    f.online(false); await f.queue.add([pdf("b.pdf")], options); f.online();
+    const entered = deferred<void>(); const held = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return held.promise; });
+    const stop = f.queue.start(); await entered.promise;
+    f.read.mockImplementation(async (id: number) => { if (id === 12) throw new Error("reader unavailable"); return { id, status: "ready" }; });
+    const first = f.queue.resume(failed.clientId); const second = f.queue.resume(failed.clientId);
+    held.resolve({ id: 13 }); await Promise.all([first, second]); stop();
+    expect(f.read.mock.calls.map(([id]) => id)).toEqual([12, 13, 12]);
+  });
+
   it("a Try now pressed during an automatic pass runs after it instead of being dropped", async () => {
     const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf")], options); f.online();
     f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();

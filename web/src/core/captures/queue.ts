@@ -24,6 +24,8 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
   let snapshot: QueueSnapshot = { items: [], loading: false, error: null, busy: null };
   let running: Promise<void> | null = null;
   let runningAutomatic = false;
+  // Try now presses already waiting behind the running pass, by row: a second press joins the first.
+  const waiting = new Map<string, Promise<void>>();
   let controller: AbortController | null = null;
   const listeners = new Set<() => void>();
   const cleanups = new Set<() => void>();
@@ -91,7 +93,15 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
     if (userId === null) return Promise.resolve();
     if (!online()) { if (!automatic) publish({ error: OFFLINE_RETRY }); return Promise.resolve(); }
     // A Try now during an automatic pass runs after it: the automatic pass skips rows that wait for Try now.
-    if (running) return clientId || (runningAutomatic && !automatic) ? running.then(() => run(clientId, automatic)) : running;
+    if (running) {
+      if (!clientId && !(runningAutomatic && !automatic)) return running;
+      const key = clientId ?? "";
+      const queued = waiting.get(key);
+      if (queued) return queued;
+      const next = running.then(() => { waiting.delete(key); return run(clientId, automatic); });
+      waiting.set(key, next);
+      return next;
+    }
     runningAutomatic = automatic;
     running = drain(clientId, automatic).finally(() => { running = null; });
     return running;
