@@ -229,27 +229,38 @@ def change_person(actor, pk, action, data):
         audit_user(actor, user, "password", "Set by the owner · signed out everywhere")
         return {"detail": f"New password set for {person(user)['name']}. They're signed out everywhere and choose their own when they next sign in."}
     elif action == "stop":
-        user.is_active = False
-        user.save(update_fields=["is_active"])
-        at, _ = revoke_all(user, actor=actor, how="stopped")
-        security = security_for(user)
-        security.stopped_at = at
-        security.stopped_by = actor
-        security.save(update_fields=["stopped_at", "stopped_by"])
+        stop_person(user, actor)
         audit_user(actor, user, "stopped", "Signed out everywhere · bills and history kept")
     elif action == "allow":
         if old["active"] and old["stopped_at"] is None:
             return old
-        user.is_active = True
-        user.save(update_fields=["is_active"])
-        security = security_for(user)
-        security.stopped_at = None
-        security.stopped_by = None
-        security.save(update_fields=["stopped_at", "stopped_by"])
+        allow_person(user)
         audit_user(actor, user, "allowed", f"As {old['role_label']}")
     else:
         raise NotFound("That action isn't on file.")
     return people_rows(actor, pk)[0]
+
+
+@transaction.atomic
+def stop_person(user, actor):
+    """Stop someone signing in and sign them out everywhere; v3's stop and v2's users/ deactivate (X-65)."""
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    at, _ = revoke_all(user, actor=actor, how="stopped")
+    security = security_for(user)
+    security.stopped_at = at
+    security.stopped_by = actor
+    security.save(update_fields=["stopped_at", "stopped_by"])
+
+
+@transaction.atomic
+def allow_person(user):
+    user.is_active = True
+    user.save(update_fields=["is_active"])
+    security = security_for(user)
+    security.stopped_at = None
+    security.stopped_by = None
+    security.save(update_fields=["stopped_at", "stopped_by"])
 
 
 def masked_phone(phone):

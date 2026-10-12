@@ -3372,10 +3372,14 @@ class UserManagementView(APIView):
             kept = list(user.groups.filter(name__in=V3_GROUPS)) if new_role == "editor" else []
             user.groups.set([Group.objects.get(name=new_role), *kept])
 
-        # Update active status
-        if "is_active" in request.data:
-            user.is_active = request.data["is_active"]
-            user.save(update_fields=["is_active"])
+        # Update active status: stopping signs them out everywhere, as v3's stop does (X-65).
+        if "is_active" in request.data and bool(request.data["is_active"]) != user.is_active:
+            from billing.services.people import allow_person, stop_person
+
+            if request.data["is_active"]:
+                allow_person(user)
+            else:
+                stop_person(user, request.user)
 
         # Update password
         if request.data.get("password"):

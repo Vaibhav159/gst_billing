@@ -325,6 +325,32 @@ class PeopleTest(TestCase):
         for body in ([], {"email": []}, {"phone": {}}, {"last_name": None}):
             self.assertEqual(self.client.patch("/api/account/", body, format="json").status_code, 400)
 
+    def test_v2_users_deactivate_signs_out_everywhere_and_reactivate_allows(self):
+        """X-65: v2's users/ deactivate stops the person as v3's stop does; reactivating allows them."""
+        from billing.models import SignInSession, UserSecurity
+
+        sessions = [SignInSession.objects.create(user=self.staff, device=device) for device in ("Chrome on Windows", "Safari on Mac")]
+        response = self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": False}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(response.data["is_active"])
+        for session in sessions:
+            session.refresh_from_db()
+            self.assertIsNotNone(session.signed_out_at)
+            self.assertEqual((session.ended_how, session.signed_out_by_id), ("stopped", self.owner.pk))
+        security = UserSecurity.objects.get(user=self.staff)
+        self.assertIsNotNone(security.tokens_after)
+        self.assertEqual((security.stopped_at, security.stopped_by_id), (security.tokens_after, self.owner.pk))
+        self.assertEqual(self.post("allow").data["active"], True)
+        self.assertEqual(self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": False}, format="json").status_code, 200)
+        response = self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": True}, format="json")
+        self.assertTrue(response.data["is_active"])
+        security.refresh_from_db()
+        self.assertEqual((security.stopped_at, security.stopped_by_id), (None, None))
+        stopped_at = security.tokens_after
+        # Resending an unchanged status changes nothing.
+        self.client.patch("/api/users/", {"user_id": self.staff.pk, "is_active": True}, format="json")
+        self.assertEqual(UserSecurity.objects.get(user=self.staff).tokens_after, stopped_at)
+
     def test_v2_editor_keeps_v3_group_and_password_revokes(self):
         from billing.models import SignInSession, UserSecurity
 
