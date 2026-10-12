@@ -29,6 +29,7 @@ venv/
 .venv/
 ENV/
 .env
+.env.*
 
 # Local development settings
 gst_billing/local.py
