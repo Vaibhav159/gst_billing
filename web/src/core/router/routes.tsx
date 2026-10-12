@@ -7,6 +7,7 @@ import Login from "@/pages/core/Login";
 import More from "@/pages/core/More";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
+import { capturePages, captureRoutes } from "@/pages/purchases/capture/routes";
 import { customerPages, customerRoutes } from "@/pages/customers/routes";
 import { idlePages, lazyPage } from "./lazyPage";
 
@@ -26,7 +27,7 @@ const PurchaseList = lazyPage(() => import('@/pages/purchases/PurchaseList'));
 const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 
-const warmPages = idlePages([SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, paletteCode]);
+const warmPages = idlePages([SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -105,6 +106,7 @@ export const appRoutes: RouteObject[] = [{
       children: [
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
         ...customerRoutes,
+        ...captureRoutes,
         { path: '/purchases', element: <PurchaseList /> },
         { path: '/purchases/new', element: <PurchaseFormPage />, handle: { hideNav: true } },
         { path: '/purchases/:id/edit', element: <PurchaseFormPage />, handle: { hideNav: true } },

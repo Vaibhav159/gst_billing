@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { useNetwork } from "@/core/api/network";
 import { cn } from "@/core/cn";
@@ -15,6 +15,8 @@ import { PhoneShell } from "./PhoneShell";
 import { Palette } from "./Palette";
 import { ScreenBoundary } from "./ScreenBoundary";
 
+const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(module => ({ default: module.CaptureUploadHost })));
+
 /**
  * Around every route, sign-in included: the app's one ToastHost (a second would show every toast twice), the view on
  * its root, so the sign-in form gets the phone's 16 px fields too (iOS zooms into anything smaller), and the phone's
@@ -25,12 +27,15 @@ import { ScreenBoundary } from "./ScreenBoundary";
 export function RootLayout() {
   const { view } = useView();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const signIn = useRef(false);
   useEffect(() => { if (pathname === "/login") signIn.current = true; }, [pathname]);
   useKeyboardInset();
   return (
     <SignInShown.Provider value={signIn}>
-      <div data-view={view} className="h-full"><Outlet /><ToastHost /></div>
+      <div data-view={view} className="h-full"><Outlet /><ToastHost />
+        <ScreenBoundary onHome={() => { void navigate("/"); }}><Suspense fallback={null}><CaptureUploadHost /></Suspense></ScreenBoundary>
+      </div>
     </SignInShown.Provider>
   );
 }
