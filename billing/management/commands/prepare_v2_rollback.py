@@ -14,6 +14,8 @@ cancelled bill in a filed month moves too.
     python manage.py prepare_v2_rollback --reverse --apply   # then: freeze_firm_snapshots --apply
 """
 
+from contextlib import suppress
+
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Exists, OuterRef
@@ -154,8 +156,11 @@ class Command(BaseCommand):
         moved = [row for row in rows if str(row[2]) != str(row[1])]
         names = dict(uncached(Business).values_list("pk", "name")) if moved else {}
         for _pk, firm_id, frozen_id, number, day in moved:
+            frozen_name = f"firm {frozen_id}"
+            with suppress(TypeError, ValueError, OverflowError):
+                frozen_name = names.get(int(frozen_id), frozen_name)
             self.stdout.write(f"  {names.get(firm_id, f'Firm {firm_id}')} {number} of {day}: frozen with "
-                              f"{names.get(frozen_id, f'firm {frozen_id}')}'s details")
+                              f"{frozen_name}'s details")
         if apply and moved:
             with transaction.atomic():
                 lock_firms(*sorted({firm_id for _pk, firm_id, *_rest in moved}))

@@ -68,3 +68,18 @@ def test_reverse_without_a_rollback_keeps_every_current_firm_snapshot(text_id):
     assert "0 bill(s) moved to another firm while v2 ran" in reverse("--apply")
     bill.refresh_from_db()
     assert bill.firm_snapshot == frozen
+
+
+@pytest.mark.parametrize("frozen_id", ["text_id", "unknown", None, []])
+def test_reverse_names_text_firm_ids_and_reports_unrecognised_ids(frozen_id):
+    old, new, customer = firm(), firm("NEW FIRM"), buyer()
+    value = str(old.pk) if frozen_id == "text_id" else frozen_id
+    frozen = {**firm_snapshot(old), "business_id": value}
+    bill = sale(new, customer, "1", date(2026, 9, 1), firm_snapshot=frozen)
+    old_name = old.name if frozen_id == "text_id" else f"firm {value}"
+    assert f"  NEW FIRM 1 of 2026-09-01: frozen with {old_name}'s details" in reverse()
+    bill.refresh_from_db()
+    assert bill.firm_snapshot == frozen
+    reverse("--apply")
+    bill.refresh_from_db()
+    assert bill.firm_snapshot is None

@@ -1,7 +1,9 @@
 """Part 7 hardening (Ruling 7-D15): deeply nested JSON is a 400, never a 500 (1A final review, Minor 7)."""
+import os
+import subprocess
+import sys
 from io import BytesIO
 from pathlib import Path
-from runpy import run_path
 
 import pytest
 from django.utils.module_loading import import_string
@@ -39,8 +41,17 @@ def test_production_parses_deep_json_as_a_client_error_too():
         parser.parse(BytesIO(DEEP.encode()))
 
 
-def test_redis_password_is_not_printed_when_loading_settings(monkeypatch, capsys):
+def test_redis_password_is_not_printed_when_loading_settings(monkeypatch):
     monkeypatch.setenv("REDIS_PASSWORD", "synthetic-redis-password-for-test")
-    run_path(str(Path(__file__).resolve().parents[2] / "gst_billing" / "settings.py"))
-    captured = capsys.readouterr()
-    assert "synthetic-redis-password-for-test" not in captured.out + captured.err
+    marker = "GST_TEST_DOTENV_ISOLATION"
+    monkeypatch.setenv(marker, "parent")
+    # A checkout's .env can change settings-loader environment, but never this pytest process.
+    def load_dotenv():
+        os.environ[marker] = "settings-loader"
+
+    monkeypatch.setattr("dotenv.load_dotenv", load_dotenv)
+    result = subprocess.run([sys.executable, "-c", "import gst_billing.settings"],
+                            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "synthetic-redis-password-for-test" not in result.stdout + result.stderr
+    assert os.environ[marker] == "parent"

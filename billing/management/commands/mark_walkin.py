@@ -9,7 +9,8 @@ with the most cash sales first. Nothing is selected by name or created implicitl
 """
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 
 from billing.cache import invalidate, uncached
 from billing.models import Customer, Invoice
@@ -32,6 +33,8 @@ class Command(BaseCommand):
         marked = uncached(Customer).filter(customer_type="walkin").only("pk", "name").order_by("pk").first()
         if marked:
             self.stdout.write(f"Already marked: {marked.name} (id {marked.pk}). Nothing to do.")
+            if opts["id"] is not None and opts["id"] != marked.pk:
+                self.stdout.write(f"--id {opts['id']} was not applied.")
             return
         self._candidates()
         if opts["id"] is None and not opts["add"]:
@@ -55,7 +58,7 @@ class Command(BaseCommand):
 
     def _target(self, pk):
         """Only --id selects an existing row; --add refuses a duplicate canonical name."""
-        rows = uncached(Customer).only("pk", "name", "gst_number")
+        rows = uncached(Customer).only("pk", "name", "gst_number", "is_supplier")
         if pk is None:
             named = list(rows.filter(name__iexact=NAME).order_by("pk")[:2])
             if len(named) > 1:
@@ -66,21 +69,24 @@ class Command(BaseCommand):
         found = rows.filter(pk=pk).first()
         if found is None:
             raise CommandError(f"No customer has id {pk}.")
+        if found.is_supplier:
+            raise CommandError(f"{found.name} is a supplier; the walk-in record must be a customer. Choose another.")
         if has_gstin(found.gst_number):
             raise CommandError(f"{found.name} has a GSTIN; the walk-in record has none. Choose another.")
         return found
 
     def _candidates(self):
         """Rank before limiting: a general counter record may have any name (X-83)."""
-        rows = list(uncached(Customer).exclude(registered()).only("pk", "name"))
+        bills = (Invoice.objects.sales().counted().filter(customer_id=OuterRef("pk")).order_by()
+                 .values("customer_id").annotate(n=Count("pk"), cash=Count("pk", filter=Q(payment_mode="cash")),
+                                                 last=Max("invoice_date")))
+        rows = list(uncached(Customer).filter(is_supplier=False).exclude(registered()).only("pk", "name").annotate(
+            n=Coalesce(Subquery(bills.values("n")), 0), cash=Coalesce(Subquery(bills.values("cash")), 0),
+            last=Subquery(bills.values("last"))).order_by("-cash", "-n", "name", "pk")[:10])
         if not rows:
             self.stdout.write("No customers without a GSTIN.")
             return
-        bills = Invoice.objects.sales().counted().filter(customer_id__in=[c.pk for c in rows]).values("customer_id").annotate(
-            n=Count("pk"), cash=Count("pk", filter=Q(payment_mode="cash")), last=Max("invoice_date"))
-        counts = {row["customer_id"]: (row["n"], row["cash"], row["last"]) for row in bills}
-        rows.sort(key=lambda c: (-counts.get(c.pk, (0, 0, None))[1], c.name, c.pk))
         self.stdout.write("Customers without a GSTIN, with the most cash sales first:")
-        for row in rows[:10]:
-            n, cash, last = counts.get(row.pk, (0, 0, None))
-            self.stdout.write(f"  {row.name} (id {row.pk}): {n} sales bill(s), {cash} cash sale(s), last bill {last or 'none'}")
+        for row in rows:
+            self.stdout.write(f"  {row.name} (id {row.pk}): {row.n} sales bill(s), {row.cash} cash sale(s), "
+                              f"last bill {row.last or 'none'}")
