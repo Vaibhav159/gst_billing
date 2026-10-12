@@ -169,6 +169,18 @@ test("restore a deleted bill through the bin-id link after seeing its effect", a
   const restored = await api.get(`sales/${bill.id}/`);
   expect(restored.id).toBe(bill.id);
   expect(restored.invoice_number).toBe(bill.number);
+
+  // The same confirmation must also open from the log's normal action, whose
+  // display target includes both the number and customer name.
+  await api.del(`sales/${bill.id}/`, { reason: "Test bill" });
+  await openAudit(page, bill.number);
+  await page.getByRole("button", { name: `Restore ${deletion.words.target}`, exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Restore the bill", exact: true })).toBeEnabled();
+  await afterDialog(page);
+  await dialog.getByRole("button", { name: "Restore the bill", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect((await api.get(`sales/${bill.id}/`)).id).toBe(bill.id);
 });
 
 test("download a complete version 5 backup and record the finished download", async ({ page, request }, info) => {
@@ -297,7 +309,8 @@ test("a backup of more than 3,000 bills is restored one financial year at a time
   test.setTimeout(600_000);
   const api = client(request);
   const stamp = `${Date.now()}`;
-  const firmName = "ZZ E2E Years restore firm";
+  // Binned sales reserve their firm/FY/counter, so each run needs its own firm.
+  const firmName = `ZZ E2E Years restore firm ${stamp}`;
   const buyer = "ZZ E2E Years restore buyer";
   // Kept: the restored bills' bin entries protect their original customer reference.
   const line = { product_name: "Silver", hsn_code: "711311", gst_tax_rate: "0.03", quantity: "1", rate: "100", unit: "gms" };
@@ -323,6 +336,7 @@ test("a backup of more than 3,000 bills is restored one financial year at a time
       await expect.poll(() => previews.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(index + 2);
       const checked = await previews[index + 1].json();
       expect(checked.fy).toBe(fy);
+      expect(checked.plan.bills.add_count).toBe(1501);
       const dialog = await openRestoreConfirmation(page, checked.plan.words);
       await expect(dialog).toContainText(fy);
       const apply = page.waitForResponse((response) =>
@@ -339,7 +353,7 @@ test("a backup of more than 3,000 bills is restored one financial year at a time
     await expect(main(page)).toContainText("Added 3,002 bills across these years.");
   } finally {
     // The restored bills go to the bin; their firm and buyer remain for those protected references.
-    const firms = await api.get("businesses/");
+    const firms = await api.get("businesses/", { search: firmName, page_size: 100 });
     const firm = (firms.results ?? firms).find((row) => row.name === firmName);
     if (firm) {
       for (const fy of ["2024-25", "2025-26"]) {

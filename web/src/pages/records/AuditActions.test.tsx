@@ -73,6 +73,25 @@ test("a disabled restore shows its reason instead of opening from a deep link", 
   expect(screen.getByRole("button", { name: "Restore Priya Sharma" })).toBeDisabled();
 });
 
+test("a sale restore from the log loads the original bill by id, not its combined display target", async () => {
+  const target = "#MO/2026-27/27 - Priya Sharma";
+  const sale: AuditEntry = { ...entry, id: 9008, entity: "invoice", entity_id: 205, kind: "sales", group: "delete", action: "deleted", changes: [],
+    words: { text: "Deleted bill", target, after: "" }, link: null, can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect } };
+  const calls = serve({ "GET audit/": page(sale), "GET bin/": { count: 0, next: null, results: [] },
+    "GET sales/205/": () => ({ status: 404, data: { code: "deleted", binned } }),
+    "POST audit/9008/restore/": { entry: { ...sale, result: "restored", can: null }, new_entry: { ...sale, id: 9010 } } });
+  renderApp(<Audit />);
+  fireEvent.click(await screen.findByRole("button", { name: `Restore ${target}` }));
+  const dialog = screen.getByRole("dialog", { name: `Restore ${target}?` });
+  expect(await within(dialog).findByText("₹1,31,830.52")).toBeInTheDocument();
+  expect(within(dialog).getByText("Priya Sharma")).toBeInTheDocument();
+  expect(within(dialog).getByText(effect)).toBeInTheDocument();
+  opened(); fireEvent.click(within(dialog).getByRole("button", { name: "Restore the bill" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(calls.filter((call) => call.method === "POST")).toMatchObject([{ url: "audit/9008/restore/" }]);
+  expect(calls.some((call) => call.url === "bin/")).toBe(false);
+});
+
 test("offline action fails in its dialog without queuing or losing the field comparison", async () => {
   serve({ "GET audit/": page(), "POST audit/9012/revert/": () => ({ status: 0 }) });
   renderApp(<Audit />);

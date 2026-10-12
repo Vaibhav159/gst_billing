@@ -77,9 +77,9 @@ const recordOf = (bill: BillWire): AuditRecord => ({ number: bill.invoice_number
 const binRecord = (bill: BinWire): AuditRecord => ({ ...recordOf(bill), deletedAt: bill.deleted_at, deletedBy: bill.deleted_by });
 /** A stale link stops after this many pages instead of walking the whole bin or log. */
 const SCAN_PAGES = 20;
-async function findBin(match: (row: BinWire) => boolean, signal: AbortSignal, q?: string): Promise<BinWire | null> {
+async function findBin(match: (row: BinWire) => boolean, signal: AbortSignal): Promise<BinWire | null> {
   for (let page = 1; page <= SCAN_PAGES; page += 1) {
-    const answer = (await api.get<{ results: BinWire[]; next: string | null }>("bin/", { params: { page, page_size: 100, ...(q ? { q } : {}) }, signal })).data;
+    const answer = (await api.get<{ results: BinWire[]; next: string | null }>("bin/", { params: { page, page_size: 100 }, signal })).data;
     const row = answer.results.find(match);
     if (row) return row;
     if (!answer.next) return null;
@@ -110,18 +110,15 @@ export function useAuditRecord(entry: AuditEntry, record?: AuditRecord) {
     queryKey: ["audit", "record", entry.id], initialData: record,
     enabled: !record && ["sales", "purchases"].includes(entry.kind),
     queryFn: async ({ signal }): Promise<AuditRecord | null> => {
-      if (entry.can?.kind === "restore" && entry.kind === "purchases") {
-        try { await api.get(`purchases/${entry.entity_id}/`, { signal }); return null; }
+      if (entry.can?.kind === "restore") {
+        const resource = entry.kind === "purchases" ? "purchases" : "sales";
+        try { await api.get(`${resource}/${entry.entity_id}/`, { signal }); return null; }
         catch (error) {
           const problem = problemOf(error);
           const binned = problem.kind === "notfound" && problem.code === "deleted" ? (problem.body as { binned?: BinWire }).binned : undefined;
           if (binned) return binRecord(binned);
           throw error;
         }
-      }
-      if (entry.can?.kind === "restore") {
-        const bin = await findBin((row) => row.original_id === entry.entity_id && (row.type === "purchase") === (entry.kind === "purchases"), signal, entry.words.target);
-        return bin ? binRecord(bin) : null;
       }
       if (entry.kind === "sales") {
         const answer = await qc.fetchQuery(billQuery(entry.entity_id));
