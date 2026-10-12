@@ -270,7 +270,7 @@ export function useUnfinishedBills(enabled = true, { fresh = false, businessId }
   // its last ask failed, or waits for the network: what the cache holds may be older than a copy here
   const unread = server.isError || server.fetchStatus === "paused";
   const bills = useMemo(() => {
-    const live = kept.filter((d) => !d.gone && (businessId === undefined || d.business === businessId));
+    const live = kept.filter((d) => !d.gone);
     const gone = new Set(kept.filter((d) => d.gone).map((d) => d.id));
     const fromServer = (list?.drafts ?? []).filter((d) => !gone.has(d.id));
     const listed = new Set(fromServer.map((d) => d.id));
@@ -284,7 +284,7 @@ export function useUnfinishedBills(enabled = true, { fresh = false, businessId }
       const mine = changed.get(d.id);
       return mine ? { ...d, business: mine.business, data: mine.data, updated_at: mine.updated_at, onDevice: true } : { ...d, onDevice: false };
     });
-    return businessId === null ? [] : [...here, ...merged].sort(newestFirst);
+    return businessId === null ? [] : [...here, ...merged].filter((d) => businessId === undefined || d.business === businessId).sort(newestFirst);
   }, [list, kept, firstAsk, unread, businessId]);
   const asking = fresh ? server.fetchStatus === "fetching" && !server.isFetchedAfterMount : firstAsk;
   const answered = server.isSuccess && server.fetchStatus !== "paused" && (!fresh || server.isFetchedAfterMount);

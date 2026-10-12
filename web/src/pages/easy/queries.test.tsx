@@ -18,7 +18,7 @@ function setup() {
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}>{children}</AuthContext.Provider></QueryClientProvider>;
   return { qc, wrapper };
 }
-beforeEach(() => { __resetDeviceDrafts(); __resetDrafts(); });
+beforeEach(() => { localStorage.removeItem("gst3.drafts"); __resetDeviceDrafts(); __resetDrafts(); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 test("Home reads 50 today and one this month, preserving the whole-period summaries in paise", async () => {
@@ -72,7 +72,7 @@ test("recent customers ask for seven with this firm's FY figures, then show six 
   const { calls } = easyServer([["GET", "customers/", () => ({ results: customers })]]);
   const { result } = renderHook(() => useEasyRecentCustomers(3, EASY_TODAY), { wrapper: setup().wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(calls[0].params).toEqual({ figures: 1, figures_business_id: 3, start_date: "2026-04-01", end_date: EASY_TODAY, ordering: "-last_bill", page_size: 7 });
+  expect(calls[0].params).toEqual({ role: "customers", figures: 1, figures_business_id: 3, start_date: "2026-04-01", end_date: EASY_TODAY, ordering: "-last_bill", page_size: 7 });
   expect(result.current.data?.map((c) => c.id)).toEqual([20, 21, 22, 23, 24, 25]);
 });
 
@@ -87,14 +87,14 @@ test("customer search waits for two characters and 300 ms, normalizes a mobile a
   await act(async () => { await vi.advanceTimersByTimeAsync(299); });
   expect(calls).toEqual([]);
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-  expect(calls[0].params).toEqual({ figures: 1, figures_business_id: 3, start_date: "2026-04-01", end_date: EASY_TODAY, search: "9829041122", page_size: 12 });
+  expect(calls[0].params).toEqual({ role: "customers", figures: 1, figures_business_id: 3, start_date: "2026-04-01", end_date: EASY_TODAY, search: "9829041122", page_size: 12 });
 });
 
 test("Customers loads 40 more only on action, and a firm change never shows the old figures", async () => {
   const { calls } = easyServer([["GET", "customers/", (c) => c.params.figures_business_id === 2 ? new Promise(() => {}) : ({ count: 41, next: c.params.page === 1 ? "next" : null, results: [easyCustomer({ id: Number(c.params.page) })] })]]);
   const { result, rerender } = renderHook(({ firm }) => useEasyCustomers(firm, "Anil", EASY_TODAY), { wrapper: setup().wrapper, initialProps: { firm: 3 } });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(calls[0].params).toEqual({ figures: 1, figures_business_id: 3, start_date: "2026-04-01", end_date: EASY_TODAY, ordering: "-last_bill", search: "Anil", page_size: 40, page: 1 });
+  expect(calls[0].params).toEqual({ role: "customers", figures: 1, figures_business_id: 3, start_date: "2026-04-01", end_date: EASY_TODAY, ordering: "-last_bill", search: "Anil", page_size: 40, page: 1 });
   await act(async () => { await result.current.fetchNextPage(); });
   expect(calls.map((c) => c.params.page)).toEqual([1, 2]);
   rerender({ firm: 2 });
@@ -120,6 +120,17 @@ test("unfinished bills scope server and device rows, and discard/Undo update the
   await act(async () => { await result.current.keep(draft.id, 3, draft.data); });
   expect(result.current.list.bills.map((d) => d.id)).toEqual([draft.id]);
   expect(keptDraft("other")?.gone).not.toBe(true);
+});
+
+test("a draft moved on this device leaves its old firm's list before the server hears it", async () => {
+  const draft = easyDraft();
+  keepOnDevice({ ...draft, business: 2, data: { ...draft.data, firmId: 2 }, synced: false });
+  easyServer([["GET", "drafts/", (c) => ({ results: c.params.business_id === 3 ? [draft] : [] })]]);
+  const { result } = renderHook(() => ({ oldFirm: useEasyUnfinishedBills(3), newFirm: useEasyUnfinishedBills(2) }), { wrapper: setup().wrapper });
+  await waitFor(() => expect(result.current.oldFirm.answered && result.current.newFirm.answered).toBe(true));
+  expect(result.current.oldFirm.bills).toEqual([]);
+  expect(result.current.newFirm.bills).toHaveLength(1);
+  expect(result.current.newFirm.bills[0]).toMatchObject({ id: draft.id, business: 2, data: { firmId: 2 }, onDevice: true });
 });
 
 test("Send the bills gathers every unsent page before sending, dropping duplicate and invalid-mobile rows", async () => {

@@ -37,13 +37,14 @@ export function easyFirmId(firms: readonly Firm[], picked: unknown, personal: un
   return Number.isInteger(id) && firms.some(f => f.id === id) ? id : defaultFirmId(firms, personal, shop);
 }
 export function useEasyFirm() {
-  const list = useFirms(); const { prefs, ready } = usePrefs(); const shop = useShopSettings();
+  const list = useFirms(); const { prefs, ready, unavailable } = usePrefs(); const shop = useShopSettings();
   const offline = useNetwork() === "offline";
   const [picked, setPick] = useEasyPref("firm");
   const valid = (id: unknown) => list.firms.some(f => f.id === Number(id));
-  const waiting = list.loading || (!valid(picked) && (!ready || (!valid(prefs.defaultBusinessId) && (shop.isPending || (shop.isError && !shop.data)))));
+  const unreadPrefs = !valid(picked) && Boolean(unavailable);
+  const waiting = list.loading || unreadPrefs || (!valid(picked) && (!ready || (!valid(prefs.defaultBusinessId) && (shop.isPending || (shop.isError && !shop.data)))));
   const firmId = waiting ? null : easyFirmId(list.firms, picked, prefs.defaultBusinessId, shop.data?.default_business);
-  return { ...list, firmId, firm: list.firms.find(f => f.id === firmId) ?? null, loading: waiting && !offline && !shop.isPaused && !shop.isError, error: list.error || (waiting && (offline || shop.isPaused || shop.isError)),
+  return { ...list, firmId, firm: list.firms.find(f => f.id === firmId) ?? null, loading: waiting && !unreadPrefs && !offline && !shop.isPaused && !shop.isError, error: list.error || unreadPrefs || (waiting && (offline || shop.isPaused || shop.isError)),
     setFirm: (id: number) => { if (valid(id)) setPick(id); } };
 }
 export function useWelcome() {

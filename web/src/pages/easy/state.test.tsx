@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render";
+import { serve } from "@/test/server";
 import { toShopSettings } from "@/core/sales/wire";
 import { __setNetState } from "@/core/api/network";
 import { salesServer } from "@/core/sales/fixtures";
@@ -11,6 +12,21 @@ import { easyFirmId, thisYear, lastYear, earlyInYear, weightSlip, unusual, useEa
 const firms = [{ id: 3, name: "Kiran", short: "Kiran", gstin: "", state: "Rajasthan" }, { id: 8, name: "Aarav", short: "Aarav", gstin: "", state: "Rajasthan" }];
 afterEach(() => __setNetState("online"));
 describe("Easy state", () => {
+  it.each([null, 8])("keeps an unread personal default unknown unless this phone picked %s", async (picked) => {
+    const me = picked === null ? 92 : 93;
+    if (picked !== null) setEasyPref("firm", me, picked);
+    serve({
+      "GET firms/": { results: firms },
+      "GET preferences/": () => ({ status: 503, data: { detail: "Unavailable" } }),
+      "GET shop-settings/": { default_business: 3 },
+    });
+    function Probe() {
+      const f = useEasyFirm();
+      return <output>{f.loading ? "waiting" : "settled"}:{f.firmId ?? "none"}:{String(f.error)}</output>;
+    }
+    renderApp(<Probe />, { me: { id: me } });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(picked === null ? "settled:none:true" : "settled:8:false"));
+  });
   it("uses the phone pick then personal, shop, alphabetical; ignores vanished firms", () => {
     expect(easyFirmId(firms, 3, "8", 8)).toBe(3);
     expect(easyFirmId(firms, 99, "3", 8)).toBe(3);
