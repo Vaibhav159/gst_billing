@@ -18,7 +18,7 @@ export function MonthCard({ data, scope, phone = false }: { data: DashboardData;
   if (phone) return <Card title={title} subtitle={caption}>
     <div className="flex flex-col gap-4">
       {period}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+      <div className="dashboard-figures grid grid-cols-2 gap-x-4 gap-y-5">
         <Figure label={`Sales · ${plural(figures.sales.count, "bill")}`} value={figures.sales.total} size="xl" tone="sale" />
         <Figure label={`Purchases · ${plural(figures.purchases.count, "bill")}`} value={figures.purchases.total} size="xl" tone="amber" />
         <Figure label="GST on sales" value={figures.sales.tax} size="lg" />

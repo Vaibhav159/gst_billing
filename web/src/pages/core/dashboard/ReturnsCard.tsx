@@ -13,7 +13,7 @@ export function PastReturnsCard({ rows, fy, phone = false }: { rows: NonNullable
       actions={phone ? null : <ButtonLink to="/gst" variant="link" iconRight={ChevronRight}>Open GST returns</ButtonLink>}>
       {phone ? <div className="mt-1">
         {rows.map(r => <ListRow key={r.firm.id} to={`/gst?firm=${r.firm.id}&month=${march}`} title={r.firm.name}
-          className="[&_.line-clamp-2]:line-clamp-none"
+          className="dashboard-return-row [&_.line-clamp-2]:line-clamp-none"
           subtitle={<><span className="block">{r.months_filed === 12 ? "All 12 filed and locked" : `${r.months_filed} of 12 filed`}</span><span className="block">{r.last_gstr3b_filed_on ? `GSTR-3B filed ${date(r.last_gstr3b_filed_on)}` : "—"}</span></>}
           right={<Money value={r.cash_paid} />} rightSub="tax paid in cash" />)}
       </div> : <Table label={`FY ${fy} returns by firm`} className="mt-2">
@@ -38,7 +38,7 @@ export function ReturnsCard({ returns: data, today, phone = false }: { returns: 
       subtitle={<><Due today={today} iso={data.gstr1_due} label="GSTR-1" /> · <Due today={today} iso={data.gstr3b_due} label={phone ? "3B" : "GSTR-3B"} /></>} pad={false}
       actions={phone ? null : <ButtonLink to="/gst" variant="link" iconRight={ChevronRight}>Open GST returns</ButtonLink>}>
       {phone ? <div className="mt-1">
-        {data.firms.map(({ firm, stage, cash }) => <ListRow key={firm.id} to={`/gst?firm=${firm.id}&month=${data.month}${stage === "blocked" && files ? "&fix=1" : ""}`} title={firm.name}
+        {data.firms.map(({ firm, stage, cash }) => <ListRow key={firm.id} to={`/gst?firm=${firm.id}&month=${data.month}${stage === "blocked" && files ? "&fix=1" : ""}`} title={firm.name} className="dashboard-return-row"
           subtitle={stage === "blocked" ? (files ? "Blocked · tap to fix" : "Blocked · the owner is fixing it") : stage === "filed" ? "Filed and locked" : stage === "gstr1" ? "GSTR-1 filed · GSTR-3B next" : stage === "unlocked" ? "Unlocked for a correction" : "Ready to file"}
           right={<Money value={cash} />} rightSub="cash to pay" />)}
       </div> : <Table label="Returns by firm" className="mt-2">

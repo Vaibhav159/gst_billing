@@ -26,13 +26,13 @@ export function TodayCard({ data, scope, allFirms, phone = false }: { data: Dash
   const shown = today.bills.slice(0, 5);
   const firmShort = (id: number, name: string) => firms.find(f => f.id === id)?.short ?? shortName(name);
   if (phone) return <Card pad={false}>
-    <div className="px-4 pt-4 pb-3 flex items-end justify-between gap-3">
+    <div className="dashboard-today-total px-4 pt-4 pb-3 flex items-end justify-between gap-3">
       <div><p className="caps">Sales today</p><Money value={today.total} size="3xl" tone="sale" bump className="block mt-1" /></div>
       <p className="text-sm text-muted text-right pb-1">{plural(today.count, "bill")}<br />incl. GST</p>
     </div>
     <PaySplit data={data} className="px-4 pb-3 -mt-1" />
     {hasToday ? <ul>
-      {shown.map(b => <li key={b.id} data-row={b.id} className="flex items-center gap-2 pl-4 pr-2 border-t border-rule min-h-16">
+      {shown.map(b => <li key={b.id} data-row={b.id} className="dashboard-bill-row flex items-center gap-2 pl-4 pr-2 border-t border-rule min-h-16">
         <Link to={`/sales/${b.id}`} className="flex-1 min-w-0 py-3">
           <span className="block font-medium line-clamp-2">{b.customer.name}</span>
           <span className="block text-sm text-muted tnum">No. {b.counter ?? b.invoice_number} · {timeOf(b.created_at)} · {PAY_SHORT[b.payment_mode]}{allFirms ? ` · ${firmShort(b.business, b.business_name)}` : ""}</span>
@@ -42,7 +42,7 @@ export function TodayCard({ data, scope, allFirms, phone = false }: { data: Dash
       </li>)}
     </ul> : <>
       <p className="px-4 pb-2 text-sm text-fg2">No bills yet today.{recent.length ? ` The last ${recent.length === 1 ? "bill" : `${recent.length} bills`}:` : ""}</p>
-      <ul>{recent.map(b => <li key={b.id} data-row={b.id} className="flex items-center gap-2 pl-4 pr-2 border-t border-rule min-h-16">
+      <ul>{recent.map(b => <li key={b.id} data-row={b.id} className="dashboard-bill-row flex items-center gap-2 pl-4 pr-2 border-t border-rule min-h-16">
         <Link to={`/sales/${b.id}`} className="flex-1 min-w-0 py-3">
           <span className="block font-medium line-clamp-2">{b.customer.name}</span>
           <span className="block text-sm text-muted tnum">No. {b.counter ?? b.invoice_number} · {dateShort(b.invoice_date)}{allFirms ? ` · ${firmShort(b.business, b.business_name)}` : ""}</span>

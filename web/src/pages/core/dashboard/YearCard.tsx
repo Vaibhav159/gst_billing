@@ -15,7 +15,7 @@ export function YearCard({ data, scope, phone = false }: { data: DashboardData; 
   const currentMonth = monthOf(data.today.date);
   if (phone) return (
     <Card title={`FY ${data.fy}${data.current ? " so far" : ""}`} subtitle={`${data.current ? `1 Apr to ${dateShort(data.today.date)}` : "1 Apr to 31 Mar"} · ${scope}`}>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="dashboard-figures grid grid-cols-2 gap-4">
         <Figure label={`Sales · ${plural(year.sales.count, "bill")}`} value={year.sales.total} whole size="lg" tone="sale" />
         <Figure label={`Purchases · ${plural(year.purchases.count, "bill")}`} value={year.purchases.total} whole size="lg" tone="amber" />
       </div>
@@ -39,9 +39,9 @@ export function YearCard({ data, scope, phone = false }: { data: DashboardData; 
   const spoken = (m: Month) => `${monthLabel(m.month, { long: true })}${m.month === currentMonth ? " so far" : ""}: sales ${inr(m.sales.total)} in ${plural(m.sales.count, "bill")}, purchases ${inr(m.purchases.total)} in ${plural(m.purchases.count, "bill")}`;
   return (
     <Card title={`FY ${data.fy} by month`} subtitle={`${scope} · ${data.current ? `April to ${monthLabel(currentMonth, { long: true, year: false })} so far` : "April to March"} · ${count ? "bill counts" : "values incl. GST"} · click a month for its bills`}
-      actions={<div className="flex items-center gap-4 text-sm">
-        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="w-2.5 h-2.5 rounded-sm bg-sale" />Sales <Money value={year.sales.total} whole strong /> <span className="text-muted">· {plural(year.sales.count, "bill")}</span></span>
-        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="w-2.5 h-2.5 rounded-sm bg-amber" />Purchases <Money value={year.purchases.total} whole strong /> <span className="text-muted">· {plural(year.purchases.count, "bill")}</span></span>
+      actions={<div className="flex flex-wrap items-center gap-4 text-sm">
+        <span className="flex flex-wrap items-center gap-1.5"><span aria-hidden="true" className="w-2.5 h-2.5 rounded-sm bg-sale" />Sales <Money value={year.sales.total} whole strong /> <span className="text-muted">· {plural(year.sales.count, "bill")}</span></span>
+        <span className="flex flex-wrap items-center gap-1.5"><span aria-hidden="true" className="w-2.5 h-2.5 rounded-sm bg-amber" />Purchases <Money value={year.purchases.total} whole strong /> <span className="text-muted">· {plural(year.purchases.count, "bill")}</span></span>
         <Segmented label="Chart shows" value={mode} onChange={setMode} options={[{ value: "value", label: "Value" }, { value: "count", label: "Bills" }]} />
       </div>}>
       <div className="flex gap-3">

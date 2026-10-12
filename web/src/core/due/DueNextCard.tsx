@@ -8,7 +8,7 @@ import type { DueData, DueItem } from "@/core/dashboard/types";
 import { Card } from "@/core/ui";
 import { chipWhen, COUNT_WORD, dueLink, dueTone, PILL, VERB } from "./model";
 export function DueRow({ item, today, phone = false }: { item: DueItem; today: string; phone?: boolean }) {
-  return <Link to={dueLink(item)} className={cn("group flex items-start gap-3 border-t border-rule first:border-t-0 hover:bg-raised/50 transition-colors", phone ? "px-4 py-3 min-h-16" : "px-5 py-3")}>
+  return <Link to={dueLink(item)} className={cn("due-row group flex items-start gap-3 border-t border-rule first:border-t-0 hover:bg-raised/50 transition-colors", phone ? "px-4 py-3 min-h-16" : "px-5 py-3")}>
     <span className={cn("mt-0.5 shrink-0 rounded-md border text-xs font-semibold tnum text-center leading-tight px-1.5 py-1", phone ? "w-[64px]" : "w-[70px]", PILL[dueTone(item, today)])}>
       {item.due ? <><span className="sr-only">Due </span>{dateShort(item.due)}<span className="block font-normal opacity-90">{chipWhen(today, item.due)}</span></> : <>{item.count}<span className="block font-normal opacity-90">{COUNT_WORD[item.kind] || "waiting"}</span></>}
     </span>

@@ -90,6 +90,7 @@ for (const theme of ["obsidian", "pearl"]) {
         const main = document.getElementById("app-main");
         return Math.max(document.documentElement.scrollWidth - window.innerWidth, main.scrollWidth - main.clientWidth);
       })).toBeLessThanOrEqual(1);
+      if (phone) await expect.poll(() => page.locator('[data-actionbar] [data-variant="primary"] .btn-label').evaluate(label => label.scrollWidth - label.clientWidth)).toBeLessThanOrEqual(1);
       expect(await measure(page)).toEqual([]);
     });
   }

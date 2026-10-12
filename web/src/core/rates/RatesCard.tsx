@@ -23,7 +23,7 @@ function BoardCard({ data, variant, className }: { data: Rates; variant: RatesVa
   const sheet = <RatesSheet open={open} onClose={() => setOpen(false)} />;
   if (variant === 'strip') return <>
     <button type="button" onClick={() => { if (allowed) setOpen(true); }} aria-disabled={!allowed || undefined}
-      className={cn('card w-full flex items-center gap-3 px-4 py-3 text-left min-h-14', className)} title={allowed ? undefined : whyNot('rates.edit')}>
+      className={cn('rates-strip card w-full flex items-center gap-3 px-4 py-3 text-left min-h-14', className)} title={allowed ? undefined : whyNot('rates.edit')}>
       <Coins size={20} className="text-brand shrink-0" aria-hidden="true" />
       <span className="flex-1 min-w-0">
         <span className="block text-sm font-semibold">{stale ? setLine : `Today's rates · set ${timeOf(board?.set_at)}`}</span>

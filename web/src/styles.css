@@ -306,6 +306,10 @@
   [data-actionbar] > :is(button, a):not([data-variant="primary"]):has(svg) > .btn-label { display: none; }
   [data-actionbar] > :is(button, a):not([data-variant="primary"]):has(svg) { flex: 0 0 auto; padding-left: 14px; padding-right: 14px; }
 }
+@container actionbar (max-width: 220px) {
+  [data-actionbar] > [data-variant="primary"] { flex-wrap: wrap; height: auto; padding-block: 8px; }
+  [data-actionbar] > [data-variant="primary"] > .btn-label { white-space: normal; overflow-wrap: anywhere; }
+}
 /* While the phone's keyboard is up (keyboard.ts marks #root), the tabs make way: they're under it anyway, and kept
    they'd hold the page's action bar a tab bar's height above the keyboard, over an empty band. */
 #root[data-kb] .phone-tabs { display: none; }
@@ -337,4 +341,25 @@
   body:has([data-print-copy]) > :not([data-print-copy]) { display: none !important; }
   [data-print-copy] { display: block !important; }
   [data-print-copy] [data-paper] { box-shadow: none !important; min-height: 296mm !important; break-after: page; print-color-adjust: exact; }
+}
+
+/* Text enlargement reduces the app container, not the viewport media queries. */
+.dashboard { container: dashboard / inline-size; }
+[data-phone-header] { container: phone-header / inline-size; }
+@container dashboard (max-width: 1000px) {
+  .dashboard-columns { grid-template-columns: minmax(0, 1fr); }
+}
+@container phone-header (max-width: 300px) {
+  [data-phone-header] > div { flex-wrap: wrap; padding-block: 8px; }
+  [data-phone-header] > div > .flex-1 { flex-basis: calc(100% - 64px); }
+  [data-phone-header] h1 { white-space: normal; overflow-wrap: anywhere; }
+  [data-phone-header] > div > .flex:last-child { flex-wrap: wrap; margin-left: auto; }
+}
+@container dashboard (max-width: 300px) {
+  .dashboard-today-total, .dashboard-bill-row, .due-row, .rates-strip,
+  .rates-strip .flex, .dashboard-return-row, [role="radiogroup"] { flex-wrap: wrap; }
+  .dashboard-bill-row > a, .due-row > .flex-1, .rates-strip > .flex-1,
+  .dashboard-return-row > .flex-1 { flex-basis: 100%; }
+  .dashboard-figures { grid-template-columns: minmax(0, 1fr); }
+  .due-row .line-clamp-2, .dashboard-return-row .line-clamp-2 { -webkit-line-clamp: unset; }
 }
