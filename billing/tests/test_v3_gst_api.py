@@ -123,3 +123,48 @@ class GstApiTest(TestCase):
         response = self.client.get("/api/gst/files/gstr1a/", self.query)
         self.assertEqual(response.status_code, 409, response.content)
         self.assertEqual(response.json()["code"], "no_corrections")
+
+    def test_empty_amendments_names_the_return_before_and_after_gstr3b(self):
+        from billing.models import FilingRecord
+        FilingRecord.objects.create(business=self.business, year=2026, month=9, kind="gstr1",
+                                    filed_on=date(2026, 10, 5), bills={})
+        for filed, ending in ((False, "there's no GSTR-1A to record."),
+                              (True, "there are no amendments to carry.")):
+            with self.subTest(gstr3b=filed):
+                if filed:
+                    FilingRecord.objects.create(business=self.business, year=2026, month=9,
+                                                kind="gstr3b", filed_on=date(2026, 10, 6))
+                response = self.client.get("/api/gst/files/amendments/", self.query)
+                self.assertEqual(response.status_code, 409, response.content)
+                self.assertEqual(response.json()["code"], "no_corrections")
+                self.assertEqual(response.json()["detail"],
+                                 "Nothing has changed since September 2026's GSTR-1, so " + ending)
+
+    def test_bundle_preparation_does_not_record_parts_but_bundle_post_records_once(self):
+        from billing.models import AuditLog, ReturnDownload
+        from billing.services.gst_downloads import fingerprint
+        for kind in ("gstr1", "gstr3b"):
+            response = self.client.get(f"/api/gst/files/{kind}/", {**self.query, "record": "0"})
+            self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(ReturnDownload.objects.exists())
+        self.assertFalse(AuditLog.objects.filter(entity="gst_file").exists())
+        parts = ["gstr1", "gstr3b", "excel"]
+        response = self.client.post("/api/gst/files/bundle/", {
+            "business": self.business.pk, "month": "2026-09", "parts": parts,
+        }, format="json")
+        self.assertEqual(response.status_code, 204, response.content)
+        row = ReturnDownload.objects.get()
+        self.assertEqual(row.kind, "bundle")
+        self.assertEqual(row.fingerprint, fingerprint({"parts": sorted(parts)}))
+        self.assertEqual(AuditLog.objects.filter(entity="gst_file", action="downloaded").count(), 1)
+
+    def test_record_zero_keeps_download_permissions_and_running_month_checks(self):
+        response = self.client.get("/api/gst/files/gstr3b/", {
+            **self.query, "record": "0", "month": "2026-10",
+        })
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "month_running")
+        self.client = client_for(person("viewer", "viewer"))
+        response = self.client.get("/api/gst/files/gstr3b/", {**self.query, "record": "0"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["needs"], "gst.download")

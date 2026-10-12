@@ -33,6 +33,7 @@ test("bundle preserves portal JSON bytes and fetches the one firm's calendar mon
   expect(new TextDecoder().decode(await bytesOf(bundle.gstr1!.blob))).toBe(gstr1);
   expect(bundle.gstr1!.name).toBe("GSTR1_08VRHFA2322D1ZI_092026.json");
   expect(calls.every((c) => c.method === "GET")).toBe(true);
+  expect(calls.filter(c => c.url.startsWith("gst/files/")).every(c => c.params.record === "0")).toBe(true);
 });
 
 test("blocked bundle excludes only GSTR-1, never the workbook or 3B", async () => {
@@ -59,4 +60,16 @@ test("range uses leap-year month end; workbook failure makes no return-download 
   await expect(prepareCaBundle({ ...input, month: "2028-02" })).rejects.toBeDefined();
   expect(calls).toHaveLength(1);
   expect(calls[0].params.to).toBe("2028-02-29");
+});
+
+
+test.each(["gstr1", "zip"])("a %s failure leaves every bundle file read unrecorded", async (failure) => {
+  const calls = serve({ "GET reports/ca-workbook/": data, "GET gst/files/gstr3b/": "{}",
+    "GET gst/files/gstr1/": failure === "gstr1" ? () => ({ status: 500 }) : "{}" });
+  if (failure === "zip") vi.mocked(caBundle).mockRejectedValueOnce(new Error("Zip failed"));
+  await expect(prepareCaBundle(input)).rejects.toBeDefined();
+  const files = calls.filter(c => c.url.startsWith("gst/files/"));
+  expect(files).toHaveLength(2);
+  expect(files.every(c => c.method === "GET" && c.params.record === "0")).toBe(true);
+  expect(calls.some(c => c.method === "POST")).toBe(false);
 });

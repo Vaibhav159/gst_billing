@@ -124,7 +124,10 @@ class GstFile(APIView):
                 summary = changes_since_filing(business, month.year, month.month, changes=changes)
                 plan = amendment_plan(business, month.year, month.month, changes=summary)
                 if not plan or not plan["rows"]:
-                    raise Refusal(f"Nothing has changed since {month:%B %Y}'s GSTR-1, so there's no GSTR-1A to record.", "no_corrections")
+                    from billing.period_lock import month_status
+                    state = month_status(business.pk, month.year, month.month, include_checks=False)
+                    ending = "there are no amendments to carry." if state.gstr3b or state.legacy else "there's no GSTR-1A to record."
+                    raise Refusal(f"Nothing has changed since {month:%B %Y}'s GSTR-1, so {ending}", "no_corrections")
                 corrected = month
                 month = date.fromisoformat(plan["carried_by"] + "-01")
                 contents = build_amendments(business, month.year, month.month,
@@ -134,7 +137,8 @@ class GstFile(APIView):
             else:
                 from billing.services.ledger import build_gstr3b_json
                 contents = build_gstr3b_json(business, month.year, month.month)
-        record_download(business, month, "gstr1_filed" if as_filed else kind, request.user, via, contents)
+        if request.query_params.get("record") != "0":
+            record_download(business, month, "gstr1_filed" if as_filed else kind, request.user, via, contents)
         response = HttpResponse(json.dumps(contents, cls=JSONEncoder, ensure_ascii=False), content_type="application/json")
         response["Content-Disposition"] = f'attachment; filename="{file_name(business, month, kind)}"'
         if kind == "gstr3b":

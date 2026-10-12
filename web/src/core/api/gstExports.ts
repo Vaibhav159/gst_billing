@@ -16,11 +16,11 @@ export function useCaWorkbook(scope: WorkbookScope, open: boolean) {
 
 export type BundleInput = { businessId: number; month: string; short: string; gstin: string; split: boolean; includeGstr1: boolean };
 type NamedBlob = { name: string; blob: Blob };
-// A file endpoint records a ReturnDownload. Call only after a person's download press, never as a prefetch.
+// Bundle preparation stays unrecorded; recordCaBundle logs the completed zip after download.
 async function returnFile(kind: "gstr1" | "gstr3b", input: BundleInput): Promise<NamedBlob> {
   try {
     const response = await api.get<string>(`gst/files/${kind}/`, {
-      params: { business_id: input.businessId, month: input.month, via: "download" }, responseType: "text", transformResponse: [(raw) => raw],
+      params: { business_id: input.businessId, month: input.month, via: "download", record: "0" }, responseType: "text", transformResponse: [(raw) => raw],
     });
     const period = input.month.slice(5) + input.month.slice(0, 4);
     // The server's bytes stay intact: parsing and serializing would rewrite number formatting in a filed JSON.
