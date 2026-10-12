@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router";
 import { createRef } from "react";
@@ -28,11 +28,74 @@ test("a table has a name and keeps its header cells", () => {
 });
 
 test("a wide table without controls can be reached by keyboard to scroll", async () => {
-  wrap(<Table label="Restore preview" minWidth={720}><tbody><Tr><Td>Sales bills</Td></Tr></tbody></Table>);
+  const width = vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(720);
+  const viewportWidth = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(480);
+  try {
+    wrap(<Table label="Restore preview" minWidth={720}><tbody><Tr><Td>Sales bills</Td></Tr></tbody></Table>);
+    await userEvent.tab();
+    const viewport = screen.getByRole("table", { name: "Restore preview" }).parentElement;
+    expect(viewport).toHaveFocus();
+    expect(viewport).toHaveAccessibleName("Restore preview");
+  } finally { width.mockRestore(); viewportWidth.mockRestore(); }
+});
+
+test("a table that fits has no extra Tab stop or named region", async () => {
+  wrap(<Table label="Bills"><tbody><Tr><Td><Button>Open bill</Button></Td></Tr></tbody></Table>);
   await userEvent.tab();
-  const viewport = screen.getByRole("table", { name: "Restore preview" }).parentElement;
-  expect(viewport).toHaveFocus();
-  expect(viewport).toHaveAccessibleName("Restore preview");
+  expect(screen.getByRole("button", { name: "Open bill" })).toHaveFocus();
+  expect(screen.queryByRole("region", { name: "Bills" })).not.toBeInTheDocument();
+});
+
+test("a table's keyboard scroll region follows viewport and content resizing", () => {
+  const observed = new Map<Element, () => void>();
+  const disconnect = vi.fn(() => observed.clear());
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private cb: ResizeObserverCallback) {}
+    observe(target: Element) { observed.set(target, () => this.cb([], this as unknown as ResizeObserver)); }
+    disconnect = disconnect;
+  });
+  let contentWidth = 480, viewportWidth = 480;
+  const width = vi.spyOn(Element.prototype, "scrollWidth", "get").mockImplementation(() => contentWidth);
+  const clientWidth = vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(() => viewportWidth);
+  try {
+    const page = wrap(<Table label="Bills"><tbody><Tr><Td>Sales bills</Td></Tr></tbody></Table>);
+    const table = screen.getByRole("table", { name: "Bills" });
+    const viewport = table.parentElement!;
+    expect(viewport).not.toHaveAttribute("tabindex", "0");
+    viewportWidth = 320;
+    act(() => observed.get(viewport)?.());
+    expect(screen.getByRole("region", { name: "Bills" })).toHaveAttribute("tabindex", "0");
+    viewportWidth = 480;
+    act(() => observed.get(viewport)?.());
+    expect(viewport).not.toHaveAttribute("tabindex", "0");
+    expect(screen.queryByRole("region", { name: "Bills" })).not.toBeInTheDocument();
+    contentWidth = 720;
+    act(() => observed.get(table)?.());
+    expect(viewport).toHaveAttribute("tabindex", "0");
+    contentWidth = 480;
+    act(() => observed.get(table)?.());
+    expect(viewport).not.toHaveAttribute("tabindex", "0");
+    page.unmount();
+    expect(disconnect).toHaveBeenCalledOnce();
+  } finally { width.mockRestore(); clientWidth.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+test("a table rechecks overflow when its text changes", async () => {
+  let contentWidth = 480;
+  const width = vi.spyOn(Element.prototype, "scrollWidth", "get").mockImplementation(() => contentWidth);
+  const clientWidth = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(480);
+  const table = (text: string) => <MemoryRouter><Table label="Bills"><tbody><Tr><Td>{text}</Td></Tr></tbody></Table></MemoryRouter>;
+  try {
+    const page = render(table("Bill"));
+    const viewport = screen.getByRole("table", { name: "Bills" }).parentElement;
+    expect(viewport).not.toHaveAttribute("tabindex", "0");
+    contentWidth = 720;
+    page.rerender(table("A bill with a longer reference"));
+    await waitFor(() => expect(viewport).toHaveAttribute("tabindex", "0"));
+    contentWidth = 480;
+    page.rerender(table("Bill"));
+    await waitFor(() => expect(viewport).not.toHaveAttribute("tabindex", "0"));
+  } finally { width.mockRestore(); clientWidth.mockRestore(); }
 });
 
 /* ── Beyond the brief: the phone header and action bar, the desktop header, cards and the list helpers ── */
