@@ -62,4 +62,3 @@ class CAWorkbookView(ReportView):
 
     def get(self, request):
         return super().get(request, "ca-workbook")
-

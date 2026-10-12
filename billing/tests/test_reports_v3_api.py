@@ -98,4 +98,3 @@ def test_legacy_report_route_keeps_its_owner():
 
     from billing.api.views import ReportView
     assert resolve("/api/reports/generate/").func.view_class is ReportView
-
