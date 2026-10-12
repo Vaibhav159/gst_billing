@@ -73,14 +73,15 @@ function gstr3bRows(rows: Row[], firm: string, value: CaWorkbook["firms"][number
   table(rows, "Credit too late to claim · bills", records(record(data.t4d2).list), purchaseColumns);
   table(rows, "Credit to confirm", records(data.to_confirm), purchaseColumns);
   table(rows, "5 · Exempt, nil and non-GST purchases", [record(data.t5)], [["Inter-state", "inter", true], ["Within the state", "intra", true]]);
+  for (const note of [data.t5_note, data.reduction_note]) if (typeof note === "string" && note) rows.push({ kind: "sub", cells: [{ v: note, span: 12 }] });
   const balanceKeys = [["carry_in", "Credit carried in"], ["available", "Credit available"], ["used", "6.1 · Credit used"], ["cash", "6.1 · Cash to pay"], ["cash_paid", "6.1 · Cash paid"], ["carry_on", "Credit carried on"]] as const;
   table(rows, "6.1 · Payment and credit carried", balanceKeys.filter(([key]) => data[key] != null).map(([key, label]) => ({ label, ...record(data[key]), ...record(record(data[key]).heads) })), [["Working", "label"], ...moneyColumns.slice(1), ["Total", "total", true], ["From", "from"], ["As filed", "as_filed"], ["Opening", "opening"]]);
   table(rows, "Credit set-off", records(data.steps), [["Credit head", "from"], ["Tax head", "to"], ["Amount", "amount", true]]);
   if (data.amendments) table(rows, "Corrections carried", [record(data.amendments)], [["Corrected months", "months"], ["Output IGST", "output.igst", true], ["Output CGST", "output.cgst", true], ["Output SGST", "output.sgst", true], ["Credit IGST", "credit.igst", true], ["Credit CGST", "credit.cgst", true], ["Credit SGST", "credit.sgst", true]]);
   if (data.late) {
     const late = record(data.late);
-    table(rows, "Late fee · estimate", ["gstr1", "gstr3b"].map(kind => ({ ...record(late[kind]), kind: kind === "gstr1" ? "GSTR-1" : "GSTR-3B" })), [["Return", "kind"], ["Days", "days", true], ["Per day", "per_day", true], ["Late fee", "fee", true], ["Cap", "cap", true], ["Capped", "capped"]]);
-    table(rows, "Late fee and interest · estimate", [{ ...late, interest_note: data.interest_note ?? "" }], [["Interest", "interest", true], ["Interest on", "interest_on", true], ["Interest from", "interest_from"], ["Total", "total", true], ["Interest note", "interest_note"]]);
+    table(rows, `Late fee · ${late.recorded ? "as recorded" : "estimate"}`, ["gstr1", "gstr3b"].map(kind => ({ ...record(late[kind]), kind: kind === "gstr1" ? "GSTR-1" : "GSTR-3B" })), [["Return", "kind"], ["Days", "days", true], ["Per day", "per_day", true], ["Late fee", "fee", true], ["Cap", "cap", true], ["Capped", "capped"]]);
+    table(rows, `Late fee and interest · ${late.recorded ? "as recorded" : "estimate"}`, [{ ...late, interest_note: data.interest_note ?? "" }], [["Interest", "interest", true], ["Interest on", "interest_on", true], ["Interest from", "interest_from"], ["Total", "total", true], ["Interest note", "interest_note"]]);
   }
   if (data.opening_missing) rows.push({ kind: "sub", cells: [{ v: "The opening credit isn't typed yet, so the credit carried in may be too low.", span: 12 }] });
 }

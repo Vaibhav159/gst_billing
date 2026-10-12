@@ -72,6 +72,17 @@ test("late estimates use the nested contract shape and unlocked books are marked
   expect(values).toEqual(expect.arrayContaining(["Summary · 2026-09 · To file", "150.00", "5000.00", "2026-10-21", "Owner"]));
 });
 
+test("3A's notes reach the GSTR-3B sheet and recorded charges are not called an estimate", () => {
+  const data = caFixture();
+  const month = data.firms[0].gstr3b[0];
+  month.tables.t5_note = "Includes purchases from unregistered suppliers with no GST charged.";
+  month.tables.reduction_note = "₹0.60 of an earlier correction is taken off next month's tax.";
+  month.tables.late = { gstr1: { days: 0, per_day: "50.00", fee: "0.00", cap: "5000.00", capped: false }, gstr3b: { days: 0, per_day: "50.00", fee: "400.00", cap: "5000.00", capped: false }, interest: "12.50", interest_on: "1509.50", interest_from: "2026-10-21", total: "412.50", recorded: true };
+  const values = workbookSheets(data)[3].rows.flatMap(row => row.cells.map(cell => cell.v));
+  expect(values).toEqual(expect.arrayContaining([month.tables.t5_note, month.tables.reduction_note, "Late fee · as recorded", "Late fee and interest · as recorded", "412.50"]));
+  expect(values).not.toContain("Late fee · estimate");
+});
+
 test("GSTR-3B has statutory zero tables and preserves cash paid as a total with unknown heads", () => {
   const data = caFixture();
   data.firms[0].gstr3b[0].tables.cash_paid = { igst: null, cgst: null, sgst: null, total: "1510.00" };
