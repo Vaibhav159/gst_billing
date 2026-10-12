@@ -80,9 +80,10 @@ def test_two_thousand_bin_rows_restore_with_bounded_queries_and_history():
         assert marker["by"] == owner.pk and marker["via"] == "bin"
     if connection.vendor == "postgresql":
         locks = [query["sql"] for query in queries if "FOR UPDATE" in query["sql"] or "FOR NO KEY UPDATE" in query["sql"]]
+        # 4A's order: audit entries, then firms (firm edits freeze bin data under them), then bin rows.
         assert '"billing_auditlog"' in locks[0]
-        assert '"billing_binnedinvoice"' in locks[1]
-        assert '"billing_business"' in locks[2]
+        assert '"billing_business"' in locks[1]
+        assert '"billing_binnedinvoice"' in locks[2]
     print(f"2000 bin bills: {len(queries)} queries, {elapsed:.2f}s ({connection.vendor})")
 
 
