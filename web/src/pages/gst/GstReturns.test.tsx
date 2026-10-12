@@ -1,6 +1,6 @@
 import { act, configure, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useLocation } from 'react-router';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { expect, test, vi, beforeEach, afterAll } from 'vitest';
 import { renderApp } from '@/test/render';
 import { serve } from '@/test/server';
@@ -10,12 +10,13 @@ import { shareFile, saveFile } from '@/core/print/files';
 configure({asyncUtilTimeout:5000});
 afterAll(()=>configure({asyncUtilTimeout:1000}));
 const goScope=vi.fn();
-const scopeState=vi.hoisted(()=>({ready:true}));
-vi.mock('@/core/scope',async original=>({...await original<typeof import('@/core/scope')>(),useScope:()=>({firmId:scopeState.ready?3:null,fy:'2026-27',ready:scopeState.ready,setFirmId:goScope,setFy:vi.fn(),fyChoices:['2026-27','2025-26','2024-25']}),useFirms:()=>({firms:[{id:3,name:'KIRAN GOLD HOUSE',short:'Kiran',gstin:'08VRHFA2322D1ZI',state:'RAJASTHAN'}],loading:false,error:false,problem:null})}));
+const goFy=vi.fn();
+const scopeState=vi.hoisted(()=>({ready:true,firmId:3 as number|'all',fy:'2026-27',loading:false}));
+vi.mock('@/core/scope',async original=>({...await original<typeof import('@/core/scope')>(),useScope:()=>({firmId:scopeState.ready?scopeState.firmId:null,fy:scopeState.fy,ready:scopeState.ready,setFirmId:goScope,setFy:goFy,fyChoices:['2026-27','2025-26','2024-25']}),useFirms:()=>({firms:scopeState.loading?[]:[{id:3,name:'KIRAN GOLD HOUSE',short:'Kiran',gstin:'08VRHFA2322D1ZI',state:'RAJASTHAN'},{id:1,name:'AARAV JEWELLERS',short:'Aarav',gstin:'08DLTFT2681H1ZV',state:'RAJASTHAN'}],loading:scopeState.loading,error:false,problem:null})}));
 vi.mock('@/core/print/files',()=>({saveFile:vi.fn(),shareFile:vi.fn()}));
 vi.mock('./CreditView',()=>({CreditView:({businessId,fy}:{businessId:number;fy:string})=> <p data-testid="credit-scope">{businessId}/{fy}</p>}));
 vi.mock('./ReconView',()=>({ReconView:({businessId,fy}:{businessId:number;fy:string})=> <p data-testid="recon-scope">{businessId}/{fy}</p>}));
-beforeEach(()=>{scopeState.ready=true;vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-08T06:00:00Z'));});
+beforeEach(()=>{Object.assign(scopeState,{ready:true,firmId:3,fy:'2026-27',loading:false});goScope.mockReset();goFy.mockReset();vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-08T06:00:00Z'));});
 function server(m: unknown=monthFixture()) {return serve({'GET gst/year/':yearFixture(),'GET gst/month/':m,'GET gst/month/gstr1/':sectionsFixture(),'GET gst/month/gstr3b/':ledgerFixture(),'GET gst/month-end/':endFixture()});}
 test('opens exact month and section, requests each lazy detail once, and hides filing from viewers',async()=>{
   const calls=server();renderApp(<GstReturns/>,{path:'/gst?firm=3&month=2026-09&sec=docs',me:{role:'viewer',permissions:['view','reports.export']}});
@@ -47,6 +48,72 @@ test('no GST query runs while the scope is unresolved, even after firms have loa
   fireEvent.click(screen.getByText('Resolve scope'));
   expect(await screen.findByRole('tab',{name:/Documents/})).toBeInTheDocument();
   expect(calls.filter(c=>c.url==='gst/month/')).toHaveLength(1);
+});
+
+test.each(['scope first','firms first'])('a deep link keeps its firm while defaults hydrate, %s',async order=>{
+  const calls=server();
+  function HydratingScope() {
+    const [step,setStep]=useState(0),[firm,setFirm]=useState<number|'all'>(1);
+    scopeState.ready=step>=(order==='scope first'?1:2);
+    scopeState.loading=step<(order==='firms first'?1:2);
+    scopeState.firmId=firm;goScope.mockImplementation(setFirm);
+    const location=useLocation();
+    return <><button onClick={()=>setStep(s=>s+1)}>Continue loading</button><output data-testid="gst-location">{location.search}</output><GstReturns/></>;
+  }
+  renderApp(<HydratingScope/>,{path:'/gst?firm=3&month=2026-09&sec=docs'});
+  expect(calls.filter(c=>c.url.startsWith('gst/'))).toHaveLength(0);
+  fireEvent.click(screen.getByText('Continue loading'));
+  fireEvent.click(screen.getByText('Continue loading'));
+  await screen.findByRole('tab',{name:/Documents/});
+  expect(new URLSearchParams(screen.getByTestId('gst-location').textContent!).get('firm')).toBe('3');
+  expect(screen.getByRole('radio',{name:'Kiran'})).toHaveAttribute('aria-checked','true');
+  expect(scopeState.firmId).toBe(3);
+  expect(calls.filter(c=>c.url==='gst/month/').at(-1)?.params).toEqual({business_id:3,month:'2026-09'});
+});
+
+test('a deep link keeps its exact prior-FY month while deliberate header firm and FY changes navigate',async()=>{
+  server();
+  function HeaderScope() {
+    const [firm,setFirm]=useState<number|'all'>(1),[fy,setFy]=useState('2026-27');
+    scopeState.firmId=firm;scopeState.fy=fy;goScope.mockImplementation(setFirm);goFy.mockImplementation(setFy);
+    const location=useLocation();
+    return <><button onClick={()=>setFirm(1)}>Header firm</button><button onClick={()=>setFy('2026-27')}>Header FY</button><output data-testid="gst-location">{location.search}</output><GstReturns/></>;
+  }
+  renderApp(<StrictMode><HeaderScope/></StrictMode>,{path:'/gst?firm=3&month=2025-05&sec=docs&fix=1&tab=credit'});
+  await screen.findByTestId('credit-scope');
+  const query=()=>new URLSearchParams(screen.getByTestId('gst-location').textContent!);
+  expect(query().get('firm')).toBe('3');
+  expect(query().get('month')).toBe('2025-05');
+  expect(query().get('sec')).toBe('docs');
+  expect(query().get('fix')).toBe('1');
+  expect(scopeState.fy).toBe('2025-26');
+  fireEvent.click(screen.getByText('Header firm'));
+  await waitFor(()=>expect(query().get('firm')).toBe('1'));
+  expect(query().get('month')).toBe('2025-05');
+  expect(query().has('sec')).toBe(false);
+  expect(query().has('fix')).toBe(false);
+  fireEvent.click(screen.getByText('Header FY'));
+  await waitFor(()=>expect(query().get('fy')).toBe('2026-27'));
+  expect(query().has('month')).toBe(false);
+  expect(query().get('firm')).toBe('1');
+});
+
+test.each(['firm','FY'])('an implicit GST link canonicalizes a deliberate header %s change and resets its section',async kind=>{
+  server();
+  function HeaderScope() {
+    const [firm,setFirm]=useState<number|'all'>(3),[fy,setFy]=useState('2026-27');
+    scopeState.firmId=firm;scopeState.fy=fy;goScope.mockImplementation(setFirm);goFy.mockImplementation(setFy);
+    const location=useLocation();
+    return <><button onClick={()=>kind==='firm'?setFirm(1):setFy('2025-26')}>Change header</button><output data-testid="gst-location">{location.search}</output><GstReturns/></>;
+  }
+  renderApp(<StrictMode><HeaderScope/></StrictMode>,{path:'/gst?sec=docs'});
+  await screen.findByRole('tab',{name:/Documents/});
+  fireEvent.click(screen.getByText('Change header'));
+  const query=()=>new URLSearchParams(screen.getByTestId('gst-location').textContent!);
+  await waitFor(()=>expect(query().has('sec')).toBe(false),{timeout:1000});
+  expect(query().get('firm')).toBe(kind==='firm'?'1':'3');
+  if(kind==='firm')expect(query().get('month')).toBe('2026-09');
+  else {expect(query().get('fy')).toBe('2025-26');expect(query().has('month')).toBe(false);}
 });
 
 test('unlocking refreshes the month and changes GSTR-1 from the snapshot to the live books',async()=>{

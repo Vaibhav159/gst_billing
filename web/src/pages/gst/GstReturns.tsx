@@ -41,13 +41,15 @@ export default function GstReturns() {
   const phoneBadgeMonth=isPhone&&nav.tab==='returns'&&picked&&picked<todayIST().slice(0,7)?picked:null;
   const end=useGstMonthEnd(scope.ready?(nav.tab==='all'?endMonth:phoneBadgeMonth):null);
   const badge=(id:number)=>{if(!isPhone||nav.tab!=='returns'||!picked)return '';const current=todayIST().slice(0,7);if(picked>=current)return STATE_META[picked===current?'open':'future'].word;const row=end.data?.firms.find(r=>r.firm.id===id);return row?STATE_META[row.stage].word:'';};
-  const seen=useRef({firm:scope.firmId,fy:scope.fy,search:search.toString()});
+  const seen=useRef<{firm:typeof scope.firmId;fy:string;search:string;nav:GstNav}|null>(null);
   const go=(patch:Partial<GstNav>)=>{const n={...nav,...patch};if(n.tab==='all')scope.setFirmId('all');else if(n.firm)scope.setFirmId(n.firm);navigate(gstHref(nav,patch),{replace:true});};
   useEffect(()=>{
-    if(!scope.ready||loading)return;
-    const old=seen.current, s=search.toString();seen.current={firm:scope.firmId,fy:scope.fy,search:s};
-    if(old.search===s&&(old.firm!==scope.firmId||old.fy!==scope.fy)) {
-      const changedFy=old.fy!==scope.fy;
+    if(!scope.ready||loading){seen.current=null;return;}
+    const old=seen.current, s=search.toString();seen.current={firm:scope.firmId,fy:scope.fy,search:s,nav};
+    // Hydration and our own URL-to-scope updates aren't header picks; effect replay observes no change either.
+    const changedFirm=old&&old.firm!==scope.firmId&&scope.firmId!==(old.nav.tab==='all'?'all':old.nav.firm);
+    const changedFy=old&&old.fy!==scope.fy&&scope.fy!==old.nav.fy;
+    if(old&&old.search===s&&(changedFirm||changedFy)) {
       navigate(gstHref({...nav,firm:typeof scope.firmId==='number'?scope.firmId:nav.firm,fy:scope.fy,month:changedFy?null:nav.month,tab:scope.firmId==='all'&&!isPhone?'all':nav.tab==='all'?'returns':nav.tab,sec:'b2b',fix:false}),{replace:true});return;
     }
     if(nav.tab==='all'){if(scope.firmId!=='all')scope.setFirmId('all');}
