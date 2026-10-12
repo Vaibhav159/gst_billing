@@ -315,7 +315,8 @@ test("a backup of more than 3,000 bills is restored one financial year at a time
   try {
     await openBackup(page);
     const overview = await previewFile(page, file);
-    test.skip(!overview.years, "X-40: 4B's per-year restore (P4-8) has not landed");
+    // 4B has landed (P4-8): a backup over 3,000 bills previews as its years only.
+    expect(overview.plan).toBeUndefined();
     expect(overview.years.map((year) => [year.fy, year.bills])).toEqual([["2024-25", 1501], ["2025-26", 1501]]);
     for (const [index, fy] of ["2024-25", "2025-26"].entries()) {
       await expect(main(page).getByText(`Financial year ${fy}`, { exact: true })).toBeVisible();
