@@ -31,7 +31,7 @@ async function open(page, theme, path) {
 async function pickProduct(page, phone, name) {
   if (phone) {
     await page.getByRole('button', { name: 'Add item', exact: true }).click(); await afterDialog(page);
-    await page.getByRole('textbox', { name: 'Search products' }).fill(name);
+    await page.getByRole('searchbox', { name: 'Search products' }).fill(name);
     await page.getByRole('button', { name: new RegExp('^' + name) }).click();
   } else {
     await page.getByRole('combobox', { name: 'Line 1 product' }).fill(name); await pickByKeyboard(page, name);
