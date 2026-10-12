@@ -262,11 +262,17 @@ for (const theme of ["obsidian", "pearl"]) {
     const downloaded = XLSX.readFile(await downloadExcel(page, dialog, workbook.file, info));
     expect(downloaded.SheetNames).toEqual(sheetNames);
     const firm = workbook.summary.find(firm => (firm.sales.bills ?? 0) + (firm.purchases.bills ?? 0) > 0);
-    expect(firm, "the workbook has an active firm in its summary").toBeTruthy();
     const summary = XLSX.utils.sheet_to_json(downloaded.Sheets.Summary, { header: 1 });
-    const row = summary.find(row => row[0] === firm.firm);
-    expect(row, `Summary includes ${firm.firm}`).toBeTruthy();
-    expect(row[7], `${firm.firm} sales bill value matches the preview JSON`).toBe(Number(firm.sales.value));
+    if (firm) {
+      const row = summary.find(row => row[0] === firm.firm);
+      expect(row, `Summary includes ${firm.firm}`).toBeTruthy();
+      expect(row[7], `${firm.firm} sales bill value matches the preview JSON`).toBe(Number(firm.sales.value));
+    } else {
+      expect(firmTabs).toHaveLength(0);
+      // The final row is the scope/period note, after the numeric summary rows.
+      expect(summary.slice(3, -1)).toEqual([["GRAND TOTAL", ...Array(15).fill(0)]]);
+      expect(summary.at(-1)[0]).toBe(`${workbook.scope} · ${workbook.period}. Net Total is the combined invoice value of sales and purchases.`);
+    }
   });
 }
 

@@ -194,23 +194,15 @@ test.describe('Easy GST wrapper browser boundaries', () => {
   });
 });
 
-// /e is deliberately unavailable on desktop. This exercises the exported real fallback
-// in Chromium after proving that route guard; it does not claim a desktop Easy screen exists.
-test('Easy GST desktop boundary: redirect Easy and open the shared number-free WhatsApp fallback', async ({ page, request }, info) => {
+// /e is deliberately unavailable on desktop. The phone fallback is exercised through its button above.
+test('Easy GST desktop boundary: redirect Easy without sharing', async ({ page, request }, info) => {
   test.skip(info.project.name !== 'phone', 'The phone acceptance project also measures the desktop boundary');
   await page.setViewportSize({ width: 1280, height: 900 });
-  const { s, state } = await fixture(page, request);
+  const { state } = await fixture(page, request);
   await page.goto('/e/gst');
-  await expect(page).not.toHaveURL(/\/e(?:\/|$)/);
-  const result = await page.evaluate(async ({ firm, month }) => {
-    const { shareGst } = await import('/src/pages/easy/gst.ts');
-    return shareGst(`${firm}\n${month}: synthetic GST figures`, { open: (url, target) => window.open(url, target) });
-  }, { firm: s.firm.name, month: state.payload.month });
-  expect(result).toBe('opened');
-  const opened = await page.evaluate(() => window.__easyOpened);
-  expect(opened).toHaveLength(1);
-  const url = new URL(opened[0]); expect(url.origin).toBe('https://wa.me'); expect(url.pathname).toBe('/');
-  expect(url.searchParams.get('text')).toContain(s.firm.name);
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('button', { name: SHARE })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__easyOpened)).toEqual([]);
   expect(await page.evaluate(() => window.__easyShares)).toEqual([]);
   expect(state.writes).toEqual([]);
 });
