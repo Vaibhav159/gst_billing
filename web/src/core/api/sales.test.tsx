@@ -211,7 +211,7 @@ test("cancel posts the reason; afterwards bills, the bin, customers and search a
 test("delete sends its reason in the body and answers the bin row that Undo restores; a closed month keeps the server's code and words", async () => {
   const { calls } = salesServer([
     ["DELETE", "sales/205/", () => wireBin()],
-    ["DELETE", "sales/206/", () => refuse(409, { detail: "September 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be deleted. Have the owner unlock September 2026 in GST returns first.", code: "month_closed", locked_period: { id: 7, business: 3, year: 2026, month: 9 } })],
+    ["DELETE", "sales/206/", () => refuse(409, { detail: "September 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be deleted. Have the owner unlock September 2026 in GST returns first.", code: "month_closed", stage: "filed", locked_period: { id: 7, business: 3, year: 2026, month: 9 } })],
   ]);
   const { wrapper } = setup();
   const { result } = renderHook(() => useDeleteBill(), { wrapper });

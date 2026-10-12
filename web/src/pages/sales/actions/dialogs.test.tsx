@@ -41,7 +41,7 @@ test("a closed month refuses the cancel in the server's words, and Try again ask
   let tries = 0;
   salesServer([["POST", "sales/412/cancel/", () => {
     tries += 1;
-    return refuse(409, { detail: "October 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be cancelled. Have the owner unlock October 2026 in GST returns first.", code: "month_closed" });
+    return refuse(409, { detail: "October 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be cancelled. Have the owner unlock October 2026 in GST returns first.", code: "month_closed", stage: "filed" });
   }]]);
   renderApp(<Harness bill={row()} kind="cancel" />);
   await openIt();
@@ -209,7 +209,7 @@ test("moving checks the number in the new firm's series with the same check, and
       ? { invoice_number: "MO/2026-27/29", counter: 29, code: "number_deleted", problem: "MO/2026-27/29 belonged to a bill that was deleted (it can be restored from the Audit log), so it can't be used again. The next free number is MO/2026-27/31.",
         bill: null, binned: null, note: "", same_counter: null, next: { counter: 31, invoice_number: "MO/2026-27/31" } }
       : { invoice_number: `MO/2026-27/${Number(params.invoice_number)}`, counter: 30, code: "", problem: "", bill: null, binned: null, note: "", same_counter: null, next: { counter: 31, invoice_number: "MO/2026-27/31" } })],
-    ["POST", "sales/412/move/", () => { tries += 1; return refuse(409, { detail: "October 2026 is filed and locked for MEERA ORNAMENTS, so its bills can't move to another firm. Have the owner unlock October 2026 in GST returns first.", code: "month_closed" }); }],
+    ["POST", "sales/412/move/", () => { tries += 1; return refuse(409, { detail: "October 2026 is filed and locked for MEERA ORNAMENTS, so its bills can't move to another firm. Have the owner unlock October 2026 in GST returns first.", code: "month_closed", stage: "filed" }); }],
   ]);
   renderApp(<Harness bill={row()} kind="move" />);
   fireEvent.click(screen.getByText("open it"));

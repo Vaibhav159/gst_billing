@@ -329,7 +329,7 @@ test("a closed month, then a lost connection: each said first in the review, wit
   let tries = 0;
   const { router, dialog } = await review(user, [["POST", "sales/", () => {
     tries += 1;
-    if (tries === 1) return refuse(409, { detail: "October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.", code: "month_closed", locked_period: { id: 7, business: 3, year: 2026, month: 10 } });
+    if (tries === 1) return refuse(409, { detail: "October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.", code: "month_closed", stage: "filed", locked_period: { id: 7, business: 3, year: 2026, month: 10 } });
     if (tries === 2) throw new AxiosError("Network Error", "ERR_NETWORK");
     return wireDetail({ id: 503, invoice_number: "KGH/2026-27/34" });
   }]]);
@@ -464,7 +464,7 @@ test("a month closed during save refreshes the date and removes the unfiled assu
   const words = "October 2026 is filed and locked for KIRAN GOLD HOUSE, so no bill can go into it. Have the owner unlock October 2026 in GST returns first.";
   const { calls, dialog } = await review(user, [
     ["GET", "sales/", ({ params }) => ({ ...wirePage([]), ...(params.facets ? { facets: { ...wireFacets(), months: [{ month: "2026-10", bills: 1, locked: closed }] } } : {}) })],
-    ["POST", "sales/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", locked_period: { id: 7, business: 3, year: 2026, month: 10 } }); }],
+    ["POST", "sales/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", stage: "filed", locked_period: { id: 7, business: 3, year: 2026, month: 10 } }); }],
   ]);
   await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
   await user.click(within(dialog).getByRole("button", { name: "Save bill" }));
@@ -486,7 +486,7 @@ test.each([false, true])("a filed month refusal stays on an edit's unchanged dat
       if (params.facets && closed && fails) return refuse(503, {});
       return { ...wirePage([]), ...(params.facets ? { facets: { ...wireFacets(), months: [{ month: "2026-10", bills: 1, locked: closed }] } } : {}) };
     }],
-    ["PUT", "sales/412/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", locked_period: { business: 3, year: 2026, month: 10 } }); }],
+    ["PUT", "sales/412/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", stage: "filed", locked_period: { business: 3, year: 2026, month: 10 } }); }],
   ]);
   const { client } = mountForm("/sales/412/edit");
   await screen.findByRole("heading", { name: "Edit KGH/2026-27/31" });
@@ -520,7 +520,7 @@ test("a new bill keeps the filed month refusal when its refresh fails, until the
       if (params.facets && closed) return refuse(503, {});
       return { ...wirePage([]), ...(params.facets ? { facets: { ...wireFacets(), months: [{ month: "2026-10", bills: 1, locked: false }, { month: "2026-09", bills: 1, locked: false }] } } : {}) };
     }],
-    ["POST", "sales/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", locked_period: { business: 3, year: 2026, month: 10 } }); }],
+    ["POST", "sales/", () => { closed = true; return refuse(409, { detail: words, code: "month_closed", stage: "filed", locked_period: { business: 3, year: 2026, month: 10 } }); }],
   ]);
   await user.click(within(dialog).getByRole("radio", { name: "Cash" }));
   await user.click(within(dialog).getByRole("button", { name: "Save bill" }));

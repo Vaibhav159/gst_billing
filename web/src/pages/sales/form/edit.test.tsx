@@ -217,7 +217,7 @@ test.each([
   ["cancelled", () => ({ kind: "bill", bill: toBillDetail(wireDetail({ status: "cancelled", cancel_reason: "Customer returned the piece" })) }), () => refuse(409, { detail: CANCELLED, code: "cancelled" }), "Not saved", CANCELLED, true],
   ["deleted", () => ({ kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) }), () => refuse(404, { detail: "No Invoice matches the given query." }), "Not saved", GONE, true],
   ["deleted, the server saying so in its own words", () => ({ kind: "deleted", binned: toBinRow(wireBin({ original_id: 412 })) }), () => refuse(404, { detail: "This bill was deleted.", code: "deleted", binned: wireBin({ original_id: 412 }) }), "Not saved", "This bill was deleted.", true],
-  ["put in a filed month", () => ({ kind: "bill", bill: toBillDetail(wireDetail({ locked: true })) }), () => refuse(409, { detail: FILED_OCT, code: "month_closed", locked_period: OCTOBER }), "October 2026 was just filed", FILED_OCT, false],
+  ["put in a filed month", () => ({ kind: "bill", bill: toBillDetail(wireDetail({ locked: true })) }), () => refuse(409, { detail: FILED_OCT, code: "month_closed", stage: "filed", locked_period: OCTOBER }), "October 2026 was just filed", FILED_OCT, false],
 ] as const)("once the form is open it stays, though the bill is %s meanwhile; the save then says what happened, in the server's words", async (_, now, put, title, words, final) => {
   const user = fakeToday();
   const { calls, client, router } = await changeWeight(user, wireDetail(), [["PUT", "sales/412/", put]]);
@@ -257,7 +257,7 @@ test.each([
     "September 2026 is filed and locked for KIRAN GOLD HOUSE, so its bills can't be changed. Have the owner unlock September 2026 in GST returns first."],
 ] as const)("a change that moves the bill %s is refused for the month the server names (contract §2.3: the old and the new month)", async (_, period, month, words) => {
   const user = fakeToday();
-  formServer([["GET", "sales/412/", () => wireDetail()], ["PUT", "sales/412/", () => refuse(409, { detail: words, code: "month_closed", locked_period: period })]]);
+  formServer([["GET", "sales/412/", () => wireDetail()], ["PUT", "sales/412/", () => refuse(409, { detail: words, code: "month_closed", stage: "filed", locked_period: period })]]);
   mountForm("/sales/412/edit");
   await screen.findByRole("heading", { level: 1, name: "Edit KGH/2026-27/31" });
   const day = screen.getByLabelText("Date");
