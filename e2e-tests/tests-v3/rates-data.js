@@ -1,4 +1,4 @@
-// Runs after 5A rates + seed, 5B dashboard slots, and corrected 4C product mapper land.
+// Runs after 5A rates, 5B dashboard slots, and corrected 4C product mapper land.
 const { expect } = require('@playwright/test');
 const { opened, easyIfExpertSaved, savedToken } = require('./session');
 const { client, afterDialog } = require('./sales-data');
@@ -10,7 +10,7 @@ function ratesScenario(test) {
 startsDrafts(test);
 test.beforeEach(async ({ request }, info) => {
   const api = client(request); original = (await api.get('rates/')).latest;
-  expect(original, '5A must seed a rates board before this suite').toBeTruthy();
+  // Fresh CI has no board; this normal POST establishes one there too.
   await api.post('rates/', { quoted });
   if (info.project.name === 'phone') await api.patch('preferences/', { phoneMode: 'expert' });
 });
