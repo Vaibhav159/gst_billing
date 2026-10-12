@@ -51,7 +51,7 @@ def test_real_routes_share_line_paise_and_workbook_return_shapes(books):
     assert "customer" not in sheet["gstr1"][0]["sections"]["b2b"][0]
     assert sheet["gstr3b"][0]["tables"]["t31a"]["cgst"] == "0.06"
     assert sheet["gstr3b"][0]["filing"] is None
-    assert sheet["gstr3b"][0]["note"] == sheet["gstr3b"][0]["tables"]["t5_note"]
+    assert sheet["gstr3b"][0]["tables"]["t5_note"] == "Includes purchases from unregistered suppliers with no GST charged."
 
 
 def test_reconciliation_uses_1a_then_subsequent_filed_amendments(books):

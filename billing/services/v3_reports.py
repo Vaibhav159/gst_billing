@@ -429,8 +429,8 @@ def ca_workbook(sales, purchases, *, firms, start, end, split=False, return_data
                 sheet["gstr1"].append({"month": month, "sections": _without_customers(returns["gstr1"]), "stage": returns["stage"]})
                 # R3A-3: the 3B sheet says Table 5 counts unregistered suppliers' no-GST purchases, even for
                 # months frozen before 3A's tables carried the note.
-                sheet["gstr3b"].append({"month": month, "tables": returns["gstr3b"], "stage": returns["stage"],
-                                        "filing": returns.get("filing"), "note": T5_NOTE})
+                tables = {**returns["gstr3b"], "t5_note": T5_NOTE} if returns["gstr3b"] else returns["gstr3b"]
+                sheet["gstr3b"].append({"month": month, "tables": tables, "stage": returns["stage"], "filing": returns.get("filing")})
                 sheet["amendments"].extend(returns.get("amendments", []))
         sheets.append(sheet)
     scope = scope or (firms[0]["name"] if len(firms) == 1 else "All firms")
