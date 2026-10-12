@@ -144,7 +144,7 @@ it.each([false, true])("requires another preview of the same File after an uncer
 });
 
 it("keeps restore reachable when the backup summary fails", async () => {
-  serve({ "GET backup/summary/": () => ({ status: 500 }), "GET businesses/": [], "GET preferences/": { data: {} }, "POST backup/restore/preview/": preview() });
+  serve({ "GET backup/summary/": () => ({ status: 500 }), "GET firms/": { results: [] }, "GET preferences/": { data: {} }, "POST backup/restore/preview/": preview() });
   renderApp(<ScopeProvider><Backup /></ScopeProvider>);
   expect(await screen.findByRole("button", { name: "Choose a backup file" })).toBeEnabled();
   choose();

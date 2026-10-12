@@ -19,7 +19,7 @@ export const summary = {
   last_backup_at: "2026-10-01T21:05:00+05:30", estimated_size: "2.0 MB",
 };
 function server(extra = {}) { return serve({
-  "GET preferences/": { data: {} }, "GET businesses/": [{ id: 3, name: "AARAV JEWELLERS" }], "GET backup/summary/": summary,
+  "GET preferences/": { data: {} }, "GET firms/": { results: [{ id: 3, name: "AARAV JEWELLERS" }] }, "GET backup/summary/": summary,
   "GET backup/full/": new Blob(["backup"]), "GET exports/sales/": new Blob(["csv"]), "GET exports/customers/": new Blob(["csv"]), ...extra,
 }); }
 function open(role: "owner" | "accountant" | "staff" | "viewer" = "owner") {
@@ -49,7 +49,7 @@ it.each(["accountant", "staff", "viewer"] as const)("gates the full backup for %
   server(); open(role);
   const button = await screen.findByRole("button", { name: "Download full backup" });
   if (role === "accountant") expect(button).toBeEnabled(); else expect(button).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Customers as CSV" })).toBeEnabled();
+  expect(await screen.findByRole("button", { name: "Customers as CSV" })).toBeEnabled();
 });
 
 it("sends only the selected export scope and disables bad date ranges", async () => {
