@@ -16,6 +16,7 @@ export function AuditActionConfirm({ entry, record, busy, error, onClose, onConf
   const b = query.data;
   const loading = bill && query.isPending;
   const gone = bill && query.isSuccess && !b;
+  const purged = bill && action === "restore" && query.isError && problemOf(query.error).kind === "notfound";
   let title = "", label = "", words = "";
   let rows: DLRow[] = [];
   if (action === "revert") {
@@ -41,8 +42,9 @@ export function AuditActionConfirm({ entry, record, busy, error, onClose, onConf
   }
   return <ConfirmDialog open onClose={onClose} onConfirm={onConfirm} title={title} confirmLabel={label} record={rows} tone={action === "undo" ? "danger" : "primary"}
     busy={busy} busyLabel={action === "restore" ? "Restoring…" : action === "revert" ? "Reverting…" : "Undoing…"} confirmDisabled={loading || query.isError || gone || refused}
-    extra={<><FailNote error={query.isError ? saveFailure(problemOf(query.error)) : null} onRetry={() => void query.refetch()} /><FailNote error={error ? saveFailure(problemOf(error)) : null} onRetry={refused ? undefined : onConfirm} busy={busy} /></>}>
+    extra={<><FailNote error={query.isError && !purged ? saveFailure(problemOf(query.error)) : null} onRetry={() => void query.refetch()} /><FailNote error={error ? saveFailure(problemOf(error)) : null} onRetry={refused ? undefined : onConfirm} busy={busy} /></>}>
     {loading ? <BusyText>Loading the bill…</BusyText> : null}
+    {purged ? <p role="alert">That deleted bill is no longer in the bin.</p> : null}
     {gone ? <p>That bill changed since this entry. Close this question and load the log again.</p> : null}
     {entry.can?.effect ? <p>{entry.can.effect}</p> : null}<p>{words}</p>
   </ConfirmDialog>;

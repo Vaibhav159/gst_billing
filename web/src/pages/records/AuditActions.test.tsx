@@ -104,6 +104,56 @@ test("offline action fails in its dialog without queuing or losing the field com
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
 });
 
+test.each(["sales", "purchases"])("a purged %s restore explains the missing bin row without offering a retry", async (kind) => {
+  const deleted: AuditEntry = { ...entry, entity: "invoice", entity_id: 205, kind, group: "delete", action: "deleted", changes: [],
+    words: { text: "Deleted bill", target: "MO/2026-27/27", after: "" }, link: null,
+    can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "" } };
+  const calls = serve({ "GET audit/": page(deleted), [`GET ${kind}/205/`]: () => ({ status: 404, data: { detail: "Not found." } }) });
+  renderApp(<Audit />);
+  fireEvent.click(await screen.findByRole("button", { name: "Restore MO/2026-27/27" }));
+  const dialog = screen.getByRole("dialog");
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("That deleted bill is no longer in the bin.");
+  const restore = within(dialog).getByRole("button", { name: kind === "sales" ? "Restore the bill" : "Restore the purchase bill" });
+  expect(restore).toBeDisabled();
+  expect(within(dialog).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  expect(within(dialog).queryByText("That isn't there any more.")).not.toBeInTheDocument();
+  opened(); fireEvent.click(restore);
+  expect(calls.some((call) => call.method === "POST")).toBe(false);
+});
+
+test("a restored sale keeps the changed-entry message", async () => {
+  const deleted: AuditEntry = { ...entry, entity: "invoice", entity_id: 205, kind: "sales", group: "delete", action: "deleted", changes: [],
+    can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "" } };
+  serve({ "GET audit/": page(deleted), "GET sales/205/": binned });
+  renderApp(<Audit />);
+  fireEvent.click(await screen.findByRole("button", { name: "Restore Priya Sharma" }));
+  const dialog = screen.getByRole("dialog");
+  expect(await within(dialog).findByText("That bill changed since this entry. Close this question and load the log again.")).toBeInTheDocument();
+  expect(within(dialog).queryByText("That deleted bill is no longer in the bin.")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Restore the bill" })).toBeDisabled();
+});
+
+test("a forbidden restore lookup keeps its real error and retry", async () => {
+  const deleted: AuditEntry = { ...entry, entity: "invoice", entity_id: 205, kind: "sales", group: "delete", action: "deleted", changes: [],
+    can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "" } };
+  serve({ "GET audit/": page(deleted), "GET sales/205/": () => ({ status: 403, data: { detail: "Your role can't read this bill." } }) });
+  renderApp(<Audit />);
+  fireEvent.click(await screen.findByRole("button", { name: "Restore Priya Sharma" }));
+  const dialog = screen.getByRole("dialog");
+  expect(await within(dialog).findByText("Your role can't read this bill.")).toBeInTheDocument();
+  expect(within(dialog).queryByText("That deleted bill is no longer in the bin.")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Try again" })).toBeEnabled();
+  expect(within(dialog).getByRole("button", { name: "Restore the bill" })).toBeDisabled();
+});
+
+test("a purged restore deep link uses the missing-bin message without opening a dialog", async () => {
+  const calls = serve({ "GET audit/": page(), "GET bin/": { count: 0, next: null, results: [] } });
+  renderApp(<Audit />, { path: "/audit?restore=11" });
+  expect(await screen.findByText("That deleted bill is no longer in the bin.")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(calls.some((call) => call.method === "POST")).toBe(false);
+});
+
 test("a deleted purchase uses its own deleted-bill response, and names input tax credit before restoring", async () => {
   const purchase: AuditEntry = { ...entry, id: 9009, entity: "invoice", entity_id: 77, kind: "purchases", group: "delete", action: "deleted", changes: [], words: { text: "Deleted purchase", target: "UBS/26-27/0850", after: "" }, link: null,
     can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "Kiran's October input tax credit goes up by ₹14,348.88." } };
@@ -126,7 +176,7 @@ test.each(["purchase", "sale"] as const)("a bin-id link never opens a purchase r
     can: { kind: "restore", label: "Restore", disabled: "", hint: "", effect: "" } };
   const calls = serve({ "GET audit/": page(purchase), "GET bin/": { count: 1, next: null, results: [{ ...binned, type }] } });
   renderApp(<Audit />, { path: "/audit?restore=11" });
-  expect(await screen.findByText("That deleted bill isn't in the bin any more.")).toBeInTheDocument();
+  expect(await screen.findByText("That deleted bill is no longer in the bin.")).toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(calls.some((c) => c.url.startsWith("purchases/") || c.method === "POST")).toBe(false);
 });
@@ -137,7 +187,7 @@ test("a purchase bin row whose original id matches a deleted sales bill never op
   const purchaseRow = { ...binned, type: "purchase", invoice_number: "UBS/26-27/0850", customer: undefined, supplier: { id: 8, name: "Udaipur Bullion" } };
   const calls = serve({ "GET audit/": page(sale), "GET bin/": { count: 1, next: null, results: [purchaseRow] } });
   renderApp(<Audit />, { path: "/audit?restore=11" });
-  expect(await screen.findByText("That deleted bill isn't in the bin any more.")).toBeInTheDocument();
+  expect(await screen.findByText("That deleted bill is no longer in the bin.")).toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.queryByText("UBS/26-27/0850")).not.toBeInTheDocument();
   expect(calls.some((c) => c.method === "POST")).toBe(false);

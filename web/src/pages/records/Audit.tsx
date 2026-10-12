@@ -105,7 +105,7 @@ function Log() {
     {!isPhone && filtered && first ? <p className="text-sm text-fg2 -mt-2">Showing {plural(first.count, "change")} of {first.total ?? first.count} · <button type="button" className="link" onClick={clear}>Show every change</button></p> : null}
     <FailNote error={exportError ? { title: "Not downloaded", body: exportError } : null} onRetry={() => void exportLog()} busy={download.isPending} />
     {restoreText && can("audit.undo") ? !Number.isSafeInteger(restoreId) || restoreId <= 0 ? <p role="alert">That restore link isn't valid. Open the deleted bill from the log.</p>
-      : <QueryView query={restore} what="the deleted bill">{(linkedEntry) => linkedEntry?.entry.can?.disabled ? <p role="alert" className="text-sm text-muted">{linkedEntry.entry.can.disabled}</p> : linkedEntry ? null : <p role="alert">That deleted bill isn't in the bin any more.</p>}</QueryView> : null}
+      : <QueryView query={restore} what="the deleted bill">{(linkedEntry) => linkedEntry?.entry.can?.disabled ? <p role="alert" className="text-sm text-muted">{linkedEntry.entry.can.disabled}</p> : linkedEntry ? null : <p role="alert">That deleted bill is no longer in the bin.</p>}</QueryView> : null}
     <QueryView query={query} what="the audit log">{(data) => {
       const seen = new Set<number>();
       const entries = data.pages.flatMap((p) => p.results).filter(entry => { if (seen.has(entry.id)) return false; seen.add(entry.id); return true; });
