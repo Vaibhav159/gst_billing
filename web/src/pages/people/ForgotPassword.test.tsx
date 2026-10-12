@@ -66,9 +66,11 @@ test("owner start remains generic, resend is explicit, finish has the contracted
   opened(); await user.click(screen.getByRole("button", { name: "Back to sign in" }));
   expect(close).toHaveBeenCalledOnce();
 });
-test.each(["That code isn't right. 4 tries left.", "That code has run out or been used. Ask for a new one."])("server attempt error stays beside code: %s", async (words) => {
+test("the server's one refusal for a wrong, expired or used code stays beside the code, with no tries count (R4B-1)", async () => {
+  const words = "That code isn't right or has run out. Ask for a new code.";
   mount({ "POST auth/reset/finish/": () => ({ status: 400, data: { code: [words] } }) }); await start(); await finish();
   expect(await screen.findByText(words)).toBeInTheDocument();
+  expect(screen.queryByText(/tries/)).not.toBeInTheDocument();
   expect(screen.getByLabelText("Code from the SMS")).toHaveAttribute("aria-invalid", "true");
   expect(screen.getByLabelText("New password")).toHaveValue("Sunrise927");
   expect(screen.getByRole("button", { name: "Send a new code" })).toBeEnabled();

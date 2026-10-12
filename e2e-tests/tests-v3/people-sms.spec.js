@@ -26,7 +26,8 @@ test("fake SMS resets a temporary owner's password and ends their existing sessi
   await signInPerson(signedIn, owner); await choosePassword(signedIn, owner);
   // A fresh synthetic mobile each run: a stopped owner from an earlier run never shares it (4B may make phones unique).
   const phone = `9${String(randomInt(0, 1_000_000_000)).padStart(9, "0")}`;
-  await privateCall(request, "PATCH", "account/", { phone }, await accountToken(signedIn));
+  // R4B-2: a phone change needs the current password (this device stays signed in).
+  await privateCall(request, "PATCH", "account/", { phone, current: owner.nextPassword }, await accountToken(signedIn));
 
   const guest = await anotherPage(browser, baseURL, page.viewportSize());
   try {
@@ -64,7 +65,7 @@ test("fake SMS resets a temporary owner's password and ends their existing sessi
     await secretField(guest, "New password", "");
     await secretField(guest, "New password again", "");
     expect(refused.status()).toBe(400);
-    expect(Array.isArray(refusal.code) && refusal.code.length === 1 && refusal.code[0] === "That code isn't right. 4 tries left.").toBe(true);
+    expect(Array.isArray(refusal.code) && refusal.code.length === 1 && refusal.code[0] === "That code isn't right or has run out. Ask for a new code.").toBe(true);
 
     await fillReset(code);
     const [finished] = await Promise.all([responseTo("finish"), dialog.getByRole("button", { name: "Set the new password", exact: true }).click()]);
@@ -78,8 +79,8 @@ test("fake SMS resets a temporary owner's password and ends their existing sessi
     const me = await privateCall(request, "GET", "me/", undefined, await accountToken(guest));
     expect(me.username).toBe(owner.username);
     expect(me.must_change_password).toBe(false);
-    // Best effort: the stopped temporary owner left behind keeps no mobile number.
-    await privateCall(request, "PATCH", "account/", { phone: "" }, await accountToken(guest)).catch(() => {});
+    // The stopped temporary owner left behind keeps no mobile number; clearing it needs the password just signed in with (R4B-2).
+    await privateCall(request, "PATCH", "account/", { phone: "", current: person.password }, await accountToken(guest));
   } finally {
     await guest.goto("about:blank").catch(() => {});
   }
