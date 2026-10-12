@@ -14,7 +14,6 @@ from django.db.models import (
     ExpressionWrapper,
     F,
     IntegerField,
-    Min,
     OuterRef,
     Prefetch,
     Q,
@@ -41,7 +40,7 @@ from django.db.models.functions import (
 from billing.cache import uncached
 from billing.constants import BILL_ACTIVE, GST_CODE
 from billing.fy import fy_label, fy_of, fy_range
-from billing.models import Invoice, LineItem
+from billing.models import Business, Invoice, LineItem
 from billing.numbering import bill_ref
 from billing.services.bill_reads import _tax_off
 from billing.services.gstr1_file import build_gstr1
@@ -161,28 +160,60 @@ def _message(kind):
                             default=Value(": an HSN code needs 6 digits for a business buyer")))
 
 
+def _firm_count(firm_bills, counter):
+    return Coalesce(Subquery(firm_bills.values("business_id").annotate(n=Count(counter, distinct=True)).values("n")[:1]), 0)
+
+
 def gstr1_blockers(business_ids, months):
-    """Only grouped counts and first witness text, never every bill or line."""
+    """Only grouped counts and first witness text, never every bill or line; one query for every month."""
     business_ids = list(business_ids)
     out = {(bid, month): {"count": 0, "bills": 0, "first_two": []} for bid in business_ids for month in months}
-    if not business_ids:
+    if not business_ids or not months:
         return out
+    per_month = []
     for month in months:
         year, mm = map(int, month.split("-"))
         bills = checked_bills(business_ids, year, mm).annotate(**{f"text_{k}": _message(k) for k in KINDS})
         any_check = Q(**{f"check_{KINDS[0]}": True})
         for k in KINDS[1:]:
             any_check |= Q(**{f"check_{k}": True})
-        fields = {"bills": Count("pk", filter=any_check)}
+        # One row per firm, each figure a subquery over that firm's bills: a witness subquery inside an
+        # aggregate would run once per bill, which SQLite took minutes over at a few hundred bills.
+        firm_bills = bills.filter(business_id=OuterRef("pk"))
+        fields = {"month_key": Value(month, output_field=CharField()),
+                  "bills": _firm_count(firm_bills.filter(any_check), "pk")}
         for k in KINDS:
             condition = Q(**{f"check_{k}": True})
-            fields[k] = Count(Lower("invoice_number") if k == "duplicate" else "pk", filter=condition, distinct=True)
-            fields[f"first_{k}"] = Min(f"text_{k}", filter=condition)
-            second = (bills.filter(business_id=OuterRef("business_id")).filter(condition)
-                      .order_by(f"text_{k}").values(f"text_{k}").distinct()[1:2])
-            fields[f"second_{k}"] = Min(Subquery(second))
-        for row in bills.values("business_id").annotate(**fields).order_by():
-            out[row["business_id"], month] = {"count": sum(row[k] for k in KINDS), "bills": row["bills"],
+            fields[k] = _firm_count(firm_bills.filter(condition), Lower("invoice_number") if k == "duplicate" else "pk")
+            texts = firm_bills.filter(condition).order_by(f"text_{k}").values(f"text_{k}").distinct()
+            fields[f"first_{k}"] = Subquery(texts[:1])
+            fields[f"second_{k}"] = Subquery(texts[1:2])
+        per_month.append(uncached(Business).filter(pk__in=business_ids).annotate(**fields).values("pk", *fields).order_by())
+    # The months run as one UNION ALL so a year's scan stays one query (P5-3).
+    rows = per_month[0].union(*per_month[1:], all=True) if len(per_month) > 1 else per_month[0]
+    for row in rows:
+        out[row["pk"], row["month_key"]] = {"count": sum(row[k] for k in KINDS), "bills": row["bills"],
+                                            "first_two": [row[f"{order}_{k}"] for k in KINDS for order in ("first", "second")
+                                                          if row[f"{order}_{k}"]][:2]}
+    return out
+    for month in months:
+        year, mm = map(int, month.split("-"))
+        bills = checked_bills(business_ids, year, mm).annotate(**{f"text_{k}": _message(k) for k in KINDS})
+        any_check = Q(**{f"check_{KINDS[0]}": True})
+        for k in KINDS[1:]:
+            any_check |= Q(**{f"check_{k}": True})
+        # One row per firm, each figure a subquery over that firm's bills: a witness subquery inside an
+        # aggregate would run once per bill, which SQLite took minutes over at a few hundred bills.
+        firm_bills = bills.filter(business_id=OuterRef("pk"))
+        fields = {"bills": _firm_count(firm_bills.filter(any_check), "pk")}
+        for k in KINDS:
+            condition = Q(**{f"check_{k}": True})
+            fields[k] = _firm_count(firm_bills.filter(condition), Lower("invoice_number") if k == "duplicate" else "pk")
+            texts = firm_bills.filter(condition).order_by(f"text_{k}").values(f"text_{k}").distinct()
+            fields[f"first_{k}"] = Subquery(texts[:1])
+            fields[f"second_{k}"] = Subquery(texts[1:2])
+        for row in uncached(Business).filter(pk__in=business_ids).annotate(**fields).values("pk", *fields):
+            out[row["pk"], month] = {"count": sum(row[k] for k in KINDS), "bills": row["bills"],
                                                "first_two": [row[f"{order}_{k}"] for k in KINDS for order in ("first", "second")
                                                              if row[f"{order}_{k}"]][:2]}
     return out
