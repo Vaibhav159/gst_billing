@@ -28,17 +28,17 @@ def _cell(cell, bills):
     return {**{key: getattr(cell, key) for key in COLUMNS}, "bills": bills}
 
 
-def _totals(rows):
-    return {key: sum((Decimal(str(row.get(key, 0))) for row in rows if row is not None), ZERO) for key in COLUMNS} | {
-        "bills": sum(row.get("bills", 0) for row in rows if row is not None),
-    }
+def _totals(rows, keys=(*COLUMNS, "bills")):
+    """Adds only the keys the rows carry: GSTR-3B rows have tax heads, no taxable value or bill count."""
+    rows = [row for row in rows if row is not None]
+    return {key: sum(row[key] for row in rows) if key == "bills" else sum((Decimal(str(row[key])) for row in rows), ZERO)
+            for key in keys}
 
 
 def _check(key, label, period, expected, actual, *, tolerance=Decimal("1"), link=None):
     check = old_check(key, label, period, to_paise(expected), to_paise(actual))
-    status = check.status
-    if check.difference and abs(check.difference) <= tolerance:
-        status = "rounding"
+    # v2's own status rounds up to ₹1; the tolerance decides here, so a count check (tolerance 0) fails on any gap.
+    status = "pass" if not check.difference else "rounding" if abs(check.difference) <= tolerance else "fail"
     return {"id": check.id, "label": check.label, "period": check.period, "expected": money(check.expected), "actual": money(check.actual),
             "diff": money(check.difference), "status": status, "link": link}
 
@@ -89,7 +89,7 @@ def reconcile(business_id, fy, sales, *, filed=None, stages=None, amendments=Non
         empty = counts["empty"]
         empty_words = f"; {empty} {'bill' if empty == 1 else 'bills'} with no items" if empty else ""
         checks.append(_check("coverage", f"Bills counted: {counts['rolled']} of {counts['in']}{empty_words}", label,
-                             Decimal(counts["in"]), Decimal(counts["rolled"] + empty),
+                             Decimal(counts["in"]), Decimal(counts["rolled"] + empty), tolerance=ZERO,
                              link={"to": "/sales?empty=1", "label": "Open bills with no items"} if empty else None))
     for section in ("all", "b2b", "b2cl", "b2c"):
         for column in COLUMNS:
@@ -120,8 +120,15 @@ def reconcile(business_id, fy, sales, *, filed=None, stages=None, amendments=Non
                            "diff": wire(diff) if diff is not None else None, "differs": bool(diff and any(diff.values())), "amended_in": amendments.get(month)})
     for period in periods:
         rows = [row for row in month_rows if row["month"] in period["months"]]
-        period.update({key: wire(_totals([row[key] for row in rows])) for key in ("books", "gstr1", "gstr3b", "diff")})
-        period.update(filed_months=sum(row["gstr1"] is not None for row in rows), differs=[row["month"] for row in rows if row["differs"]])
+        filed_rows = [row for row in rows if row["gstr1"] is not None]
+        # Books sit beside GSTR-1 and the difference, so once a month is filed they cover the filed months only:
+        # period books − period GSTR-1 = period difference. With nothing filed they cover every month so far.
+        period.update(books=wire(_totals([row["books"] for row in filed_rows or rows])),
+                      gstr1=wire(_totals([row["gstr1"] for row in filed_rows])) if filed_rows else None,
+                      diff=wire(_totals([row["diff"] for row in filed_rows])) if filed_rows else None,
+                      gstr3b=wire(_totals([row["gstr3b"] for row in rows if row["gstr3b"]], HEADS))
+                      if any(row["gstr3b"] for row in rows) else None,
+                      filed_months=len(filed_rows), differs=[row["month"] for row in rows if row["differs"]])
     return {"business": business_id, "fy": fy, "filed": month_rows, "periods": periods, "sections": sections, "checks": checks, "split": modes,
             "differs": [row["month"] for row in month_rows if row["differs"]],
             "failing": sum(check["status"] == "fail" for check in checks), "roundings": sum(check["status"] == "rounding" for check in checks)}
