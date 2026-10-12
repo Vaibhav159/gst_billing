@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation } from "react-router";
+import { useBillDetail } from "@/core/api/sales";
+import * as files from "@/core/print/files";
+import { useSendFile } from "@/core/print/send";
 import { pastTheGuard } from "@/core/print/testing";
 import { salesServer, wireDetail, wireRow } from "@/core/sales/fixtures";
 import { toBillDetail, toBillRow } from "@/core/sales/wire";
@@ -24,6 +27,75 @@ test("payment order, disabled choices, roving focus and error description", asyn
   await userEvent.click(radios[0]); await userEvent.keyboard("{ArrowRight}");
   expect(radios[2]).toBeChecked(); expect(radios[1]).toBeDisabled();
   await userEvent.keyboard("{ArrowLeft}"); expect(radios[0]).toBeChecked();
+});
+
+test.each([false, true])("disabling the selected payment retains an enabled keyboard tab stop (Cash disabled: %s)", async (cashDisabled) => {
+  function Pay() {
+    const [value, setValue] = useState<PaymentMode | null>("credit");
+    const [walkin, setWalkin] = useState(false);
+    return <><button onClick={() => setWalkin(true)}>Choose walk-in</button><h2 id="easy-paid-t">How did they pay?</h2><PayChoice value={value} onChange={setValue} disabled={walkin ? { credit: true, cash: cashDisabled } : {}} /></>;
+  }
+  renderApp(<Pay />);
+  const radios = screen.getAllByRole("radio");
+  await userEvent.tab();
+  await userEvent.tab();
+  expect(radios[2]).toHaveFocus();
+  expect(radios[2]).toBeChecked();
+  await userEvent.tab({ shift: true });
+  await userEvent.keyboard("{Enter}");
+  expect(radios[2]).toBeDisabled();
+  expect(radios[2]).toBeChecked();
+  const first = radios[cashDisabled ? 1 : 0];
+  expect(radios.filter(r => r.tabIndex === 0)).toEqual([first]);
+  await userEvent.tab();
+  expect(first).toHaveFocus();
+  await userEvent.keyboard("{ArrowRight}");
+  const next = radios[cashDisabled ? 3 : 1];
+  expect(next).toBeChecked();
+  await waitFor(() => expect(next).toHaveFocus());
+  await userEvent.keyboard("{ArrowLeft}");
+  expect(first).toBeChecked();
+  await waitFor(() => expect(first).toHaveFocus());
+});
+
+test.each(["Send the bill", "Send again", "Send the bill becomes Send again"] as const)("a completed %s ignores the second click of a double click", async (mode) => {
+  const initial = { at: "2026-10-08T10:50:00+05:30", last_at: "2026-10-08T10:50:00+05:30", count: 1, via: "whatsapp", to: "" };
+  let sent = mode === "Send again" ? initial : null;
+  const original = toBillDetail(wireDetail({ sent }));
+  const { calls } = salesServer([
+    ["GET", "shop-settings/", () => ({ copies: "original", show_bank: true, share_message: "Bill {number} for {customer}.", updated_at: null, updated_by: null })],
+    ["GET", "sales/412/", () => wireDetail({ sent })],
+    ["POST", "sales/412/sent/", () => {
+      sent = { ...initial, count: (sent?.count ?? 0) + 1 };
+      return { id: 412, sent };
+    }],
+  ]);
+  const handoff = vi.spyOn(window, "open").mockReturnValue({} as Window);
+  vi.spyOn(files, "saveFile").mockImplementation(() => {});
+  const file = { blob: new Blob(["%PDF-1.3"], { type: "application/pdf" }), name: "bill.pdf", sheets: 1 };
+  function Bill() {
+    useSendFile(412, file);
+    const live = useBillDetail(mode === "Send the bill becomes Send again" ? 412 : null);
+    return <SendBig bill={live.data ?? original} />;
+  }
+  renderApp(<Bill />);
+  const first = screen.getByRole("button", { name: mode === "Send again" ? "Send again" : "Send the bill" });
+  await waitFor(() => expect(first).toBeEnabled());
+  await userEvent.click(first);
+  const nextName = mode === "Send the bill" ? "Send the bill" : "Send again";
+  // The first handoff and POST have completed, so neither in-flight guard can hide a duplicate.
+  await waitFor(() => {
+    expect(calls.filter(c => c.url === "sales/412/sent/")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: nextName })).not.toHaveAttribute("aria-busy", "true");
+  });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: nextName }), { detail: 2 }); });
+  await waitFor(() => expect(screen.getByRole("button", { name: nextName })).not.toHaveAttribute("aria-busy", "true"));
+  expect({ handoffs: handoff.mock.calls.length, records: calls.filter(c => c.url === "sales/412/sent/").length }).toEqual({ handoffs: 1, records: 1 });
+  // Keyboard clicks have detail 0 and remain a deliberate new send.
+  act(() => screen.getByRole("button", { name: nextName }).focus());
+  await userEvent.keyboard("{Enter}");
+  await waitFor(() => expect(calls.filter(c => c.url === "sales/412/sent/")).toHaveLength(2));
+  expect(handoff).toHaveBeenCalledTimes(2);
 });
 test("page keeps labelled Back, sticky header and document title", async () => {
   renderApp(<><EasyPage title="Who is buying?" back="/e" subtitle="Step 1 of 2">A customer</EasyPage><Location /></>, { path: "/e/new" });

@@ -221,7 +221,7 @@ export function SendBig({ bill }: { bill: BillDetail }) {
     const I = off ? WifiOff : CloudOff;
     return <div className="flex flex-col gap-3"><div role="alert" className="flex items-start gap-3 rounded-card border border-neg-line bg-neg-tint px-4 py-3.5"><I size={20} className="text-neg shrink-0 mt-0.5" aria-hidden="true" /><p className="text-md text-fg2">{failed.retry ? <><span className="block font-semibold text-fg">Not marked as sent: {off ? "you're offline." : "the app couldn't get through."}</span>{off ? "If you shared it, WhatsApp delivers it when the internet is back. Tap Mark as sent once you're online." : "If you shared it, the customer has it. Tap Mark as sent in a minute."}</> : failed.problem.message}</p></div>{failed.retry ? <Button size="lg" icon={CheckCircle2} loading={busy} onClick={() => void mark()}>{busy ? "Marking as sent…" : "Mark as sent"}</Button> : null}</div>;
   }
-  return <>{!bill.sent ? <Button variant="primary" size="xl" icon={MessageCircle} full loading={busy} disabled={!ready} onClick={() => void mark()}>{busy ? "Sending…" : "Send the bill"}</Button> : <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2"><p role="status" className="text-sale font-semibold"><span key={bump} className={cn(bump > 0 && "anim-bump")}><span className="inline-flex items-center gap-2"><CheckCircle2 size={20} className="shrink-0" aria-hidden="true" />Sent {sentWhen(bill.sent)}</span></span></p><Button variant="secondary" icon={Send} loading={busy} disabled={!ready} onClick={() => void mark()}>{busy ? "Sending…" : "Send again"}</Button></div>}<WhatsAppDialog bill={ask ? bill : null} onClose={() => setAsk(false)} sendOptions={feedback} /></>;
+  return <>{!bill.sent ? <Button variant="primary" size="xl" icon={MessageCircle} full loading={busy} disabled={!ready} onClick={(e) => { if (e.detail > 1) return; void mark(); }}>{busy ? "Sending…" : "Send the bill"}</Button> : <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2"><p role="status" className="text-sale font-semibold"><span key={bump} className={cn(bump > 0 && "anim-bump")}><span className="inline-flex items-center gap-2"><CheckCircle2 size={20} className="shrink-0" aria-hidden="true" />Sent {sentWhen(bill.sent)}</span></span></p><Button variant="secondary" icon={Send} loading={busy} disabled={!ready} onClick={(e) => { if (e.detail > 1) return; void mark(); }}>{busy ? "Sending…" : "Send again"}</Button></div>}<WhatsAppDialog bill={ask ? bill : null} onClose={() => setAsk(false)} sendOptions={feedback} /></>;
 }
 
 /** The shared A4 print page, reached through Easy's route so Back returns to this bill. */
@@ -298,6 +298,7 @@ export function PayChoice({ value, onChange, invalid, describedBy, disabled = {}
   const box = useRef<HTMLDivElement>(null);
   const opts = PAY_GRID.map((v) => PAY_CHOICES.find((o) => o.value === v)!);
   const vals = opts.map((o) => o.value).filter((v) => !disabled[v]);
+  const tabStop = value !== null && !disabled[value] ? value : vals[0];
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const fwd = e.key === "ArrowRight" || e.key === "ArrowDown";
     if (!fwd && e.key !== "ArrowLeft" && e.key !== "ArrowUp") return;
@@ -315,7 +316,7 @@ export function PayChoice({ value, onChange, invalid, describedBy, disabled = {}
         const sel = o.value === value;
         const off = Boolean(disabled[o.value]);
         return (
-          <button key={o.value} type="button" role="radio" aria-checked={sel} data-v={o.value} disabled={off} tabIndex={sel || (!value && !off && o.value === vals[0]) ? 0 : -1} onClick={() => onChange(o.value)}
+          <button key={o.value} type="button" role="radio" aria-checked={sel} data-v={o.value} disabled={off} tabIndex={o.value === tabStop ? 0 : -1} onClick={() => onChange(o.value)}
             className={cn("min-h-16 px-2 py-2 rounded-ctl border flex flex-col items-center justify-center leading-tight text-[17px] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97]",
               off ? "bg-raised border-line text-muted cursor-not-allowed" : sel ? "bg-brand-sel border-brand text-brand font-semibold" : "bg-card border-ctl-line text-fg hover:border-muted/50")}>
             <span>{o.label}</span>
