@@ -9,7 +9,8 @@ mechanism behind A3, A7 and A11.
 
 There is now one contract:
 
-* direction comes from ``is_interstate(invoice.business, invoice.customer)``;
+* direction comes from ``supply_interstate(invoice)``: the bill's place of
+  supply when it has one, else ``is_interstate`` on its two parties;
 * the rate goes through the slab allowlist (``normalize_rate``), so a stray
   percent or a pre-fix ``0.25`` cannot bill 25%;
 * ``source="form"`` trusts the client's tax-inclusive ``amount`` (checked
@@ -17,7 +18,10 @@ There is now one contract:
   rate) and re-files the client's heads on the correct side — the split is
   advisory;
 * every other source derives tax = qty x rate x rate and splits it itself,
-  in whole paise as the form does (``split_tax``).
+  in whole paise as the form does (``split_tax``);
+* a line's ``note`` (cut to 60) is kept from ``source="api"`` only, v3's
+  sales/ among them: v2's doors hand over the request as sent, and on v2's
+  endpoints the note is read-only (part 1 API contract, section 7).
 
 Instances are returned unsaved so callers can ``bulk_create`` them and skip the
 per-line resync signal; the running total comes back with them.
@@ -33,10 +37,10 @@ from billing.constants import GST_TAX_RATE
 from billing.tax_rules import (
     check_line_money,
     check_tax_rate,
-    is_interstate,
     normalize_rate,
     normalize_tax_heads,
     split_tax,
+    supply_interstate,
     to_paise,
 )
 
@@ -70,7 +74,7 @@ def build_line_items(
     """Return ``(unsaved LineItem rows, total)`` for ``items`` on ``invoice``."""
     from billing.models import LineItem  # models imports this module's helper
 
-    interstate = is_interstate(invoice.business, invoice.customer)
+    interstate = supply_interstate(invoice)
     workspace_id = getattr(invoice, "workspace_id", None) or 1
     lines: list = []
     total = ZERO
@@ -115,6 +119,7 @@ def build_line_items(
                 igst=igst,
                 amount=amount,
                 unit=item.get("unit") or "gms",
+                note=(item.get("note") or "")[:60] if source == "api" else "",
             )
         )
     return lines, total

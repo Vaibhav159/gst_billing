@@ -1,0 +1,284 @@
+// The bill on screen as it prints (PROTO sales/BillPrint.jsx:208-447): the same page breaks, words and figures as the
+// PDF (both come from printBill), drawn in HTML so it shows on phones (which don't show a PDF inside a page), reads
+// out to a screen reader, and scales to the space it has. Always black on white paper, in every theme. It reads only
+// the print model (Ruling 1E-6): every word and figure here was worked out there, once for both drawings.
+import { memo, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { cn } from "@/core/cn";
+import { Button } from "@/core/ui";
+import { PAGE_FIT, type CopyMark, type FreeText, type PrintBill, type PrintPage, type Run } from "./model";
+import { qrPath } from "./qrPath";
+import { LAYOUT } from "./layout";
+
+export const A4_W = 794; // 210 mm at 96 px per inch
+export const A4_H = 1123;
+const SERIF = '"Times New Roman", Times, "Liberation Serif", "Nimbus Roman", serif';
+const GREY = "#4b4b4b";
+/**
+ * The paper is the PDF drawn in HTML, so it breaks where the PDF does and a name that fits a line of the PDF fits a line of
+ * the paper (Ruling 1E-14): its lengths and sizes are BillDocument's, in points at the paper's 96 px an inch, and its line
+ * is Times's own, 1.12 em (react-pdf's, as model.ts's PAGE_FIT measures it; PROTO set 1.35).
+ */
+const LINE = 1.12;
+const pt = (n: number) => (n * 4) / 3;
+/** The goods' columns, the PDF's: Sl No., the description (the rest), HSN/SAC, Quantity, Rate, per, Amount. */
+const COLS = LAYOUT.cols.map((w) => (w ? `${pt(w)}px` : "minmax(0,1fr)")).join(" ");
+const NBSP = "\u00a0"; // PROTO's " ": an empty box or line keeps its height
+
+/**
+ * Every printed string that can hold a ₹ goes through here (Ruling 1E-5): text someone typed (names, addresses, the
+ * notes, the boxes, the bank's details) and the Total with its own ₹. It shows the text as the PDF prints it: a line
+ * break someone typed starts a new line (only the bill's note keeps any, and react-pdf breaks there too), and a ₹ shows
+ * as it is, since the browser finds a font that has one. The PDF (BillDocument) draws the same strings through its twin
+ * of this piece, which sets each ₹ in the RupeeSign font: the PDF's Times has none.
+ */
+function RupeeText({ children, bold }: { children: FreeText; bold?: boolean }) {
+  return <span className={bold ? "font-bold" : undefined} style={{ whiteSpace: "pre-line" }}>{children}</span>;
+}
+
+/** A line in runs, the bold ones bold: a later page's short header (Ruling 1E-10). */
+function Runs({ runs }: { runs: Run[] }) {
+  return <>{runs.map((r, i) => <RupeeText key={i} bold={r.bold}>{r.text}</RupeeText>)}</>;
+}
+
+/** A real QR code, drawn as SVG (black on white, for the paper). */
+export function QrSvg({ text, size = 78, label }: { text: string; size?: number; label: string }) {
+  const q = useMemo(() => qrPath(text), [text]);
+  if (!q) return null;
+  return (
+    <svg role="img" aria-label={label} width={size} height={size} viewBox={`0 0 ${q.size} ${q.size}`} shapeRendering="crispEdges" className="block">
+      <rect width={q.size} height={q.size} fill="#fff" />
+      <path d={q.d} fill="#000" />
+    </svg>
+  );
+}
+
+/**
+ * A quantity the plan sets on one line (PAGE_FIT.qtyChars) stays on one line, as in the PDF: a phone's serif can be wider
+ * than Times (Android's Noto Serif sets "1,000.000 gms" 80 px wide, in the column's 73.66), and wrapped, it would stand its
+ * row a line taller than the plan's, so Ctrl P would add sheets. One the plan wraps (10 kg and more) wraps as in the PDF.
+ */
+// ponytail: on such a serif the text runs past its column's rule on the right (the "s" of "gms", 2.3 px; 7.3 px for a bold
+// Total of 1 to 9.999 kg); the figures keep clear of it, and Times, the PDF and the sheets are as planned. Upgrade: draw the
+// paper in a Times-metric font of its own.
+const oneLineQty = (c: ReactNode) => typeof c === "string" && c.length <= PAGE_FIT.qtyChars;
+
+/**
+ * A row of the goods table, at least as tall as the PDF's (PAGE_FIT.row; a Total row passes its `closing`) and its cells
+ * padded 3 pt, as the PDF's are. head: its column headings; filler: the empty row that stretches the table down the sheet,
+ * its cells unpadded as the PDF's fill, so on a page planned exactly full it shrinks to nothing.
+ */
+function Row({ cells, className, style, bold, head, filler }: { cells: ReactNode[]; className?: string; style?: CSSProperties; bold?: boolean; head?: boolean; filler?: boolean }) {
+  return (
+    <div role="row" aria-hidden={filler || undefined} className={cn("grid", filler && "flex-1", className)} style={{ gridTemplateColumns: COLS, ...(filler ? {} : { minHeight: pt(PAGE_FIT.row) }), ...style }}>
+      {cells.map((c, i) => (
+        <div key={i} role={head ? "columnheader" : "cell"} style={{ padding: filler ? 0 : pt(LAYOUT.padding.cell) }}
+          className={cn("min-w-0", i < 6 && "border-r border-black", (i === 0 || i === 2 || i === 5) && "text-center", (i === 3 || i === 4 || i === 6) && "text-right", bold && "font-bold", i === 3 && oneLineQty(c) && "whitespace-nowrap")}>{c}</div>
+      ))}
+    </div>
+  );
+}
+
+/** Which sheet a paper is ("duplicate copy, page 2 of 3"): it names the paper, and its view at full size. */
+const sheetOf = (copy: CopyMark, page: PrintPage) => `${copy.label.toLowerCase()} copy${page.count > 1 ? `, page ${page.index + 1} of ${page.count}` : ""}`;
+
+/**
+ * One sheet: a page of one copy of one bill. Lines are keyed by their place: an address can repeat a line. It draws again
+ * only when its bill, copy or page does (memo): batch print stacks a paper for every page of every copy, twice, and the
+ * page around them draws again on every choice and answer.
+ */
+export const Paper = memo(function Paper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
+  const multi = page.count > 1;
+  // a label stands on its own line, as tall as its own 7 pt text (inline, it would take the paper's 9 pt line)
+  const label = (t: string) => <span className="block" style={{ fontSize: pt(7), color: GREY }}>{t}</span>;
+  const cell = (i: number, k: string, v: FreeText, extra: string) => (
+    <div key={i} className={cn("border-black", extra)} style={{ padding: pt(LAYOUT.padding.cell), minHeight: pt(22) }}>{label(k)}<div className="font-bold"><RupeeText>{v || NBSP}</RupeeText></div></div>
+  );
+  // a firm without a GSTIN leaves it out of the code's name, as the code leaves its field empty
+  const qrName = `QR code: ${[b.number, b.firm.gstin, b.dated, `₹${b.total.amount}`].filter(Boolean).join(", ")}`;
+  return (
+    <div role="document" data-paper="" aria-label={`Bill ${b.number} on paper, ${sheetOf(copy, page)}`}
+      className="relative flex flex-col bg-white text-black shadow-pop shrink-0" style={{ width: A4_W, minHeight: A4_H, padding: `${pt(LAYOUT.padding.pageVertical)}px ${pt(LAYOUT.padding.pageHorizontal)}px`, fontFamily: SERIF, fontSize: pt(9), lineHeight: LINE }}>
+      <div className="flex justify-between items-end" style={{ fontSize: pt(7.5), marginBottom: pt(3) }}>
+        <span style={{ color: GREY }}>{multi ? `Page ${page.index + 1} of ${page.count}` : NBSP}</span>
+        <span style={{ fontStyle: "italic" }}>({copy.tag})</span>
+      </div>
+      {/* the box fills the sheet down to its foot, as the PDF's does */}
+      <div className="border border-black flex flex-col flex-1">
+        <div className="grid border-b border-black" style={{ gridTemplateColumns: page.first ? `${pt(LAYOUT.titleSide)}px minmax(0,1fr) ${pt(LAYOUT.titleSide)}px` : "minmax(0,1fr)" }}>
+          {page.first ? <span aria-hidden="true" /> : null}
+          <div role="heading" aria-level={2} className="text-center self-center" style={{ paddingTop: pt(LAYOUT.padding.block), paddingBottom: pt(LAYOUT.padding.block) }}>
+            <span style={{ fontSize: pt(12), fontWeight: 700, letterSpacing: "0.03em" }}>Tax Invoice</span>
+            {!page.first ? <span style={{ fontSize: pt(7.5), color: GREY }}> (continued, page {page.index + 1})</span> : null}
+          </div>
+          {page.first ? (
+            <div className="border-l border-black flex flex-col items-center justify-center" style={{ paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>
+              <QrSvg text={b.qr} label={qrName} size={pt(58)} />
+              <span style={{ fontSize: pt(6.5), color: GREY }}>Scan to check</span>
+            </div>
+          ) : null}
+        </div>
+
+        {page.first ? (
+          <div className="grid border-b border-black" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(LAYOUT.infoWidth)}px` }}>
+            <div className="border-r border-black flex flex-col">
+              <div className="border-b border-black" style={{ padding: pt(LAYOUT.padding.block) }}>
+                <div style={{ fontSize: pt(11), fontWeight: 700, marginBottom: pt(1) }}><RupeeText>{b.firm.name}</RupeeText></div>
+                {b.firm.lines.map((l, i) => <div key={i}><RupeeText>{l}</RupeeText></div>)}
+              </div>
+              {b.parties.map((p, i) => (
+                <div key={i} className={cn(i === 0 && "border-b border-black")} style={{ padding: pt(LAYOUT.padding.block) }}>
+                  {label(p.label)}
+                  <div className="font-bold"><RupeeText>{p.name}</RupeeText></div>
+                  {p.lines.map((l, j) => <div key={j}><RupeeText>{l}</RupeeText></div>)}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 content-start">
+              {b.meta.map(([k, v], i) => cell(i, k, v, cn(i % 2 === 0 && "border-r", i < b.meta.length - 2 && "border-b")))}
+            </div>
+          </div>
+        ) : (
+          <div className="grid border-b border-black gap-x-4" style={{ gridTemplateColumns: "minmax(0,1fr) auto", fontSize: pt(8.5), padding: pt(LAYOUT.padding.block) }}>
+            {b.short.map((runs, i) => <div key={i} className={i % 2 ? "text-right" : undefined}><Runs runs={runs} /></div>)}
+          </div>
+        )}
+
+        <div role="table" aria-label="Goods" className="flex-1 flex flex-col">
+          <Row head bold className="border-b border-black" style={{ background: "#f2f2f2" }} cells={["Sl No.", "Description of Goods", "HSN/SAC", "Quantity", "Rate", "per", "Amount"]} />
+          {page.lines.map((i) => {
+            const l = b.lines[i];
+            return (
+              <Row key={i} cells={[l.sl, (
+                <span key="n">
+                  <span className="font-bold"><RupeeText>{l.name}</RupeeText></span>
+                  {l.note ? <span className="block" style={{ fontStyle: "italic", fontSize: pt(7.5), paddingLeft: pt(LAYOUT.padding.noteLeft) }}><RupeeText>{l.note}</RupeeText></span> : null}
+                </span>
+              ), l.hsn, l.qty, l.rate, l.per, <span key="a" className="font-bold">{l.amount}</span>]} />
+            );
+          })}
+          {page.last ? (
+            <>
+              {b.taxes.map((t) => <Row key={t.key} cells={["", <span key="l" className="block text-right font-bold" style={{ fontStyle: "italic" }}>{t.head}</span>, "", "", t.rate, "", <span key="a" className="font-bold">{t.amount}</span>]} />)}
+              {b.note ? <Row cells={["", <span key="n" className="block" style={{ fontStyle: "italic", fontSize: pt(8.5) }}>Note: <RupeeText>{b.note}</RupeeText></span>, "", "", "", "", ""]} /> : null}
+            </>
+          ) : null}
+          <Row filler cells={["", "", "", "", "", "", ""]} />
+          {page.last ? (
+            <Row bold className="border-t border-black" style={{ minHeight: pt(PAGE_FIT.closing) }} cells={["", <span key="t" className="block text-right">Total</span>, "", b.total.qty, "", "", <span key="g" style={{ fontSize: pt(10) }}><RupeeText>{`₹ ${b.total.amount}`}</RupeeText></span>]} />
+          ) : (
+            <Row className="border-t border-black" style={{ minHeight: pt(PAGE_FIT.closing) }} cells={["", <span key="t" className="block text-right" style={{ fontStyle: "italic" }}>continued on page {page.index + 2}</span>, "", "", "", "", ""]} />
+          )}
+        </div>
+
+        {page.last ? (
+          <>
+            <div className="border-t border-b border-black" style={{ padding: `${pt(LAYOUT.padding.cell)}px ${pt(LAYOUT.padding.block)}px` }}>
+              <div className="flex justify-between">{label("Amount Chargeable (in words)")}<span style={{ fontSize: pt(7.5), fontStyle: "italic" }}>E. & O.E</span></div>
+              <div className="font-bold">{b.words}</div>
+            </div>
+            <table aria-label="Tax by HSN/SAC" className="w-full border-collapse" style={{ fontSize: 11 }}>
+              <thead style={{ background: "#f2f2f2" }}>
+                <tr>{(b.igst ? ["HSN/SAC", "Taxable Value", "IGST Rate", "IGST Amount", "Total Tax Amount"] : ["HSN/SAC", "Taxable Value", "CGST Rate", "CGST Amount", "SGST/UTGST Rate", "SGST/UTGST Amount", "Total Tax Amount"])
+                  .map((h, i, a) => <th key={h} scope="col" className={cn("font-bold px-1.5 py-1 border-b border-black text-center", i < a.length - 1 && "border-r")}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {[...b.hsn, b.hsnTotal].map((h) => {
+                  const total = h === b.hsnTotal;
+                  const cells = b.igst ? [h.hsn, h.taxable, h.rate, h.igst, h.tax] : [h.hsn, h.taxable, h.rate, h.cgst, h.rate, h.sgst, h.tax];
+                  return (
+                    <tr key={h.key} className={total ? "font-bold" : ""}>
+                      {cells.map((v, i) => {
+                        const rate = i === 2 || (i === 4 && !b.igst);
+                        return <td key={i} className={cn("px-1.5 py-[3px] border-b border-black", i < cells.length - 1 && "border-r", total || i > 0 ? (rate && !total ? "text-center" : "text-right") : "text-left")}>{v}</td>;
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="border-b border-black" style={{ fontSize: pt(8), padding: pt(LAYOUT.padding.cell) }}>Tax Amount (in words) : <span className="font-bold">{b.taxWords}</span></div>
+            <div className="grid" style={{ gridTemplateColumns: `minmax(0,1fr) ${pt(LAYOUT.infoWidth)}px`, fontSize: pt(8) }}>
+              <div className="border-r border-black flex flex-col justify-between gap-3" style={{ padding: pt(LAYOUT.padding.block) }}>
+                <div>Company&apos;s PAN : <span className="font-bold">{b.firm.pan}</span></div>
+                <div>
+                  <div role="heading" aria-level={3} className="font-bold underline">Declaration</div>
+                  <div style={{ fontSize: pt(7.5) }}><RupeeText>{b.declaration}</RupeeText></div>
+                </div>
+              </div>
+              <div className="flex flex-col">
+                {b.firm.bank ? (
+                  <div className="border-b border-black" style={{ padding: pt(LAYOUT.padding.block) }}>
+                    <div>Company&apos;s Bank Details</div>
+                    <div className="grid" style={{ gridTemplateColumns: `${pt(LAYOUT.bankLabel)}px minmax(0,1fr)` }}>
+                      {b.firm.bank.map(([k, v], i) => [<span key={`${i}k`}>{k}</span>, <span key={`${i}v`} className="font-bold">: <RupeeText>{v}</RupeeText></span>])}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex-1 flex flex-col justify-between text-right" style={{ padding: pt(LAYOUT.padding.block), minHeight: pt(PAGE_FIT.sign) }}>
+                  <div className="font-bold">for <RupeeText>{b.firm.name}</RupeeText></div>
+                  {/* the signature in the PDF's own box, 90 by 30 pt, whatever its size */}
+                  {b.firm.signature ? <img src={b.firm.signature} alt={`Signature for ${b.firm.name}`} className="self-end object-contain" style={{ width: pt(90), height: pt(PAGE_FIT.signature) }} /> : null}
+                  <div>Authorised Signatory</div>
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-black text-center" style={{ fontSize: pt(7.5), paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}><RupeeText>{`SUBJECT TO ${b.jurisdiction.toUpperCase()} JURISDICTION`}</RupeeText></div>
+            <div className="border-t border-black text-center" style={{ fontSize: pt(7), color: GREY, paddingTop: pt(LAYOUT.padding.cell), paddingBottom: pt(LAYOUT.padding.cell) }}>This is a Computer Generated Invoice</div>
+          </>
+        ) : null}
+      </div>
+      {b.cancelled ? (
+        <div aria-label="Cancelled" role="img" className="absolute pointer-events-none" style={{ top: 420, left: 0, right: 0, display: "flex", justifyContent: "center" }}>
+          <span style={{ transform: "rotate(-16deg)", border: "4px solid #c62828", color: "#c62828", fontSize: 64, fontWeight: 700, letterSpacing: "0.12em", padding: "4px 26px", opacity: 0.8, fontFamily: SERIF }}>CANCELLED</span>
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+/**
+ * The paper, scaled to the space it has (a phone, a narrow window); a button shows it full size, in a region named after
+ * it, as the print page stacks one per copy and page, and batch print one per bill, copy and page. Drawn again only when
+ * its bill, copy or page does, as Paper is.
+ */
+export const ScaledPaper = memo(function ScaledPaper({ b, copy, page }: { b: PrintBill; copy: CopyMark; page: PrintPage }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(358);
+  const [full, setFull] = useState(false);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return undefined;
+    const measure = () => setW(el.clientWidth || 358);
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const scale = Math.min(1, w / A4_W);
+  return (
+    <div ref={box} className="w-full flex flex-col gap-2">
+      <div {...(full ? { className: "scroll-x -mx-4 px-4", tabIndex: 0, role: "region", "aria-label": `Bill ${b.number}, ${sheetOf(copy, page)}, at full size` } : {})}>
+        <div style={full ? undefined : { zoom: scale }}><Paper b={b} copy={copy} page={page} /></div>
+      </div>
+      {scale < 1 ? <Button size="sm" variant="ghost" icon={full ? Minimize2 : Maximize2} onClick={() => setFull(!full)} className="self-center">{full ? "Fit to the screen" : "See it full size"}</Button> : null}
+    </div>
+  );
+});
+
+/**
+ * The papers again, full size and outside the app, for printing from the browser (Ctrl P): on screen they're hidden,
+ * and in print styles.css shows only them, a sheet each (the scaled ones above are zoomed and boxed in by the app).
+ * While it's mounted the printed sheet is A4 without margins (the paper has its own); other pages keep the browser's.
+ */
+export function PrintCopy({ children }: { children: ReactNode }) {
+  return createPortal(
+    <div data-print-copy="" aria-hidden="true">
+      <style>{"@media print { @page { size: A4; margin: 0 } }"}</style>
+      {children}
+    </div>,
+    document.body,
+  );
+}

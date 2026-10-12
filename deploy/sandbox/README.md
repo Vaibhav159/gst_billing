@@ -35,6 +35,7 @@ production, the Elnuvi preview and a CI runner. Work happens directly on the VM.
 |---|---|
 | 8060 | sandbox nginx: the built app, exactly as production serves it |
 | 5174 | sandbox Vite in Docker (`sandbox.sh dev`), hot reload |
+| 5180 | v3's Vite in Docker (`sandbox.sh dev`, service `vite-v3`), hot reload |
 | 5173 | native `npm run dev` (configured by `sweet-rebuild-suite-main/.env.local`) |
 | 8000, 80, 5432 | **Bahikhata production** — never point anything at these |
 
@@ -42,7 +43,7 @@ production, the Elnuvi preview and a CI runner. Work happens directly on the VM.
 
 ```bash
 deploy/sandbox/sandbox.sh up      # db, redis, web, nginx (rebuilds if needed)
-deploy/sandbox/sandbox.sh dev     # + Vite on 5174
+deploy/sandbox/sandbox.sh dev     # + Vite: v2 on 5174, v3 on 5180
 deploy/sandbox/sandbox.sh seed    # first time only; reseed wipes and reloads
 deploy/sandbox/sandbox.sh logs web
 deploy/sandbox/sandbox.sh manage migrate
@@ -50,7 +51,7 @@ deploy/sandbox/sandbox.sh manage migrate
 
 - **Python edits** reload gunicorn by themselves: the backend source is mounted
   into the web container.
-- **Frontend edits** hot-reload in Vite (5174 or 5173). To see the built app
+- **Frontend edits** hot-reload in Vite (5174 or 5173; v3 on 5180). To see the built app
   exactly as nginx serves it: `sandbox.sh build nginx && sandbox.sh up`.
 - **Dependency changes** (`pyproject.toml`/`uv.lock`) need `sandbox.sh build web`.
   Image builds run in a BuildKit container capped at 1 CPU / 3 GB.
@@ -71,8 +72,54 @@ ssh -N -L 8060:127.0.0.1:8060 -L 5174:127.0.0.1:5174 bk-free
 ```
 
 Then http://localhost:8060 or http://localhost:5174. Logins are in
-`../env/logins.txt`: one each for owner (superuser), admin, editor, viewer
-and a user with no group.
+`../env/logins.txt`: one each for owner (superuser), admin, editor, viewer,
+a user with no group, and v3's accountant and counter staff (`sandbox_staff`
+opens on KIRAN, its default firm).
+
+## v3 (branch `v3`)
+
+- `./sandbox.sh dev` also starts v3 (`web/`) on 127.0.0.1:5180, beside v2 on
+  5174. Add `-L 5180:127.0.0.1:5180` to the tunnel to open it from the laptop.
+- v3 talks to the same server as v2: its `/api` goes through the sandbox
+  nginx to the same Django and database, so the same logins work in both.
+- Run `sandbox.sh` from the `gst_billing_v3` worktree, so the server runs
+  v3's code: the images build from, and the web container mounts `billing/`
+  and `gst_billing/` from, the checkout whose `sandbox.sh` you run.
+
+## A second sandbox (`gst-sandbox-2`)
+
+A second, independent copy for a second e2e lane or another branch: its own
+compose project, database, Redis, volumes (`gst-sandbox-2_*`, including the
+Vite `node_modules`), image tags (`gst-sandbox-2-web:dev`, `-nginx:dev`) and
+seed. Run it from its own worktree (on this VM `v3wt/sbx2`, branch `v3-sbx2`),
+since the images build from, and the containers mount, the checkout whose
+`sandbox.sh` you run.
+
+| | `gst-sandbox` | `gst-sandbox-2` |
+|---|---|---|
+| nginx | 8060 | 8160 |
+| v2 Vite | 5174 | 5274 |
+| v3 Vite | 5180 | 5280 |
+| logins | `env/logins.txt` | `env/logins-2.txt` |
+| e2e lock | `locks/e2e-gst-sandbox.lock` | `locks/e2e-gst-sandbox-2.lock` |
+
+```bash
+export GST_SANDBOX_PROJECT=gst-sandbox-2
+export GST_SANDBOX_ENV_DIR=/home/ubuntu/projects/gst-billing-sandbox/env  # the worktree's parent isn't the workspace
+deploy/sandbox/sandbox.sh up && deploy/sandbox/sandbox.sh dev && deploy/sandbox/sandbox.sh seed
+```
+
+- With no variables set, `sandbox.sh` and `compose.yaml` drive `gst-sandbox`
+  exactly as before. `GST_SANDBOX_PROJECT` takes only `gst-sandbox` or
+  `gst-sandbox-N` (N 2–9); `gst-sandbox-N` gets 8060/5174/5180 + 100×(N−1) and
+  `logins-N.txt`. `GST_SANDBOX_NGINX_PORT`, `GST_SANDBOX_VITE_PORT`,
+  `GST_SANDBOX_VITE3_PORT` and `GST_SANDBOX_LOGINS` override them; 80, 8000
+  and 5432 are refused.
+- Both share `sandbox.env` (DB password, Django key) and the capped builder.
+- e2e against it: `BASE_URL_V3=http://127.0.0.1:5280`,
+  `LOGINS_FILE=<env>/logins-2.txt`, under
+  `flock <workspace>/locks/e2e-gst-sandbox-2.lock`. Running both lanes from
+  one checkout? Give each its own `E2E_AUTH_FILE` and `--output` directory.
 
 ## Differences from production, on purpose
 
@@ -83,7 +130,7 @@ and a user with no group.
 | gunicorn | 4 workers × 4 threads | 2 × 4, `--reload`, backend source mounted read-only |
 | Edge | Cosmos TLS → nginx | SSH tunnel → nginx |
 | Watchtower, backup sidecar | yes | no |
-| Resources | whole box | capped: web 1 CPU / 1.5 GB, db 0.5 / 768 MB, vite 1 / 1 GB, redis, nginx small |
+| Resources | whole box | capped: web 1 CPU / 1.5 GB, db 0.5 / 768 MB, each vite (v2, v3) 1 / 1 GB, redis, nginx small |
 
 ## Tear down
 

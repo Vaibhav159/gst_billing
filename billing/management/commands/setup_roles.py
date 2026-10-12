@@ -4,10 +4,10 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = "Create default user roles: admin, editor, viewer"
+    help = "Create the user roles: admin, editor, viewer, and v3's accountant and counter_staff"
 
     def handle(self, *args, **options):
-        roles = ["admin", "editor", "viewer"]
+        roles = ["admin", "editor", "viewer", "accountant", "counter_staff"]
         for role in roles:
             _group, created = Group.objects.get_or_create(name=role)
             if created:

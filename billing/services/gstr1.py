@@ -7,7 +7,6 @@ and export use its queryset helpers).
 
 import bisect
 import re
-from datetime import date
 from decimal import Decimal
 
 from django.db.models import Count, F, Q, Sum
@@ -15,8 +14,16 @@ from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.utils import timezone
 from rest_framework.response import Response
 
-from billing.models import Business, Invoice, LineItem
-from billing.tax_rules import HEADS, classify_b2c, clean_gstin, gstin_problem, rate_as_percent, utilise_by_month
+from billing.models import Business, LineItem
+from billing.tax_rules import (
+    HEADS,
+    classify_b2c,
+    clean_gstin,
+    gstin_problem,
+    place_of_supply,
+    rate_as_percent,
+    utilise_by_month,
+)
 
 TWO_PLACES = Decimal("0.01")
 
@@ -42,7 +49,7 @@ def _readings(number):
             for i, m in enumerate(runs)]
 
 
-def document_series(numbers, elsewhere=()):
+def document_series(numbers, elsewhere=(), cancelled=()):
     """Table 13 rows for one kind of document: the month's number series.
 
     The counter is the run of digits that runs through the FY's numbers: in
@@ -52,11 +59,17 @@ def document_series(numbers, elsewhere=()):
     (`elsewhere`: a back-dated invoice); the range then splits into two rows
     there instead of counting phantom cancellations in both months (review of
     H11). A number with no digits is a series of one.
+
+    `cancelled` are the month's cancelled bills' numbers: in the series, and
+    counted as cancelled, so a cancelled first or last number keeps its row's
+    range instead of dropping out of it (design decision 5).
     """
     numbers = list(dict.fromkeys(numbers))
-    elsewhere = [n for n in dict.fromkeys(elsewhere) if n not in set(numbers)]
+    void = [n for n in dict.fromkeys(cancelled) if n not in set(numbers)]
+    month = numbers + void
+    elsewhere = [n for n in dict.fromkeys(elsewhere) if n not in set(month)]
     shared = {}
-    for number in numbers + elsewhere:
+    for number in month + elsewhere:
         for key, _, _ in _readings(number):
             shared[key] = shared.get(key, 0) + 1
     used_elsewhere = {}
@@ -65,7 +78,7 @@ def document_series(numbers, elsewhere=()):
             used_elsewhere.setdefault(key, []).append(counter)
 
     series, singles = {}, []
-    for number in numbers:
+    for number in month:
         readings = _readings(number)
         if not readings:
             singles.append(number)
@@ -93,11 +106,20 @@ def document_series(numbers, elsewhere=()):
         runs.append(counters[start:])
         for run in runs:
             total = run[-1] - run[0] + 1
+            live = sum(1 for counter in run if issued[counter] not in void)
             rows.append({"from": issued[run[0]], "to": issued[run[-1]], "totnum": total,
-                         "cancel": total - len(run), "net_issue": len(run)})
+                         "cancel": total - live, "net_issue": live})
     for number in sorted(singles):
-        rows.append({"from": number, "to": number, "totnum": 1, "cancel": 0, "net_issue": 1})
+        dead = number in void
+        rows.append({"from": number, "to": number, "totnum": 1, "cancel": int(dead), "net_issue": int(not dead)})
     return [{"num": i, **row} for i, row in enumerate(rows, start=1)]
+
+
+def _line_taxable():
+    """quantity x rate rounded half-up to paise per line, before SQL adds the lines (X-55)."""
+    from billing.services.purchase_reads import LinePaise
+
+    return LinePaise(F("quantity"), F("rate"))
 
 
 def _months(items):
@@ -121,7 +143,7 @@ def _months(items):
 
 def gst_summary(view, request):
     """Server-side GST summary for GSTR-1/3B — grouped by rate slab and HSN."""
-    queryset = view.get_queryset()
+    queryset = view.get_queryset().counted()
     invoice_ids = list(queryset.values_list("id", flat=True))
     items = LineItem.objects.filter(invoice_id__in=invoice_ids)
     # business_id from query string — used for the per-business ECRRS ledger
@@ -144,7 +166,7 @@ def gst_summary(view, request):
         items
         .values("invoice__type_of_invoice", "gst_tax_rate")
         .annotate(
-            taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            taxable=Coalesce(Sum(_line_taxable()), Decimal("0")),
             cgst=Coalesce(Sum("cgst"), Decimal("0")),
             sgst=Coalesce(Sum("sgst"), Decimal("0")),
             igst=Coalesce(Sum("igst"), Decimal("0")),
@@ -179,7 +201,7 @@ def gst_summary(view, request):
         .filter(invoice__type_of_invoice="outward")
         .values("hsn_code")
         .annotate(
-            taxable=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+            taxable=Coalesce(Sum(_line_taxable()), Decimal("0")),
             cgst=Coalesce(Sum("cgst"), Decimal("0")),
             sgst=Coalesce(Sum("sgst"), Decimal("0")),
             igst=Coalesce(Sum("igst"), Decimal("0")),
@@ -436,7 +458,7 @@ def gst_summary(view, request):
 
 def gstr_export(view, request):
     """Export GSTR-1, GSTR-3B, and 2B matching data in GST portal format."""
-    queryset = view.get_queryset()
+    queryset = view.get_queryset().counted()
     invoice_ids = list(queryset.values_list("id", flat=True))
 
     # Prefetch line items so the per-invoice loops below don't fire one
@@ -480,7 +502,7 @@ def gstr_export(view, request):
             "inum": inv.invoice_number,
             "idt": inv.invoice_date.strftime("%d-%m-%Y") if inv.invoice_date else "",
             "val": float(inv.total_amount),
-            "pos": cust_gst[:2],
+            "pos": place_of_supply(inv),
             "rchrg": "N",
             "inv_typ": "R",
             "itms": inv_items,
@@ -586,13 +608,13 @@ def gstr_export(view, request):
     inward_items = items_all.filter(invoice__type_of_invoice="inward")
 
     ot = outward_items.aggregate(
-        txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+        txval=Coalesce(Sum(_line_taxable()), Decimal("0")),
         cgst=Coalesce(Sum("cgst"), Decimal("0")),
         sgst=Coalesce(Sum("sgst"), Decimal("0")),
         igst=Coalesce(Sum("igst"), Decimal("0")),
     )
     it = inward_items.aggregate(
-        txval=Coalesce(Sum(F("quantity") * F("rate")), Decimal("0")),
+        txval=Coalesce(Sum(_line_taxable()), Decimal("0")),
         cgst=Coalesce(Sum("cgst"), Decimal("0")),
         sgst=Coalesce(Sum("sgst"), Decimal("0")),
         igst=Coalesce(Sum("igst"), Decimal("0")),
@@ -682,203 +704,8 @@ def gstr1_portal_json(view, request):
             status=400,
         )
 
-    def r2(x):
-        return float(Decimal(x or 0).quantize(TWO_PLACES))
+    from billing.services.gstr1_file import build_gstr1
 
-    def rate_pct(li):
-        r = li.gst_tax_rate or Decimal(0)
-        return float(rate_as_percent(r))
-
-    UQC = {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
-           "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM"}
-
-    invoices = (
-        Invoice.objects.filter(
-            business=business, type_of_invoice="outward",
-            invoice_date__year=year, invoice_date__month=month,
-        )
-        .select_related("customer")
-        .prefetch_related("lineitem_set")
-        .order_by("invoice_date", "id")
-    )
-
-    skipped, warnings = [], []
-    b2b_data, b2cl_data, b2cs_agg = {}, {}, {}
-    hsn_agg = {"hsn_b2b": {}, "hsn_b2c": {}}
-    counts = {"b2b": 0, "b2cl": 0, "b2cs": 0}
-
-    def slabs(items):
-        """Aggregate an invoice's lines into per-rate slabs (portal itms)."""
-        agg = {}
-        for li in items:
-            rt = rate_pct(li)
-            s = agg.setdefault(rt, {"txval": Decimal(0), "camt": Decimal(0),
-                                    "samt": Decimal(0), "iamt": Decimal(0)})
-            s["txval"] += (li.quantity or 0) * (li.rate or 0)
-            s["camt"] += li.cgst or 0
-            s["samt"] += li.sgst or 0
-            s["iamt"] += li.igst or 0
-        return agg
-
-    for inv in invoices:
-        items = list(inv.lineitem_set.all())
-        label = f"{inv.invoice_number or '(no number)'} / {inv.invoice_date}"
-        if not inv.invoice_number or not inv.invoice_date:
-            skipped.append(f"{label}: missing invoice number or date")
-            continue
-        if not items:
-            skipped.append(f"{label}: no line items")
-            continue
-
-        agg = slabs(items)
-        idt = inv.invoice_date.strftime("%d-%m-%Y")
-        val = r2(inv.total_amount)
-        cust_gstin = clean_gstin(inv.customer.gst_number)
-        if gstin_problem(inv.customer.gst_number):
-            # On file from before the API refused typos: filed as B2C, the
-            # buyer gets no credit, so say so before it goes up.
-            warnings.append(f"{label}: {inv.customer.name}'s GSTIN {inv.customer.gst_number.strip()} isn't a GSTIN, "
-                            "so the sale is filed as B2C. Correct it on the customer and download again.")
-
-        if cust_gstin:
-            itms = [
-                {"num": i + 1, "itm_det": {
-                    "txval": r2(s["txval"]), "rt": rt,
-                    "camt": r2(s["camt"]), "samt": r2(s["samt"]),
-                    "iamt": r2(s["iamt"]), "csamt": 0,
-                }}
-                for i, (rt, s) in enumerate(sorted(agg.items()))
-            ]
-            b2b_data.setdefault(cust_gstin, {"ctin": cust_gstin, "inv": []})["inv"].append({
-                "inum": inv.invoice_number, "idt": idt, "val": val,
-                "pos": cust_gstin[:2], "rchrg": "N", "inv_typ": "R", "itms": itms,
-            })
-            counts["b2b"] += 1
-            continue
-
-        table, inter, pos, downgraded = classify_b2c(business, inv)
-        if downgraded:
-            warnings.append(f"{label}: inter-state but customer state unknown — filed as intra-state")
-
-        if table == "b2cl":
-            itms = [
-                {"num": i + 1, "itm_det": {
-                    "txval": r2(s["txval"]), "rt": rt,
-                    "iamt": r2(s["iamt"]), "csamt": 0,
-                }}
-                for i, (rt, s) in enumerate(sorted(agg.items()))
-            ]
-            b2cl_data.setdefault(pos, {"pos": pos, "inv": []})["inv"].append({
-                "inum": inv.invoice_number, "idt": idt, "val": val, "itms": itms,
-            })
-            counts["b2cl"] += 1
-            continue
-
-        # Consolidated B2C: intra-state at any value, inter-state <= threshold.
-        sply = "INTER" if inter else "INTRA"
-        for rt, s in agg.items():
-            b = b2cs_agg.setdefault((sply, pos, rt), {
-                "sply_ty": sply, "pos": pos, "typ": "OE", "rt": rt,
-                "txval": Decimal(0), "camt": Decimal(0),
-                "samt": Decimal(0), "iamt": Decimal(0),
-            })
-            b["txval"] += s["txval"]
-            b["camt"] += s["camt"]
-            b["samt"] += s["samt"]
-            b["iamt"] += s["iamt"]
-            if sply == "INTRA" and s["iamt"]:
-                warnings.append(f"{label}: intra-state supply carries IGST — run fix_tax_heads")
-            if sply == "INTER" and (s["camt"] or s["samt"]):
-                warnings.append(f"{label}: inter-state supply carries CGST/SGST — run fix_tax_heads")
-        counts["b2cs"] += 1
-
-    # HSN summary (table 12) over everything that made it into the file, in
-    # its B2B and B2C tabs: since the April/May 2025 periods the portal takes
-    # them separately and ties each tab to its own sections (H11).
-    for inv in invoices:
-        if not inv.invoice_number or not inv.invoice_date:
-            continue
-        tab = hsn_agg[_hsn_tab(inv.customer)]
-        for li in inv.lineitem_set.all():
-            hsn = (li.hsn_code or "").strip()
-            service = _is_service(hsn)
-            uqc = "NA" if service else UQC.get((li.unit or "").strip().lower(), "OTH")
-            rt = rate_pct(li)
-            h = tab.setdefault((hsn, uqc, rt), {
-                "hsn_sc": hsn, "desc": (li.product_name or "")[:30], "uqc": uqc,
-                "rt": rt, "qty": Decimal(0), "txval": Decimal(0),
-                "camt": Decimal(0), "samt": Decimal(0), "iamt": Decimal(0),
-            })
-            h["qty"] += 0 if service else (li.quantity or 0)
-            h["txval"] += (li.quantity or 0) * (li.rate or 0)
-            h["camt"] += li.cgst or 0
-            h["samt"] += li.sgst or 0
-            h["iamt"] += li.igst or 0
-            if not hsn:
-                warnings.append(f"{inv.invoice_number}: line '{li.product_name}' has no HSN")
-
-    fp = f"{month:02d}{year}"
-    file_obj = {"gstin": gstin, "fp": fp, "version": "GST3.2.1", "hash": "hash"}
-    if b2b_data:
-        file_obj["b2b"] = list(b2b_data.values())
-    if b2cl_data:
-        file_obj["b2cl"] = list(b2cl_data.values())
-    if b2cs_agg:
-        file_obj["b2cs"] = [
-            {"sply_ty": b["sply_ty"], "pos": b["pos"], "typ": b["typ"], "rt": b["rt"],
-             "txval": r2(b["txval"]),
-             **({"iamt": r2(b["iamt"])} if b["sply_ty"] == "INTER"
-                else {"camt": r2(b["camt"]), "samt": r2(b["samt"])}),
-             "csamt": 0}
-            for b in b2cs_agg.values()
-        ]
-    hsn_tabs = {
-        tab: [
-            {"num": i + 1, "hsn_sc": h["hsn_sc"], "desc": h["desc"], "uqc": h["uqc"],
-             "qty": r2(h["qty"]), "rt": h["rt"], "txval": r2(h["txval"]),
-             "camt": r2(h["camt"]), "samt": r2(h["samt"]),
-             "iamt": r2(h["iamt"]), "csamt": 0}
-            for i, h in enumerate(rows.values())
-        ]
-        for tab, rows in hsn_agg.items() if rows
-    }
-    if hsn_tabs:
-        file_obj["hsn"] = hsn_tabs
-    # Table 13, documents issued (mandatory): doc_num 1 is "invoices for
-    # outward supply"; one row per number series of the month (H11).
-    fy_from = date(year if month >= 4 else year - 1, 4, 1)
-    elsewhere = (
-        Invoice.objects.filter(business=business, type_of_invoice="outward",
-                               invoice_date__gte=fy_from, invoice_date__lt=date(fy_from.year + 1, 4, 1))
-        .exclude(invoice_date__year=year, invoice_date__month=month)
-        .exclude(invoice_number="")
-        .values_list("invoice_number", flat=True)
-    )
-    docs = document_series([inv.invoice_number for inv in invoices if inv.invoice_number], elsewhere)
-    if docs:
-        file_obj["doc_issue"] = {"doc_det": [{"doc_num": 1, "docs": docs}]}
-    for d in docs:
-        if d["cancel"] > max(10, d["net_issue"]):
-            warnings.append(
-                f"Table 13: {d['from']} to {d['to']} leaves {d['cancel']} numbers unused, filed as cancelled. "
-                "If an invoice number was mistyped, correct it before filing."
-            )
-
-    total_txval = sum(
-        r2(b["txval"]) for b in b2cs_agg.values()
-    ) + sum(
-        i["itm_det"]["txval"] for g in b2b_data.values() for v in g["inv"] for i in v["itms"]
-    ) + sum(
-        i["itm_det"]["txval"] for g in b2cl_data.values() for v in g["inv"] for i in v["itms"]
-    )
-
-    return Response({
-        "file": file_obj,
-        "meta": {
-            "business": business.name, "gstin": gstin, "fp": fp,
-            "invoice_counts": counts,
-            "taxable_total": round(total_txval, 2),
-            "skipped": skipped, "warnings": warnings,
-        },
-    })
-
+    # v2 never had correction tables; v3's own download is where corrections live (R3A-8).
+    built = build_gstr1(business, year, month, amendments=False)
+    return Response({key: built[key] for key in ("file", "meta")})

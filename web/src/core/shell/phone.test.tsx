@@ -1,0 +1,831 @@
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { AxiosAdapter } from "axios";
+import { createMemoryRouter, RouterProvider } from "react-router";
+import { render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { api } from "@/core/api/client";
+import { wireDashboard, wireDue } from "@/core/dashboard/fixtures";
+import { FIRM, wireDetail, wirePage } from "@/core/sales/fixtures";
+import { wireRates } from "@/core/rates/testing";
+import { monthFixture } from "@/core/gst/fixtures";
+import { AuthContext } from "@/core/auth/AuthProvider";
+import { ToastProvider } from "@/core/ui";
+import { appRoutes } from "@/core/router/routes";
+import { stubAuth } from "@/test/render";
+import { pass } from "@/test/clock";
+// for the tests after the brief's four
+import type { ReactNode } from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { act, cleanup, fireEvent } from "@testing-library/react";
+import { AxiosError } from "axios";
+import type { DataRouter } from "react-router";
+import { AppRoutes } from "@/App";
+import { __setNetState } from "@/core/api/network";
+import { queryClient } from "@/core/api/query";
+import type { AuthValue } from "@/core/auth/AuthProvider";
+import { applyTextSize } from "@/core/device";
+import { Button, ButtonLink, Page, useToast, type ToastApi } from "@/core/ui";
+import { overlayLayer } from "@/core/ui/Overlay";
+import { AppLayout } from "./AppLayout";
+import { useKeyboardInset } from "./keyboard";
+import { tabOf } from "./nav";
+
+const auth = stubAuth();
+// These tests hold preferences/network reads, not the dashboard's code download.
+beforeAll(async () => { await import("@/pages/core/DashboardPage"); });
+const SETUP = { firms:{count:0,names:[]}, customers:{count:0,names:[]}, products:{count:0,names:[]}, bills:{count:0,cancelled:0}, people:1, last_backup_at:null };
+
+function mount(path: string, prefs: Record<string, unknown> = {}) {
+  server({ prefs });
+  const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
+  render(<QueryClientProvider client={new QueryClient()}><AuthContext.Provider value={auth}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+  return router;
+}
+
+beforeEach(() => { localStorage.clear(); (window as unknown as { __phone?: boolean }).__phone = true; });
+afterEach(() => { (window as unknown as { __phone?: boolean }).__phone = false; });
+
+test("Expert on a phone: five tabs at the bottom, the current one marked", async () => {
+  mount("/customers", { phoneMode: "expert" });
+  const tabs = await screen.findByRole("navigation", { name: /tabs/i });
+  for (const name of ["Home", "Bills", "Capture", "Customers", "More"]) expect(within(tabs).getByRole("link", { name })).toBeInTheDocument();
+  expect(within(tabs).getByRole("link", { name: "Customers" })).toHaveAttribute("aria-current", "page");
+});
+
+test("Easy is the phone's default: home goes to /e and its tabs stay in Easy", async () => {
+  const router = mount("/");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  const tabs = await screen.findByRole("navigation", { name: /tabs/i });
+  expect(within(tabs).getByRole("link", { name: "Bills" })).toHaveAttribute("href", "/e/bills");
+});
+
+test("an Easy person on an Expert page gets a way back to Easy", async () => {
+  mount("/customers");
+  expect(await screen.findByRole("link", { name: /back to easy/i })).toHaveAttribute("href", "/e");
+});
+
+test("More lists the other pages, switches mode and signs out", async () => {
+  mount("/more", { phoneMode: "expert" });
+  // Wait for the real route module requested by mount; the loading boundary is tested separately.
+  await act(async () => { await import("@/pages/core/More"); });
+  expect(await screen.findByRole("link", { name: /products/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /switch to easy/i })).toBeInTheDocument();
+  await act(() => new Promise<void>((r) => { setTimeout(r, 300); })); // past the page's guard against a double tap's second tap (PageFrame, 300 ms)
+  await userEvent.click(screen.getByRole("button", { name: /sign out/i }));
+  expect(await screen.findByRole("dialog", { name: /sign out/i })).toBeInTheDocument();
+});
+
+/* ── Beyond the brief: the hand-offs (hideNav, the first paint, the keyboard) and the rest of what the shell and More do ── */
+
+afterEach(() => { act(() => __setNetState("online")); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+/** Past the guards against the second tap of a double tap: the page's (300 ms) and a dialog's (350 ms). */
+const afterADoubleTap = () => act(() => { vi.advanceTimersByTime(400); });
+const wait = (ms: number) => act(() => new Promise<void>((r) => { setTimeout(r, ms); }));
+const frame = () => document.getElementById("app-main")!.firstElementChild as HTMLElement;
+const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
+
+type Call = { method?: string; url?: string; body?: unknown };
+/**
+ * The server: this person's preferences (a PATCH merges into them and answers with the whole set) and an established firm.
+ * prefsFail: the preferences can't be reached; patchFail: a change can't be saved; hold: each preferences GET, or each PATCH, waits for release().
+ */
+function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { prefs?: Record<string, unknown>; prefsFail?: boolean; patchFail?: boolean; hold?: "get" | "patch" } = {}) {
+  const calls: Call[] = [];
+  const waiting: (() => void)[] = [];
+  let stored = { ...prefs };
+  api.defaults.adapter = ((config) => {
+    const body = config.data ? JSON.parse(config.data as string) : undefined;
+    calls.push({ method: config.method, url: config.url, body });
+    const answer = (data: unknown) => ({ status: 200, statusText: "", headers: {}, config, data });
+    const down = () => Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config));
+    if (config.url === "setup/") return Promise.resolve(answer(SETUP));
+    if (config.url === "dashboard/") return Promise.resolve(answer(wireDashboard()));
+    if (config.url === "due-next/") return Promise.resolve(answer(wireDue()));
+    if (config.url === "rates/") return Promise.resolve(answer(wireRates()));
+    if (config.url === "gst/month/") return Promise.resolve(answer(monthFixture({ month: config.params.month })));
+    if (config.url === "sales/") return Promise.resolve(answer(wirePage([])));
+    if (config.url?.match(/^sales\/\d+\/$/)) return Promise.resolve(answer(wireDetail({ id: Number(config.url.split("/")[1]) })));
+    if (config.url === "customers/duplicates/") return Promise.resolve(answer({ groups: [] }));
+    if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [{ ...FIRM, short: "Kiran" }] } : { count: 0, next: null, results: [] }));
+    if (config.method === "patch") {
+      if (patchFail) return down();
+      const save = () => { stored = { ...stored, ...body }; return answer({ data: stored }); };
+      if (hold === "patch") return new Promise((resolve) => { waiting.push(() => resolve(save())); });
+      return Promise.resolve(save());
+    }
+    if (prefsFail) return down();
+    if (hold === "get") return new Promise((resolve) => { waiting.push(() => resolve(answer({ data: stored }))); });
+    return Promise.resolve(answer({ data: stored }));
+  }) as AxiosAdapter;
+  return { calls, pending: () => waiting.length, release: () => act(async () => { waiting.splice(0).forEach((go) => go()); }) };
+}
+
+/**
+ * A router inside the app's providers, signed in as `who`; queries don't retry, so a failure shows at once.
+ * `extra` renders beside the router, inside the toast provider, as App's own providers do.
+ */
+function renderIn(router: DataRouter, who: AuthValue = stubAuth(), extra: ReactNode = null) {
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthContext.Provider value={who}><ToastProvider>{extra}<RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
+  return router;
+}
+const open = (path: string, who?: AuthValue) => renderIn(createMemoryRouter(appRoutes, { initialEntries: [path] }), who);
+
+/** A visual viewport that shrinks when the keyboard opens, on an 844 px tall phone. */
+function viewport() {
+  const vv = Object.assign(new EventTarget(), { height: 844, offsetTop: 0 });
+  vi.stubGlobal("visualViewport", vv);
+  vi.stubGlobal("innerHeight", 844);
+  return { keyboard: (px: number, event = "resize") => act(() => { vv.height = 844 - px; vv.dispatchEvent(new Event(event)); }) };
+}
+function makeRoot() {
+  const root = document.createElement("div");
+  root.id = "root";
+  document.body.appendChild(root);
+  return root;
+}
+
+// Task 10/13 hand-off: the tabs make way on forms and print, and the action bar then clears the home indicator itself
+
+test("a form hides the tabs, and its action bar clears the home indicator itself; other pages keep the tabs", async () => {
+  server();
+  const router = renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
+    { path: "/sales", element: <Page title="Bills" actionBar={<Button>New bill</Button>}>The list</Page> },
+    { path: "/sales/new", handle: { hideNav: true }, element: <Page title="New bill" actionBar={<Button>Save</Button>}>The form</Page> },
+  ] }], { initialEntries: ["/sales"] }));
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  expect(screen.getByRole("navigation", { name: /tabs/i })).toBeInTheDocument();
+  expect(document.querySelector("[data-actionbar]")).toHaveClass("pb-3");
+  await act(async () => { await router.navigate("/sales/new"); });
+  await screen.findByRole("heading", { level: 1, name: "New bill" });
+  expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
+  expect(document.querySelector("[data-actionbar]")).toHaveClass("pb-[calc(12px+env(safe-area-inset-bottom,0px))]");
+  expect(document.querySelector("[data-actionbar]")).not.toHaveClass("pb-3");
+  cleanup();
+
+  // and the app's own routes: a new bill hides them, the bills list keeps them
+  open("/sales/new");
+  await screen.findByRole("heading", { level: 1, name: /^New (sales )?bill$/ }, { timeout: 5000 });
+  expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
+  cleanup();
+  open("/sales");
+  expect(await screen.findByRole("navigation", { name: /tabs/i })).toBeInTheDocument();
+});
+
+// Pinned over the page's scroll, the bar hid the row under it all but a sliver above its button: too small a target
+// (WCAG 2.5.8, axe's target-size on the sandbox's customers), and a row focused there sat behind the bar (2.4.11). jsdom
+// has no layout, so this pins where the bar is; the e2e WCAG checks measure the rest.
+test("the action bar sits under the page's scroll, between <main> and the tabs, not pinned over the page", async () => {
+  server({ prefs: { phoneMode: "expert" } });
+  const router = renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
+    { path: "/customers", element: <Page title="Customers" actionBar={<Button>Add customer</Button>}>The list</Page> },
+    { path: "/sales", element: <Page title="Bills">The list</Page> },
+  ] }], { initialEntries: ["/customers"] }));
+  const bar = (await screen.findByRole("button", { name: "Add customer" })).closest<HTMLElement>("[data-actionbar]")!;
+  const main = document.getElementById("app-main")!;
+  expect(main).not.toContainElement(bar);
+  // the shell's column: <main> (the page's scroll), the bar's place, then the tabs
+  expect(bar.parentElement!.parentElement).toBe(main.parentElement);
+  expect(main.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bar.compareDocumentPosition(screen.getByRole("navigation", { name: /tabs/i })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(bar.className).not.toMatch(/\b(sticky|fixed|absolute)\b/);
+  // a page with no bar leaves the place empty: nothing stays from the page before
+  await act(async () => { await router.navigate("/sales"); });
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  expect(main.nextElementSibling).toBeEmptyDOMElement();
+  expect(document.querySelector("[data-actionbar]")).toBeNull();
+});
+
+test("the bar is still the page's: a tap within 300 ms of the page opening is dropped, and Back puts focus back on the bar's link", async () => {
+  server({ prefs: { phoneMode: "expert" } });
+  const router = renderIn(createMemoryRouter([{ element: <AppLayout />, children: [
+    { path: "/sales", element: <Page title="Bills">The list</Page> },
+    { path: "/customers", element: <Page title="Customers" actionBar={<ButtonLink to="/customers/new">Add customer</ButtonLink>}>The list</Page> },
+    { path: "/customers/new", element: <Page title="New customer">The form</Page> },
+  ] }], { initialEntries: ["/sales"] }));
+  await screen.findByRole("heading", { level: 1, name: "Bills" });
+  // the clock moves only when the test says, so a busy runner can't carry a tap past the 300 ms
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  await act(async () => { await router.navigate("/customers"); });
+  const add = screen.getByRole("link", { name: "Add customer" });
+  act(() => { vi.advanceTimersByTime(299); });
+  await act(async () => { fireEvent.click(add); });
+  expect(router.state.location.pathname).toBe("/customers");
+  act(() => { vi.advanceTimersByTime(1); });
+  await act(async () => { fireEvent.click(add); });
+  expect(router.state.location.pathname).toBe("/customers/new");
+  await act(async () => { await router.navigate(-1); });
+  act(() => { vi.advanceTimersByTime(100); }); // the page frame's 90 ms focus
+  expect(screen.getByRole("link", { name: "Add customer" })).toHaveFocus();
+});
+
+test("each page lights its own tab: Easy's by its pages, Expert's by section, and a supplier's bill being captured under Capture", async () => {
+  const tabs = {
+    "/": "home", "/sales/7": "bills", "/scan": "bills", "/billing/invoice/kgh/2026-27/31": "bills", "/capture": "capture", "/purchases/capture": "capture",
+    "/purchases/inbox": "capture", "/purchases/inbox/4": "capture", "/purchases/9": "more", "/suppliers": "more", "/customers/7/statement": "customers",
+    "/gst": "more", "/products/5": "more", "/more": "more", "/e": "home", "/e/new/items": "home", "/e/gst": "home", "/e/bills": "bills", "/e/bill/5": "bills",
+    "/e/saved/5": "bills", "/e/capture": "capture", "/e/customers/7/edit": "customers", "/e/more": "more", "/e/profile": "more",
+  };
+  expect(Object.fromEntries(Object.keys(tabs).map((p) => [p, tabOf(p)]))).toEqual(tabs);
+
+  server();
+  const router = open("/e/bill/5");
+  const nav = await screen.findByRole("navigation", { name: /tabs/i });
+  expect(within(nav).getByRole("link", { name: "Bills" })).toHaveAttribute("aria-current", "page");
+  expect(within(nav).getAllByRole("link").filter((a) => a.hasAttribute("aria-current"))).toHaveLength(1);
+  // a tab is a place, not a step: going to another tab takes this page's place in history, as the prototype's tabs do
+  await userEvent.click(within(nav).getByRole("link", { name: "Customers" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e/customers"));
+  expect(router.state.historyAction).toBe("REPLACE");
+});
+
+test("on a desktop, Easy's addresses and the phone's More open the dashboard", async () => {
+  phone(false);
+  server();
+  for (const path of ["/e/bills", "/e", "/more"]) {
+    const router = open(path);
+    await waitFor(() => expect(router.state.location.pathname, path).toBe("/"));
+    cleanup();
+  }
+});
+
+// Ruling 38: Easy or Expert from the first paint, and never Easy for an Expert person before their setting is known
+
+test("an Expert person's phone isn't sent to Easy while their setting is on its way, nor after it arrives", async () => {
+  const s = server({ prefs: { phoneMode: "expert" }, hold: "get" });
+  const router = open("/");
+  await waitFor(() => expect(s.pending()).toBe(1));
+  await wait(50);
+  // not known yet: the app says it's loading, with neither home and no tabs, until it is
+  expect(router.state.location.pathname).toBe("/");
+  expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
+  expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
+  await s.release();
+  expect(await screen.findByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
+  await wait(50);
+  expect(router.state.location.pathname).toBe("/");
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+  cleanup();
+
+  // on a full-view page the way back to Easy waits for the setting too (and the copy just kept on this phone is gone)
+  localStorage.removeItem("gst3.prefs.1");
+  const again = server({ prefs: { phoneMode: "expert" }, hold: "get" });
+  open("/customers");
+  await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
+  await waitFor(() => expect(again.pending()).toBe(1));
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+  await again.release();
+  await wait(50);
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+});
+
+test("offline on a first visit, with no setting kept, a phone shows its Expert home rather than loading for good", async () => {
+  act(() => __setNetState("offline"));
+  const s = server({ hold: "get" }); // the setting can't come until the internet is back
+  const router = open("/");
+  expect(await screen.findByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: /tabs/i })).toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/");
+  expect(s.pending()).toBe(1);
+  // back online, the page that stood in stays until the setting arrives and moves the phone on
+  act(() => __setNetState("online"));
+  expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
+  // The page may load its figures; the shell must not replace it with its initial wait.
+  expect(screen.queryByText("Loading the app…")).not.toBeInTheDocument();
+  await s.release();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+});
+
+test("a phone kept on Easy opens on Easy at once, before the server answers, as the page the app opened on: no slide, nothing read out", async () => {
+  localStorage.setItem("gst3.prefs.1", JSON.stringify({ phoneMode: "easy" }));
+  const s = server({ prefs: { phoneMode: "easy" }, hold: "get" });
+  const router = open("/");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  expect(s.pending()).toBe(1); // the kept setting decided; the server hasn't answered
+  const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
+  expect(frame()).toHaveClass("h-full", { exact: true });
+  await wait(200);
+  expect(h1).not.toHaveFocus();
+  expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
+});
+
+test("Back to Easy takes the full-view page's place, so Back from Easy's home doesn't return to it", async () => {
+  server();
+  const router = renderIn(createMemoryRouter(appRoutes, { initialEntries: ["/e/bills", "/customers"], initialIndex: 1 }));
+  await userEvent.click(await screen.findByRole("link", { name: /back to easy/i }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  expect(router.state.historyAction).toBe("REPLACE");
+  await act(async () => { await router.navigate(-1); });
+  expect(router.state.location.pathname).toBe("/e/bills");
+});
+
+test("an Easy person tapping Home on a full-view page goes to Easy's home, greeted like any move", async () => {
+  server();
+  const router = open("/customers");
+  await screen.findByRole("link", { name: /back to easy/i }); // the setting is in: Easy
+  await userEvent.click(within(screen.getByRole("navigation", { name: /tabs/i })).getByRole("link", { name: "Home" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
+  await waitFor(() => expect(h1).toHaveFocus());
+  await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy mode · Home"));
+});
+
+test("a setting that arrives late still opens the phone on Easy, as if the app had opened there", async () => {
+  const s = server({ hold: "get" });
+  const router = open("/");
+  await waitFor(() => expect(s.pending()).toBe(1));
+  expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
+  await s.release();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  expect(router.state.historyAction).toBe("REPLACE"); // home isn't left behind for Back
+  const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
+  expect(frame()).toHaveClass("h-full", { exact: true });
+  await wait(200);
+  expect(h1).not.toHaveFocus();
+  expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
+});
+
+test("when the setting can't be loaded, a phone opens on what today's app chose there, else on Easy", async () => {
+  server({ prefsFail: true });
+  const router = open("/");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  cleanup();
+
+  localStorage.setItem("mobile-mode", "expert");
+  const s = server({ prefsFail: true });
+  const again = open("/");
+  await screen.findByRole("heading", { level: 1, name: "Today" });
+  await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
+  await wait(50);
+  expect(again.state.location.pathname).toBe("/");
+});
+
+/**
+ * Signs in as the owner through the real sign-in page, with the app's own providers and sign-in state; the server is
+ * whatever server() set up. The app then goes on to `next`, or home.
+ */
+async function signIn(path = "/login") {
+  const OWNER_ME = { id: 1, username: "kailash", full_name: "Kailash Mehta", role: "owner", role_label: "Owner", permissions: "*", needs_role_choice: false };
+  const answer = api.defaults.adapter as AxiosAdapter;
+  api.defaults.adapter = ((config) => (config.url === "token/" || config.url === "me/"
+    ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: config.url === "token/" ? { access: "a", refresh: "r" } : OWNER_ME })
+    : answer(config))) as AxiosAdapter;
+  const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
+  render(<AppRoutes router={router} />);
+  await userEvent.type(await screen.findByLabelText("Username"), "kailash");
+  await userEvent.type(screen.getByLabelText("Password"), "pw");
+  await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  return router;
+}
+
+/** Every page title that takes focus, and everything the page announcer says, until stop(). */
+function listen() {
+  const focused: string[] = [];
+  const said: string[] = [];
+  const onFocus = (e: FocusEvent) => { const el = e.target as HTMLElement; if (el.matches?.("[data-page-title]")) focused.push(el.textContent ?? ""); };
+  document.addEventListener("focusin", onFocus);
+  const watch = new MutationObserver(() => { const t = document.getElementById("route-announcer")?.textContent; if (t && said[said.length - 1] !== t) said.push(t); });
+  watch.observe(document.body, { subtree: true, childList: true, characterData: true });
+  return { focused, said, stop: () => { document.removeEventListener("focusin", onFocus); watch.disconnect(); } };
+}
+
+test("on a phone, signing in goes on to Easy with focus on its title and its name read out, whether the setting was kept or not", async () => {
+  for (const kept of [true, false]) {
+    localStorage.clear();
+    queryClient.clear();
+    if (kept) localStorage.setItem("gst3.prefs.1", JSON.stringify({ phoneMode: "easy" }));
+    server();
+    const router = await signIn();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+    const h1 = await screen.findByRole("heading", { level: 1, name: FIRM.name });
+    await waitFor(() => expect(h1, kept ? "kept" : "not kept").toHaveFocus());
+    await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Easy mode · Home"));
+    cleanup();
+  }
+  queryClient.clear();
+});
+
+test("a first sign-in on a phone, its setting slow to come, greets only the home that stays: no stand-in first", async () => {
+  for (const mode of ["easy", "expert"] as const) {
+    localStorage.clear();
+    queryClient.clear();
+    const s = server({ prefs: { phoneMode: mode }, hold: "get" }); // nothing kept on this phone yet
+    const heard = listen();
+    try {
+      await signIn();
+      await waitFor(() => expect(s.pending()).toBe(1));
+      // The preference notification, 90 ms focus and announcement's frame move only when this test says.
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+      await pass(150);
+      expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
+      expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
+      expect(heard.focused).toEqual([]);
+      expect(heard.said).toEqual([]);
+      await s.release();
+      await pass(); // deliver React Query's notification before starting the page's clock
+      const name = mode === "easy" ? FIRM.name : "Today";
+      const announcement = mode === "easy" ? "Easy mode · Home" : "Today";
+      const h1 = screen.getByRole("heading", { level: 1, name });
+      await pass(89);
+      expect(h1, mode).not.toHaveFocus();
+      expect(heard.said).toEqual([]);
+      await pass(1);
+      expect(h1, mode).toHaveFocus();
+      await pass(16); // announce() writes on the next animation frame
+      expect(document.getElementById("route-announcer")).toHaveTextContent(announcement);
+      await pass(150);
+      expect(heard.focused).toEqual([name]);
+      expect(heard.said).toEqual([announcement]);
+    } finally {
+      heard.stop();
+      cleanup();
+      vi.useRealTimers();
+    }
+  }
+  queryClient.clear();
+});
+
+test("the greeting after signing in is spent once a page stays: a later redraw of the page, like the window crossing the phone width, is quiet", async () => {
+  phone(false);
+  // a matchMedia that tells the app when the width crosses the line, as a browser does
+  const crossings = new Set<() => void>();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("max-width: 767px") && Boolean((window as unknown as { __phone?: boolean }).__phone), media: query, onchange: null,
+    addEventListener: (_: string, cb: () => void) => crossings.add(cb), removeEventListener: (_: string, cb: () => void) => crossings.delete(cb),
+    addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+  }));
+  queryClient.clear();
+  server({ prefs: { phoneMode: "expert" } });
+  await signIn("/login?next=%2Fsales");
+  const announcer = () => document.getElementById("route-announcer")!;
+  await waitFor(() => expect(announcer()).toHaveTextContent("Sales"), { timeout: 5000 }); // greeted (the desktop list's title)
+  act(() => { announcer().textContent = ""; });
+  act(() => { phone(true); crossings.forEach((cb) => cb()); }); // the phone shell takes over, and the page is drawn afresh in it
+  await screen.findByRole("navigation", { name: /tabs/i });
+  expect(frame()).toHaveClass("h-full", { exact: true });
+  await wait(200);
+  expect(announcer()).toBeEmptyDOMElement();
+  queryClient.clear();
+});
+
+// More: the mode, the pages by role, text size, sign out
+
+test("More explains the GSTR-1A correction before GSTR-3B using the contract's lock words", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  server({ prefs: { phoneMode: "expert" } });
+  open("/more");
+  const help = await screen.findByRole("button", { name: /^How do I…/ });
+  afterADoubleTap();
+  await userEvent.click(help);
+  const dialog = await screen.findByRole("dialog", { name: "How do I…" });
+  afterADoubleTap();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Fix a mistake on a bill" }));
+  expect(within(dialog).getByText("Open the bill → Edit, while its month's GSTR-1 isn't filed. This bill's month has its GSTR-1 filed, so its bills can't change. A correction goes in GSTR-1A, before GSTR-3B; unlock the month in GST returns first (owner only). A bill made by mistake can be cancelled (it keeps its number) or deleted (it can be restored from the Audit log).")).toBeVisible();
+  expect(within(dialog).queryByText(/next month's GSTR-1/)).not.toBeInTheDocument();
+});
+
+test("Switch to the full view keeps the choice for this person and opens the Expert home, and the phone stays there", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const s = server();
+  const router = open("/e/more");
+  const button = await screen.findByRole("button", { name: /switch to the full view/i });
+  await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
+  afterADoubleTap();
+  await userEvent.click(button);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+  await screen.findByRole("heading", { level: 1, name: "Today" });
+  expect(s.calls).toContainEqual({ method: "patch", url: "preferences/", body: { phoneMode: "expert" } });
+  const tabs = screen.getByRole("navigation", { name: /tabs/i });
+  expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
+  expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  await wait(50);
+  expect(router.state.location.pathname).toBe("/");
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+});
+
+test("Switch to Easy keeps the choice and opens Easy's home", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const s = server({ prefs: { phoneMode: "expert" } });
+  const router = open("/more");
+  const button = await screen.findByRole("button", { name: /switch to easy/i });
+  afterADoubleTap();
+  await userEvent.click(button);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
+  await screen.findByRole("heading", { level: 1, name: FIRM.name });
+  expect(s.calls).toContainEqual({ method: "patch", url: "preferences/", body: { phoneMode: "easy" } });
+  expect(within(screen.getByRole("navigation", { name: /tabs/i })).getByRole("link", { name: "More" })).toHaveAttribute("href", "/e/more");
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument(); // already there
+});
+
+test("a switch that can't be saved says so, and the phone stays where it was", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  server({ prefs: { phoneMode: "expert" }, patchFail: true });
+  const router = open("/more");
+  const button = await screen.findByRole("button", { name: /switch to easy/i });
+  afterADoubleTap();
+  await userEvent.click(button);
+  expect(await screen.findByText("Not saved: the app couldn't get through")).toBeInTheDocument();
+  expect(screen.getByText("Nothing was changed. Try again in a minute.")).toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/more");
+  expect(screen.getByRole("button", { name: /switch to easy/i })).not.toHaveAttribute("aria-busy");
+});
+
+test("offline, a switch says so at once and asks the server nothing", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const s = server({ prefs: { phoneMode: "expert" } });
+  const router = open("/more");
+  const button = await screen.findByRole("button", { name: /switch to easy/i });
+  await wait(20); // finish startup reads before simulating a lost connection
+  act(() => __setNetState("offline"));
+  afterADoubleTap();
+  await userEvent.click(button);
+  expect(await screen.findByText("You're offline, so this wasn't saved")).toBeInTheDocument();
+  expect(screen.getByText("Switch again when the internet is back.")).toBeInTheDocument();
+  expect(s.calls.filter((c) => c.method === "patch")).toEqual([]);
+  expect(router.state.location.pathname).toBe("/more");
+});
+
+test("a switch answered after the person has left More doesn't pull them to a home", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const s = server({ prefs: { phoneMode: "expert" }, hold: "patch" });
+  const router = open("/more");
+  const button = await screen.findByRole("button", { name: /switch to easy/i });
+  afterADoubleTap();
+  await userEvent.click(button);
+  await waitFor(() => expect(s.pending()).toBe(1));
+  expect(button).toHaveAttribute("aria-busy", "true");
+  await act(async () => { await router.navigate("/customers"); });
+  await s.release();
+  await wait(50);
+  expect(router.state.location.pathname).toBe("/customers");
+});
+
+test("More offers only the pages this person's role can open, and says who is signed in", async () => {
+  server({ prefs: { phoneMode: "expert" } });
+  /** Where the page's own links go (the tabs aside). */
+  const offered = () => [...document.querySelectorAll("#app-main a")].map((a) => a.getAttribute("href"));
+  const ADMIN = ["/users", "/backup", "/audit"];
+  const STAFF = ["view", "bill.create", "bill.send", "capture", "purchase.create", "purchase.import", "supplier.edit", "customer.edit", "rates.edit", "reports.export"] as const;
+  open("/more", stubAuth({ role: "staff", roleLabel: "Counter staff", permissions: [...STAFF] }));
+  await screen.findByText("Kailash Mehta · Counter staff");
+  expect(offered()).toEqual(["/purchases", "/purchases/inbox", "/gst", "/reports", "/scan", "/products", "/suppliers", "/firms", "/settings", "/profile"]);
+  cleanup();
+
+  open("/more", stubAuth({ role: "viewer", roleLabel: "View only", permissions: ["view", "reports.export"] }));
+  await screen.findByText("Kailash Mehta · View only");
+  expect(offered()).not.toContain("/purchases/inbox");
+  expect(offered()).toContain("/products");
+  expect(offered()).toContain("/settings");
+  cleanup();
+
+  open("/more");
+  await screen.findByText("Kailash Mehta · Owner");
+  expect(offered()).toEqual(expect.arrayContaining(["/purchases/inbox", ...ADMIN]));
+  expect(screen.getByRole("link", { name: /^Users and roles/ })).toHaveAttribute("href", "/users");
+});
+
+test("Text size on this phone lists each size with its hint, and a pick applies at once and stays on this phone", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  const root = makeRoot();
+  try {
+    server({ prefs: { phoneMode: "expert" } });
+    open("/more");
+    const row = await screen.findByRole("button", { name: "Text size Normal" });
+    afterADoubleTap();
+    await userEvent.click(row);
+    const sheet = await screen.findByRole("dialog", { name: "Text size on this phone" });
+    expect(within(sheet).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["NormalAs designed", "LargeA tenth bigger", "LargerA fifth bigger"]);
+    expect(within(sheet).getByRole("menuitem", { name: "Normal As designed" })).toHaveAttribute("aria-current", "true");
+    afterADoubleTap();
+    await userEvent.click(within(sheet).getByRole("menuitem", { name: "Large A tenth bigger" }));
+    await waitFor(() => expect(root.style.zoom).toBe("1.1"));
+    expect(localStorage.getItem("gst3.textSize")).toBe("1.1");
+    expect(await screen.findByRole("button", { name: "Text size Large · a tenth bigger" })).toBeInTheDocument();
+  } finally {
+    applyTextSize(1);
+    root.remove();
+  }
+});
+
+test("Sign out asks first: Stay signed in keeps the session, Sign out ends it", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  server({ prefs: { phoneMode: "expert" } });
+  const signOut = vi.fn();
+  open("/more", { ...stubAuth(), signOut });
+  const ask = async () => {
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign out of this phone?" });
+    afterADoubleTap();
+    return dialog;
+  };
+  await screen.findByRole("button", { name: "Sign out" });
+  afterADoubleTap();
+  let dialog = await ask();
+  expect(dialog).toHaveTextContent("You'll need your password to sign in again. Unfinished bills stay on this phone.");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Stay signed in" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(signOut).not.toHaveBeenCalled();
+
+  dialog = await ask();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
+  expect(signOut).toHaveBeenCalledTimes(1);
+});
+
+// the shell's other duties: offline, and the keyboard
+
+test("on a phone a toast sits above the tabs, never over them", async () => {
+  let toast!: ToastApi;
+  function Grab() { toast = useToast(); return null; }
+  server({ prefs: { phoneMode: "expert" } });
+  renderIn(createMemoryRouter(appRoutes, { initialEntries: ["/customers"] }), stubAuth(), <Grab />);
+  const tabs = await screen.findByRole("navigation", { name: /tabs/i });
+  // an 844 px tall phone: the overlay layer covers it, and the tab bar is its bottom 60 px
+  const box = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: 390, width: 390, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const real = Element.prototype.getBoundingClientRect;
+  const rects = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.id === "overlay-root") return box(0, 844);
+    if (this === tabs) return box(784, 844);
+    return real.call(this);
+  });
+  try {
+    act(() => { toast.show({ title: "Bill 7 saved" }); });
+    const stack = (await screen.findByText("Bill 7 saved")).closest<HTMLElement>('[aria-live="polite"]')!;
+    expect(stack.style.bottom).toBe("72px"); // the tabs' 60 px, and 12 px clear of them
+  } finally {
+    rects.mockRestore();
+  }
+});
+
+test("with the keyboard up the tabs make way, and a toast sits above the action bar on the keyboard", async () => {
+  let toast!: ToastApi;
+  function Grab() { toast = useToast(); return null; }
+  server({ prefs: { phoneMode: "expert" } });
+  renderIn(createMemoryRouter(appRoutes, { initialEntries: ["/customers"] }), stubAuth(), <Grab />);
+  await screen.findByRole("navigation", { name: /tabs/i });
+  await waitFor(() => expect(document.querySelector("[data-actionbar]")).not.toBeNull());
+  // an 844 px tall phone with a 300 px keyboard: the tabs are hidden (no box), and Add customer's bar sits on the keyboard
+  const box = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: bottom ? 390 : 0, width: bottom ? 390 : 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const real = Element.prototype.getBoundingClientRect;
+  const rects = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.id === "overlay-root") return box(0, 844);
+    if (this.classList.contains("phone-tabs")) return box(0, 0);
+    if (this.hasAttribute("data-actionbar")) return box(471, 544);
+    return real.call(this);
+  });
+  try {
+    act(() => { toast.show({ title: "Customer saved" }); });
+    const stack = (await screen.findByText("Customer saved")).closest<HTMLElement>('[aria-live="polite"]')!;
+    expect(stack.style.bottom).toBe("385px"); // the bar's top is 373 px up, and 12 px clear of it
+  } finally {
+    rects.mockRestore();
+  }
+});
+
+test("offline, the phone shell carries has-offline", async () => {
+  server({ prefs: { phoneMode: "expert" } });
+  open("/customers");
+  const shell = (await screen.findByRole("navigation", { name: /tabs/i })).parentElement!;
+  // the page's own answers first: one landing after this test would mark the network reachable outside act()
+  await screen.findByText("No customers yet", {}, { timeout: 5000 });
+  expect(shell).not.toHaveClass("has-offline");
+  act(() => __setNetState("offline"));
+  expect(shell).toHaveClass("has-offline");
+  act(() => __setNetState("unreachable"));
+  expect(shell).not.toHaveClass("has-offline");
+  act(() => __setNetState("online"));
+});
+
+const isBefore = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+test("while a phone waits for its setting, the banner still says what's wrong, at the top, above Loading the app", async () => {
+  const s = server({ hold: "get" }); // nothing kept on this phone yet
+  open("/");
+  await waitFor(() => expect(s.pending()).toBe(1));
+  act(() => __setNetState("unreachable")); // another request found the server not answering
+  const loading = screen.getByText("Loading the app…").closest("[role=status]")!;
+  const banners = document.querySelectorAll<HTMLElement>("[role=status][data-offline]");
+  expect(banners).toHaveLength(1);
+  const [banner] = banners;
+  expect(banner).toHaveTextContent("The app couldn't get through.");
+  expect(isBefore(banner, loading)).toBe(true);
+  expect(banner.parentElement!.firstElementChild).toBe(banner); // nothing above it
+  expect(banner).toHaveClass("pt-[calc(8px+env(safe-area-inset-top,0px))]"); // so it clears the notch
+  // Offline shows the Expert shell; the unread firm list cannot yet establish which home is safe.
+  const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  try {
+    await act(async () => { window.dispatchEvent(new Event("offline")); });
+    await screen.findByRole("navigation", { name: /tabs/i });
+    expect(screen.queryByRole("heading", { level: 1, name: "Today" })).not.toBeInTheDocument();
+    expect(document.querySelectorAll("[role=status][data-offline]")).toHaveLength(1);
+    expect(document.querySelector("[data-offline]")!.parentElement).toContainElement(screen.getByRole("navigation", { name: /tabs/i }));
+    expect(document.querySelectorAll("#app-main")).toHaveLength(1);
+  } finally {
+    onLine.mockRestore();
+    await act(async () => { window.dispatchEvent(new Event("online")); }); // TanStack's own online state too
+  }
+});
+
+test("the topmost strip clears the notch (the banner, else Back to Easy, else the page's own header), and nothing below pads for it again", async () => {
+  const NOTCH = "pt-[env(safe-area-inset-top,0px)]";
+  const header = () => document.querySelector("#app-main [data-phone-header]")!;
+  server(); // no mode chosen: Easy, so a full-view page has Back to Easy at the top
+  open("/customers");
+  const back = await screen.findByRole("link", { name: /back to easy/i });
+  await waitFor(() => expect(header()).toBeInTheDocument(), { timeout: 5000 });
+  // the bar sits under the notch; what it says keeps its 44 px below it
+  expect(back).toHaveClass(NOTCH, "min-h-[calc(44px+env(safe-area-inset-top,0px))]");
+  expect(header()).not.toHaveClass(NOTCH);
+  // offline, the banner goes above the bar and takes the notch from it
+  act(() => __setNetState("offline"));
+  expect(document.querySelector("[data-offline]")).toHaveClass("pt-[calc(8px+env(safe-area-inset-top,0px))]");
+  expect(back).not.toHaveClass(NOTCH);
+  expect(back).toHaveClass("min-h-11");
+  expect(header()).not.toHaveClass(NOTCH);
+  cleanup();
+  act(() => __setNetState("online"));
+
+  // an Expert person's phone has nothing above the page, so its own header clears the notch, until the banner shows
+  const s = server({ prefs: { phoneMode: "expert" } });
+  open("/customers");
+  await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
+  await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
+  await wait(50);
+  expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
+  expect(header()).toHaveClass(NOTCH);
+  act(() => __setNetState("unreachable"));
+  expect(header()).not.toHaveClass(NOTCH);
+  act(() => __setNetState("online"));
+  expect(header()).toHaveClass(NOTCH);
+});
+
+// Task 6 hand-off and the keyboard inset
+
+test("on a phone the keyboard's height is --kb on the app, in the app's own pixels, and the overlay layer follows it; while it's up the tabs make way", async () => {
+  const root = makeRoot();
+  document.getElementById("overlay-root")?.remove(); // made again below, beside this #root
+  try {
+    const { keyboard } = viewport();
+    function Probe() { useKeyboardInset(); return null; }
+    const { unmount } = render(<Probe />);
+    expect(root.style.getPropertyValue("--kb")).toBe("0px");
+    expect(root).not.toHaveAttribute("data-kb");
+    const layer = overlayLayer();
+    keyboard(300);
+    expect(root.style.getPropertyValue("--kb")).toBe("300px");
+    expect(root).toHaveAttribute("data-kb");
+    await waitFor(() => expect(layer.style.getPropertyValue("--kb")).toBe("300px"));
+    keyboard(44); // the browser's own bars moving, not a keyboard
+    expect(root.style.getPropertyValue("--kb")).toBe("0px");
+    expect(root).not.toHaveAttribute("data-kb");
+    root.style.zoom = "1.2"; // Larger text: each of the app's pixels is 1.2 of the screen's
+    keyboard(300, "scroll");
+    expect(root.style.getPropertyValue("--kb")).toBe("250px");
+    expect(root).toHaveAttribute("data-kb");
+    keyboard(0);
+    expect(root.style.getPropertyValue("--kb")).toBe("0px");
+    expect(root).not.toHaveAttribute("data-kb");
+    // the mark goes with the hook, keyboard up or not
+    keyboard(300);
+    unmount();
+    expect(root).not.toHaveAttribute("data-kb");
+    // under the keyboard the tabs would only hold the page's action bar a tab bar's height above it, over an empty band
+    expect(readFileSync(resolve(__dirname, "../../styles.css"), "utf8")).toMatch(/#root\[data-kb\] \.phone-tabs \{ display: none; \}/);
+  } finally {
+    root.remove();
+    document.getElementById("overlay-root")?.remove();
+  }
+});
+
+test("on a desktop the keyboard inset stays off", () => {
+  phone(false);
+  const root = makeRoot();
+  try {
+    const { keyboard } = viewport();
+    function Probe() { useKeyboardInset(); return null; }
+    render(<Probe />);
+    keyboard(300);
+    expect(root.style.getPropertyValue("--kb")).toBe("");
+    expect(root).not.toHaveAttribute("data-kb");
+  } finally {
+    root.remove();
+  }
+});
+
+test("every page follows the keyboard, the sign-in page too, and the browser is asked not to shrink the page for it", async () => {
+  const root = makeRoot();
+  try {
+    const { keyboard } = viewport();
+    server();
+    open("/login", stubAuth(null));
+    await screen.findByLabelText("Username");
+    keyboard(320);
+    expect(root.style.getPropertyValue("--kb")).toBe("320px");
+  } finally {
+    root.remove();
+  }
+  // a browser that resized the page for the keyboard could make a wide touch screen a phone mid-typing (Task 6)
+  const html = readFileSync(resolve(__dirname, "../../../index.html"), "utf8");
+  expect(html).toMatch(/<meta name="viewport" content="[^"]*\binteractive-widget=resizes-visual\b/);
+});

@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from billing.api.media import sign_media_path
+from billing.constants import PAN_SHAPE
 from billing.models import Business, Customer, FiledPeriod, Invoice, ITCReclaimLedger, LineItem, Product
 
 
@@ -17,6 +18,11 @@ def signed_url(file):
     return sign_media_path(file.name) if file else None
 
 
+# Contract 6.2's words, for whatever is wrong with a PAN or a customer type (Ruling 1A-5).
+PAN_WORDS = "A PAN has 10 characters: 5 letters, 4 digits, then a letter (like ABCDE1234F)."
+TYPE_WORDS = "Choose walk-in, person or business."
+
+
 def _gst_number(value):
     """A party's or firm's GSTIN as stored: refused if mistyped, blank for a placeholder."""
     from billing.tax_rules import clean_gstin, gstin_problem
@@ -26,7 +32,13 @@ def _gst_number(value):
     return clean_gstin(value) if value else value
 
 
+class OptionalFormBoolean(serializers.BooleanField):
+    # An omitted HTML control keeps the instance value (or the model default).
+    default_empty_html = serializers.empty
+
+
 class BusinessSerializer(serializers.ModelSerializer):
+    signature_on_bills = OptionalFormBoolean(required=False)
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
@@ -72,17 +84,35 @@ class BusinessSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
+    is_supplier = serializers.BooleanField(read_only=True)
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
     invoice_count = serializers.IntegerField(read_only=True)
+    # v3: the effective type (walkin, person, business) and the PAN on record.
+    type = serializers.CharField(source="kind", read_only=True)
+    pan = serializers.CharField(read_only=True)
 
     class Meta:
         model = Customer
         fields = "__all__"
         # M2M to Business is optional on create — many customers are added
         # without immediately linking to a business
-        extra_kwargs = {"businesses": {"required": False}}
+        extra_kwargs = {
+            "businesses": {"required": False},
+            "customer_type": {"error_messages": {"invalid_choice": TYPE_WORDS, "null": TYPE_WORDS}},
+            # Too long (a GSTIN typed in the PAN box) or not text: what a PAN is, never DRF's words.
+            "pan_number": {"error_messages": {"max_length": PAN_WORDS, "invalid": PAN_WORDS}},
+        }
+
+    def validate_pan_number(self, value):
+        """Stored upper-cased, and only when it is a PAN: v2's form checked the same in the browser."""
+        if not value or not value.strip():
+            return value
+        pan = value.strip().upper()
+        if not PAN_SHAPE.fullmatch(pan):
+            raise serializers.ValidationError(PAN_WORDS)
+        return pan
 
     def validate_gst_number(self, value):
         # "NA", "URP" and the like are stored as no GSTIN: kept, they were
@@ -93,6 +123,17 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    purchase_only = OptionalFormBoolean(required=False)
+    kind_effective = serializers.ReadOnlyField()
+
+    def validate_kind(self, value):
+        return value or None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["kind"] = data["kind"] or None
+        return data
+
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
@@ -112,8 +153,9 @@ class LineItemSerializer(serializers.ModelSerializer):
         model = LineItem
         fields = "__all__"
         # The invoice's, always (the views set it). A line filed under another
-        # party stays behind when the invoice changes hands (H5, H6).
-        read_only_fields = ("customer",)
+        # party stays behind when the invoice changes hands (H5, H6). The note
+        # is v3's: only /api/sales/ writes it.
+        read_only_fields = ("customer", "note")
 
     def validate_invoice(self, invoice):
         # Moving a line doubled a filed month's total and left the source
@@ -161,8 +203,19 @@ class InvoiceSerializer(serializers.ModelSerializer):
         # The total is derived from the lines; a PATCH used to persist any
         # figure at all, breaking the invariant every export and GSTR table
         # depends on.
-        read_only_fields = ("total_amount", "workspace_id")
+        # The v3 fields too: only v3's endpoints (cancel, renumber, send…) change them.
+        read_only_fields = ("total_amount", "workspace_id", *Invoice.V3_FIELDS)
         extra_kwargs = {"source_file": {"write_only": True}, "source_preview": {"write_only": True}}
+
+    def update(self, instance, validated_data):
+        # DRF's default ends in a plain save(), which writes the v3 columns back as they were read
+        # and so can undo a cancel that landed in between (Ruling 1A-16); a changed firm also
+        # freezes the new one (Ruling X-74). Invoice has no many-to-many fields for DRF's
+        # default to set.
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save_from_v2()
+        return instance
 
     def get_source_file_url(self, obj):
         return signed_url(obj.source_file)
@@ -183,8 +236,10 @@ class InvoiceListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Invoice
+        read_only_fields = Invoice.V3_FIELDS
         fields = [
             "id",
+            "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "source", "linked_sale",
             "invoice_number",
             "invoice_date",
             "total_amount",
@@ -197,6 +252,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "is_igst_applicable",
             "total_tax",
             "line_item_count",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -218,8 +274,10 @@ class InwardBillListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Invoice
+        read_only_fields = Invoice.V3_FIELDS
         fields = [
             "id",
+            "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "source", "linked_sale",
             "invoice_number",
             "invoice_date",
             "total_amount",

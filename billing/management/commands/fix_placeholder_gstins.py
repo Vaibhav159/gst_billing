@@ -20,15 +20,13 @@ total. A firm with a placeholder is reported, never changed: it needs its real
 GSTIN, set on the Businesses page.
 """
 
-from types import SimpleNamespace
-
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
 
 from billing.management.commands._repair import fresh_lines, invalidate, log_repair
 from billing.models import Business, Customer, Invoice
-from billing.tax_rules import gstin_problem, has_gstin, is_interstate
+from billing.tax_rules import gstin_problem, has_gstin, supply_interstate
 
 
 def _placeholders(qs):
@@ -68,16 +66,17 @@ class Command(BaseCommand):
         if bad_customers:
             self.stdout.write(self.style.WARNING(f"\n{len(bad_customers)} customer(s) with a placeholder GSTIN:\n"))
         for c in bad_customers:
-            invoices = (Invoice.objects.nocache().filter(customer=c).select_related("business")
+            invoices = (Invoice.objects.nocache().filter(customer=c).select_related("business", "customer")
                         .prefetch_related(fresh_lines()))
             sales = sum(1 for inv in invoices if inv.type_of_invoice == "outward")
             purchases = sum(1 for inv in invoices if inv.type_of_invoice == "inward")
             # The head each line would be filed under once the placeholder is
-            # gone, against the head it carries.
-            unregistered = SimpleNamespace(gst_number="", state_name=c.state_name)
+            # gone, against the head it carries. A placeholder is read as no
+            # GSTIN already (state_code, H12), so that is the bill's direction:
+            # its own place of supply when it has one (v3, Ruling 1A-3).
             refile = 0
             for inv in invoices:
-                inter = is_interstate(inv.business, unregistered)
+                inter = supply_interstate(inv)
                 for li in inv.lineitem_set.all():
                     on_igst = bool(li.igst) and not (li.cgst or li.sgst)
                     taxed = bool(li.igst or li.cgst or li.sgst)

@@ -1,9 +1,11 @@
 import math
-from datetime import datetime
+import re
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import CharField, Count, F, IntegerField, Sum, Value
 from django.db.models.functions import (
     Cast,
@@ -17,22 +19,30 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from billing.constants import (
+    BILL_ACTIVE,
+    BILL_CANCELLED,
+    BILL_STATUS_CHOICES,
     BILLING_DECIMAL_PLACE_PRECISION,
+    CUSTOMER_TYPES,
     GST_CODE,
     GST_TAX_RATE,
     HSN_CODE,
     INVOICE_TYPE_CHOICES,
     INVOICE_TYPE_OUTWARD,
+    PAN_SHAPE,
+    SENT_VIA_CHOICES,
     STATE_CHOICES,
     UNIT_CHOICES,
     UNIT_GMS,
 )
 from billing.tax_rules import (
+    chosen_place,
     direction_known,
-    is_interstate,
     normalize_state_name,
     normalize_tax_heads,
     rate_as_percent,
+    state_code,
+    supply_interstate,
 )
 
 
@@ -58,6 +68,12 @@ def get_state_code_from_state_name(state_name):
 
 
 class Business(AbstractBaseModel):
+    short_name = models.CharField(max_length=20, blank=True, default="", db_default="")
+    city = models.CharField(max_length=100, blank=True, default="", db_default="")
+    pin_code = models.CharField(max_length=6, blank=True, default="", db_default="")
+    jurisdiction = models.CharField(max_length=100, blank=True, default="", db_default="")
+    declaration = models.CharField(max_length=500, blank=True, default="", db_default="")
+    signature_on_bills = models.BooleanField(default=True, db_default=True)
     name = models.CharField(
         max_length=255,
         unique=True,
@@ -149,6 +165,11 @@ class Business(AbstractBaseModel):
         blank=True,
         null=True,
     )
+    # v3 (part 1): from this date the paper bills carry the full number, so digits alone take
+    # the firm's format (KGH/2026-27/108); before it, or when blank, numbers are kept as written.
+    paper_full_number_from = models.DateField(
+        null=True, blank=True, help_text="From this date, a number typed as digits takes the firm's prefix and FY.",
+    )
 
     class Meta:
         verbose_name = "Business"
@@ -175,6 +196,7 @@ class Business(AbstractBaseModel):
 
 
 class Customer(AbstractBaseModel):
+    is_supplier = models.BooleanField(default=False, db_default=False)
     name = models.CharField(
         max_length=255,
         verbose_name="Customer Name",
@@ -230,6 +252,12 @@ class Customer(AbstractBaseModel):
         null=True,
         choices=STATE_CHOICES,
     )
+    # v3 (part 1). Blank infers the type: business with a GSTIN, else person.
+    customer_type = models.CharField(
+        max_length=10, blank=True, default="", db_default="", choices=CUSTOMER_TYPES,
+        help_text="Walk-in (the counter's record for cash sales without a name), person or business.",
+    )
+    city = models.CharField(max_length=100, blank=True, default="", db_default="")
 
     def __str__(self):
         return self.name
@@ -241,6 +269,52 @@ class Customer(AbstractBaseModel):
     @property
     def state_code(self):
         return get_state_code_from_state_name(self.state_name)
+
+    @property
+    def kind(self):
+        """The customer's effective type: walkin, person or business (customer_type, else inferred)."""
+        from billing.tax_rules import has_gstin
+
+        return self.customer_type or ("business" if has_gstin(self.gst_number) else "person")
+
+    @property
+    def pan(self):
+        """The PAN on record for Rule 114B: the typed one when it is PAN-shaped once upper-cased and stripped
+        to letters and digits; else the one in a GSTIN that passes its check digit; else "". v2's imports
+        store placeholders like "N/A" unchecked, and those are no PAN (Ruling 1A-20)."""
+        from billing.gstin import validate
+
+        typed = re.sub(r"[^0-9A-Z]", "", (self.pan_number or "").upper())
+        if PAN_SHAPE.fullmatch(typed):
+            return typed
+        gstin = (self.gst_number or "").strip().upper()
+        return gstin[2:12] if gstin and validate(gstin)[0] else ""
+
+
+class InvoiceQuerySet(models.QuerySet):
+    """Invoice.objects: the shared ways of narrowing bills (design decision 5)."""
+
+    def sales(self):
+        """Outward bills only: what the shop sold. v3's way in, so it reads around cacheops (Ruling 1A-34,
+        billing.cache): a v3 page shows a cancel or an edit at once."""
+        return self.filter(type_of_invoice=INVOICE_TYPE_OUTWARD).nocache()
+
+    def purchases(self):
+        return self.filter(type_of_invoice="inward").nocache()
+
+    def counted(self):
+        """The bills every figure counts: all but the cancelled ones.
+
+        A cancelled bill keeps its number (lists, Table 13) but leaves every total. The list,
+        detail and edit views keep the plain manager; anything that adds bills up calls this.
+        """
+        return self.exclude(status=BILL_CANCELLED)
+
+
+class LineItemQuerySet(models.QuerySet):
+    def counted(self):
+        """Lines of the bills that count: Invoice.objects.counted()'s twin for line sums."""
+        return self.exclude(invoice__status=BILL_CANCELLED)
 
 
 class Invoice(AbstractBaseModel):
@@ -297,6 +371,46 @@ class Invoice(AbstractBaseModel):
         help_text="How the invoice was settled; blank = not recorded.",
     )
 
+    # v3 (part 1). Lifecycle fields: only v3's own endpoints change them; v2's
+    # serializers show them read-only and v2's undo of an old edit leaves them be.
+    status = models.CharField(
+        max_length=10, choices=BILL_STATUS_CHOICES, default=BILL_ACTIVE, db_default=BILL_ACTIVE, db_index=True,
+        help_text="Active, or cancelled: a cancelled bill keeps its number but counts in no figure.",
+    )
+    cancel_reason = models.CharField(max_length=255, blank=True, default="", db_default="")
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    # The id of the cancelled bill this one makes again. A plain id, not a foreign key: that
+    # bill may sit in the bin and come back under the same id (design decision 6).
+    replaces = models.IntegerField(null=True, blank=True)
+    # Sends: the first, the latest, how many, how, and a one-off number (a walk-in's) that is
+    # never saved to the customer. Columns, not a child table: a child row would trip v2's
+    # deletes, and "not sent yet" needs only sent_at IS NULL.
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    sent_count = models.PositiveIntegerField(default=0, db_default=0)
+    sent_to = models.CharField(max_length=15, blank=True, default="", db_default="")
+    sent_via = models.CharField(max_length=10, blank=True, default="", db_default="", choices=SENT_VIA_CHOICES)
+    # The state the goods go to (a 2-digit code). NULL keeps today's rule, the customer's
+    # state (else the firm's): a v3 bill stores one only when it differs from that.
+    place_of_supply = models.CharField(max_length=2, null=True, blank=True)
+    # The firm as printed on the bill, frozen at create and on a move to another firm.
+    # NULL (every older bill) means the live firm (design decision 7).
+    firm_snapshot = models.JSONField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="", db_default="", help_text="Printed under the items.")
+    # Copied in later from the paper book: it has the paper's number and date, and no send nag.
+    paper = models.BooleanField(default=False, db_default=False)
+
+    itc_month = models.DateField(null=True, blank=True)
+    itc_eligible = models.BooleanField(default=True, db_default=True)
+    needs_review = models.BooleanField(default=False, db_default=False)
+    buyer_gstin = models.CharField(max_length=15, blank=True, default="", db_default="")
+    buyer_ack = models.BooleanField(default=False, db_default=False)
+    linked_sale = models.IntegerField(null=True, blank=True)
+    source = models.CharField(max_length=10, blank=True, default="", db_default="")
+
     # Source image — primarily populated by AI Import (the original
     # invoice photo the user uploaded for extraction) so we have an
     # audit trail of what the OCR actually saw. Nothing else writes
@@ -323,6 +437,58 @@ class Invoice(AbstractBaseModel):
     )
 
     history = HistoricalRecords()
+
+    objects = InvoiceQuerySet.as_manager()
+
+    # Fields only v3's own endpoints write. v2's serializers show them read-only, and v2's
+    # undo of an old edit leaves them be: it would silently reverse a later cancel or send.
+    V3_FIELDS = ("status", "cancel_reason", "cancelled_at", "cancelled_by", "replaces",
+                 "sent_at", "last_sent_at", "sent_count", "sent_to", "sent_via",
+                 "place_of_supply", "firm_snapshot", "notes", "paper",
+                 "itc_month", "itc_eligible", "needs_review", "buyer_gstin", "buyer_ack", "linked_sale", "source")
+
+    @classmethod
+    def v2_columns(cls):
+        """What v2's saves write: every column but the id and V3_FIELDS (Ruling 1A-16).
+
+        A plain save() writes every column as it was read, so a cancel that landed in between
+        would be undone. v2's paths pass this as update_fields; v3's own writes save() as usual.
+        """
+        return [f.name for f in cls._meta.concrete_fields if not f.primary_key and f.name not in cls.V3_FIELDS]
+
+    def save_from_v2(self, **kwargs):
+        """Save as v2's paths do (PATCH and PUT, the line replace, the admin): v2_columns() only.
+
+        One v3 column besides: when this save changes the firm, the firm frozen on the bill would
+        name the old one, so freeze the new firm under its lock (Ruling X-74).
+        """
+        fields = self.v2_columns()
+        with transaction.atomic():
+            # The firm before this save is the one stored now, row-locked until the save commits: a v3 move
+            # that landed after this bill was read (by the admin's change form, which doesn't lock) changed it,
+            # and the firm it froze must not stay on a bill this save puts back in another (Ruling 1A-26). The
+            # admin's history revert builds its bill rather than reading it, so it has no other.
+            before = (type(self).objects.nocache().select_for_update().filter(pk=self.pk)
+                      .only("business_id", "invoice_date", "type_of_invoice", "itc_month").first())
+            moved = before is not None and str(before.business_id) != str(self.business_id)
+            if moved:
+                from billing.cache import uncached
+                from billing.services.sales import frozen_firms
+                self.firm_snapshot = frozen_firms(before.business_id, int(self.business_id))[int(self.business_id)]
+                # The form's cached target may predate the identity edit we waited for.
+                self.business = uncached(Business).get(pk=self.business_id)
+                fields.append("firm_snapshot")
+            if before is not None and "inward" in (before.type_of_invoice, self.type_of_invoice):
+                from billing.numbering import lock_firms
+                from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
+                lock_firms(before.business_id, int(self.business_id))
+                assert_inward_unlocked(before)
+                assert_period_unlocked(self.business_id, self.invoice_date, "edit", invoice_type=self.type_of_invoice)
+                changed_date = self._meta.get_field("invoice_date").to_python(self.invoice_date) != before.invoice_date
+                if moved or changed_date:
+                    self.itc_month = None
+                    fields.append("itc_month")
+            self.save(update_fields=fields, **kwargs)
 
     class Meta:
         # Every report filters on some combination of these three, and the
@@ -383,11 +549,12 @@ class Invoice(AbstractBaseModel):
         re-filed for the new direction (M14: a sale moved to an out-of-state
         buyer stayed CGST+SGST), totals unchanged; when nothing says where the
         supply goes, the heads on file stay, as bulk import keeps a file's
-        heads for an unknown direction. save(), not update(), so cacheops
+        heads for an unknown direction. A chosen place of supply says it only
+        against a firm whose state is known. save(), not update(), so cacheops
         drops the cached lines.
         """
-        known = direction_known(self.business, self.customer)
-        interstate = is_interstate(self.business, self.customer)
+        known = direction_known(self.business, self.customer) or bool(chosen_place(self) and state_code(self.business))
+        interstate = supply_interstate(self)
         for li in self.lineitem_set.all():
             changed = []
             if li.customer_id != self.customer_id:
@@ -434,9 +601,10 @@ class Invoice(AbstractBaseModel):
 
         Delegates to the shared rule, which falls back to state_name for
         unregistered parties. The invoice form and the inward-bill service
-        already used it; this makes the property agree with them.
+        already used it; this makes the property agree with them. A bill's own
+        place of supply (v3) decides when it has one.
         """
-        return is_interstate(self.business, self.customer)
+        return supply_interstate(self)
 
     @classmethod
     def get_next_invoice_number(cls, business_id):
@@ -497,6 +665,8 @@ class Invoice(AbstractBaseModel):
 
 
 class LineItem(AbstractBaseModel):
+    objects = LineItemQuerySet.as_manager()
+
     # PROTECT, like Invoice.customer, and always the invoice's customer
     # (Invoice.save re-points the lines). As CASCADE, deleting a customer whose
     # invoices had moved to someone else deleted those invoices' lines, filed
@@ -576,6 +746,7 @@ class LineItem(AbstractBaseModel):
         verbose_name="Unit",
         help_text="Unit of measurement (e.g., gms, pcs, kg, nos, etc.)",
     )
+    note = models.CharField(max_length=60, blank=True, default="", db_default="", help_text="Printed under the item.")
 
     def __str__(self):
         return self.product_name
@@ -639,6 +810,8 @@ class LineItem(AbstractBaseModel):
 
     @classmethod
     def get_invoice_summary(cls, invoice_id):
+        from billing.services.purchase_reads import LinePaise
+
         invoice_summary_data = cls.objects.filter(invoice_id=invoice_id).aggregate(
             total_amount=Coalesce(Sum("amount"), Decimal(0)),
             total_cgst_tax=Sum("cgst"),
@@ -646,7 +819,7 @@ class LineItem(AbstractBaseModel):
             total_igst_tax=Sum("igst"),
             total_items=Count("id"),
             total_tax=Sum(F("cgst") + F("sgst") + F("igst")),
-            amount_without_tax=Sum(F("quantity") * F("rate")),
+            amount_without_tax=Sum(LinePaise(F("quantity"), F("rate"))),  # per line half-up (X-55)
         )
 
         invoice_summary_data["round_off"] = cls.custom_round_off(
@@ -666,7 +839,7 @@ class LineItem(AbstractBaseModel):
         # quantity as 1.000 gm, rate as 1 / g
 
         line_item_data = (
-            cls.objects.filter(
+            cls.objects.counted().filter(
                 invoice__invoice_date__range=[start_date, end_date],
                 invoice__business=business,
             )
@@ -726,6 +899,12 @@ class LineItem(AbstractBaseModel):
 
 
 class Product(AbstractBaseModel):
+    kind = models.CharField(max_length=10, null=True, blank=True, default=None, db_default=None, choices=[
+        (value, value.title()) for value in ("gold", "silver", "diamond", "bullion", "service", "packing", "other")
+    ])
+    purity = models.CharField(max_length=20, blank=True, default="", db_default="")
+    usual_rate = models.DecimalField(max_digits=15, decimal_places=3, null=True, blank=True)
+    purchase_only = models.BooleanField(default=False, db_default=False)
     name = models.CharField(
         max_length=255,
         verbose_name="Product Name",
@@ -766,6 +945,23 @@ class Product(AbstractBaseModel):
         verbose_name="Default Unit",
         help_text="Unit a new invoice line starts with when this product is picked.",
     )
+
+
+    @property
+    def kind_effective(self):
+        """One inferred kind for v2 products, catalog and the client pickers."""
+        if self.kind:
+            return self.kind
+        hsn = self.hsn_code
+        if hsn.startswith("7102"):
+            return "diamond"
+        if hsn.startswith(("7106", "7108")):
+            return "bullion"
+        if hsn.startswith(("7113", "7114", "7117")):
+            return "silver" if any(word in self.name.lower() for word in ("silver", "chandi")) else "gold"
+        if hsn.startswith(("9983", "9988")):
+            return "service"
+        return "packing" if hsn.startswith(("4819", "4823")) else "other"
 
 
 class UserPreference(models.Model):
@@ -829,6 +1025,142 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.entity} #{self.entity_id}"
+
+
+class BinQuerySet(models.QuerySet):
+    def live(self):
+        """Deleted bills still in the bin: not restored here, and not brought back by v2's undo.
+
+        After a rollback v2 knows nothing of this table: its undo brings a bill back under a new id
+        and marks the "deleted" audit row used (`_undo`), leaving the row here stale. The bin list,
+        the number series and the admin read the bin through this, so a stale row lists nowhere and
+        holds no number (Ruling 1A-6).
+        """
+        undone = AuditLog.objects.filter(pk=models.OuterRef("audit_log_id"), snapshot__has_key="_undo")
+        return self.filter(restored_at__isnull=True).exclude(models.Exists(undone))
+
+    def settled(self):
+        """live()'s complement: rows back in Sales already, which protect no customer or firm."""
+        return self.exclude(pk__in=self.model.objects.live().values("pk"))
+
+
+class BinnedInvoice(models.Model):
+    """A deleted sales bill, kept so its number stays used and it can come back (design decision 6).
+
+    Deleting moves the bill and its lines here and out of the Invoice table, so v2 (after a
+    rollback) sees it as deleted, as it sees its own deletes. `data` holds every field of the
+    bill and of each line, v3's included; v2's audit row keeps only v2's keys. No database
+    foreign keys: v2's deletes must never trip over this table.
+    """
+
+    KIND_DELETED = "deleted"
+    KIND_CANCELLED = "cancelled"  # set aside by prepare_v2_rollback, for v2
+
+    objects = BinQuerySet.as_manager()
+
+    original_id = models.IntegerField(db_index=True)
+    business = models.ForeignKey(Business, on_delete=models.PROTECT, db_constraint=False, related_name="+")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, db_constraint=False, related_name="+")
+    invoice_number = models.CharField(max_length=255, blank=True, default="", db_default="")
+    invoice_date = models.DateField()
+    type_of_invoice = models.CharField(
+        max_length=255, choices=INVOICE_TYPE_CHOICES, default=INVOICE_TYPE_OUTWARD, db_default=INVOICE_TYPE_OUTWARD,
+    )
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=BILLING_DECIMAL_PLACE_PRECISION, default=0, db_default=0,
+    )
+    kind = models.CharField(
+        max_length=10, choices=[(KIND_DELETED, "Deleted"), (KIND_CANCELLED, "Cancelled, set aside for v2")],
+        default=KIND_DELETED, db_default=KIND_DELETED,
+    )
+    reason = models.CharField(max_length=255, blank=True, default="", db_default="")
+    data = models.JSONField(default=dict, help_text="Every field of the bill and its lines, as text.")
+    audit_log_id = models.IntegerField(null=True, blank=True, help_text="The v2-shaped 'deleted' audit row.")
+    deleted_at = models.DateTimeField(auto_now_add=True)
+    deleted_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    restored_at = models.DateTimeField(null=True, blank=True)
+    restored_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+
+    class Meta:
+        ordering = ["-deleted_at", "-id"]
+        indexes = [models.Index(fields=["business", "invoice_date"])]
+
+    def __str__(self):
+        return f"{self.invoice_number} (deleted)"
+
+
+class SaleDraft(models.Model):
+    """An unfinished sales bill, kept on the server so whoever makes bills can finish it: drafts
+    are shop-wide (the owner's answer, 10 Oct 2026), each showing who started it.
+
+    The id is a UUID the client makes, so a draft kept offline syncs once however often it's sent.
+    `data` is the form's own state; the server only keeps it. Nothing polls: the client syncs on
+    save and on reconnect, and saving the bill deletes its draft in the same transaction.
+    """
+
+    MAX_BYTES = 65536
+
+    id = models.UUIDField(primary_key=True)
+    business = models.ForeignKey(
+        Business, null=True, blank=True, on_delete=models.PROTECT, db_constraint=False, related_name="+",
+    )
+    started_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    data = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+
+class SavedDraft(models.Model):
+    """A draft a bill was made from (Rulings 1D-6 to 1D-8): its id, kept after the save deleted the draft, and the
+    bill it became. A later keep of that draft, or a later save of it, is refused (409 draft_saved): a keep that
+    arrives late never brings the draft back, and no draft makes two bills. Kept for good, one small row a saved
+    draft, read only by its own id."""
+
+    id = models.UUIDField(primary_key=True)  # the draft's
+    bill_id = models.BigIntegerField(
+        null=True, blank=True, help_text="The bill it became; no database constraint, as the bill may go to the bin.",
+    )
+    invoice_number = models.CharField(max_length=255, blank=True, default="", help_text="The number it was saved as.")
+    saved_at = models.DateTimeField(auto_now_add=True)
+
+
+DEFAULT_SHARE_MESSAGE = "Namaste {customer}, your bill {number} for {total} from {firm} is attached. Thank you!"
+
+
+class ShopSetting(models.Model):
+    """The shop's printing and sharing defaults: one row, pk 1 (design decision 8).
+
+    Copies and bank details are chosen at each print; these are what the print page starts on.
+    Part 4's Settings screen adds to it. Round-off is not a setting (design decision 2).
+    """
+
+    COPIES = [("original", "Original"), ("duplicate", "Duplicate"), ("triplicate", "Triplicate"), ("all", "All three")]
+
+    copies = models.CharField(max_length=10, choices=COPIES, default="original", db_default="original")
+    default_business = models.ForeignKey(
+        Business, null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+    show_bank = models.BooleanField(default=True, db_default=True)
+    share_message = models.CharField(max_length=500, default=DEFAULT_SHARE_MESSAGE, db_default=DEFAULT_SHARE_MESSAGE)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    updated_by = models.ForeignKey(
+        "auth.User", null=True, blank=True, on_delete=models.SET_NULL, db_constraint=False, related_name="+",
+    )
+
+    @classmethod
+    def load(cls):
+        """The row, or an unsaved one with the defaults: reading never writes (Ruling 1A-16). The person is
+        joined, so one v2 deleted reads as nobody (Ruling 1A-6)."""
+        return cls.objects.filter(pk=1).select_related("updated_by").first() or cls(pk=1)
 
 
 class ITCReclaimLedger(AbstractBaseModel):
@@ -916,6 +1248,21 @@ class InwardCapture(AbstractBaseModel):
 
     STATUS_CHOICES = [("new", "New"), ("converted", "Converted")]
 
+    client_id = models.UUIDField(null=True, blank=True)
+    read_status = models.CharField(max_length=10, blank=True, default="", db_default="")
+    read_data = models.JSONField(null=True, blank=True)
+    read_error = models.CharField(max_length=255, blank=True, default="", db_default="")
+    read_started_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    captured_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL,
+                                   db_constraint=False, related_name="+")
+    label = models.CharField(max_length=120, blank=True, default="", db_default="")
+    pdf = models.BooleanField(default=False, db_default=False)
+    pages = models.PositiveSmallIntegerField(default=1, db_default=1)
+    discarded_at = models.DateTimeField(null=True, blank=True)
+    discarded_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL,
+                                    db_constraint=False, related_name="+")
+
     business = models.ForeignKey(
         Business, on_delete=models.SET_NULL, null=True, blank=True,
         help_text="Best guess at the buying firm; confirmed at conversion.",
@@ -937,5 +1284,153 @@ class InwardCapture(AbstractBaseModel):
         help_text="The inward invoice this capture became.",
     )
 
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["captured_by", "client_id"], name="uniq_capture_uploader_client")]
+
     def __str__(self):
         return f"Capture #{self.pk} ({self.status})"
+
+
+class CapturePage(models.Model):
+    original_name = models.CharField(max_length=255, default="", db_default="")
+    capture = models.ForeignKey(InwardCapture, on_delete=models.CASCADE, db_constraint=False,
+                                related_name="v3_pages")
+    position = models.PositiveSmallIntegerField()
+    file = models.FileField(upload_to="inward_captures/%Y/%m/")
+    preview = models.FileField(upload_to="inward_captures/%Y/%m/previews/", null=True, blank=True)
+    content_type = models.CharField(max_length=100)
+    size = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["capture", "position"], name="uniq_capture_page")]
+
+
+class AiRead(models.Model):
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+    user = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL,
+                             db_constraint=False, related_name="+")
+    kind = models.CharField(max_length=10)
+    business = models.ForeignKey(Business, null=True, blank=True, on_delete=models.SET_NULL,
+                                 db_constraint=False, related_name="+")
+    ok = models.BooleanField(default=False, db_default=False)
+    pages = models.PositiveSmallIntegerField(default=1, db_default=1)
+    capture = models.ForeignKey(InwardCapture, null=True, blank=True, on_delete=models.DO_NOTHING,
+                                db_constraint=False, related_name="+")
+
+
+MONTH_VALIDATORS = [MinValueValidator(1, "Pick a month from 1 to 12."), MaxValueValidator(12, "Pick a month from 1 to 12.")]
+MONTH_RANGE = models.Q(month__gte=1, month__lte=12)
+
+
+class FilingRecord(models.Model):
+    """Immutable return snapshot; only portal filing details can be corrected."""
+    business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    year = models.IntegerField()
+    month = models.IntegerField(validators=MONTH_VALIDATORS)
+    kind = models.CharField(max_length=6, choices=[("gstr1", "GSTR-1"), ("gstr1a", "GSTR-1A"), ("gstr3b", "GSTR-3B")])
+    filed_on = models.DateField()
+    arn = models.CharField(max_length=15, blank=True, default="")
+    cash_igst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    cash_cgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    cash_sgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    cash_total = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    late_fee = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    interest = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    credit_left_igst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    credit_left_cgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    credit_left_sgst = models.DecimalField(max_digits=14, decimal_places=2, null=True)
+    figures = models.JSONField(default=dict)
+    bills = models.JSONField(default=dict)
+    file = models.JSONField(default=dict)
+    marked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    marked_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    updated_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["business", "year", "month", "kind"], name="uniq_filing_record"), models.CheckConstraint(condition=MONTH_RANGE, name="filing_record_month_1_12")]
+
+
+class FilingMonth(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    year = models.IntegerField()
+    month = models.IntegerField(validators=MONTH_VALIDATORS)
+    unlocked_at = models.DateTimeField(null=True)
+    unlocked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    unlock_reason = models.CharField(max_length=255, default="", blank=True)
+    relocked_at = models.DateTimeField(null=True)
+    relocked_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    legacy_frozen_at = models.DateTimeField(null=True)
+    legacy_snapshot = models.JSONField(null=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["business", "year", "month"], name="uniq_filing_month"), models.CheckConstraint(condition=MONTH_RANGE, name="filing_month_month_1_12")]
+
+
+class OpeningCredit(models.Model):
+    business = models.OneToOneField(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    as_of = models.DateField(default=date(2025, 4, 1))
+    igst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    cgst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    sgst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    updated_by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ReturnDownload(models.Model):
+    business = models.ForeignKey(Business, on_delete=models.DO_NOTHING, db_constraint=False)
+    year = models.IntegerField()
+    month = models.IntegerField(validators=MONTH_VALIDATORS)
+    kind = models.CharField(max_length=11, choices=[(key, key) for key in ("gstr1", "gstr1_filed", "gstr1a", "amend", "gstr3b", "bundle")])
+    by = models.ForeignKey("auth.User", on_delete=models.DO_NOTHING, db_constraint=False, null=True, related_name="+")
+    at = models.DateTimeField(auto_now_add=True)
+    via = models.CharField(max_length=8, choices=[("download", "download"), ("share", "share")], default="download")
+    fingerprint = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=MONTH_RANGE, name="return_download_month_1_12")]
+
+
+class UserSecurity(models.Model):
+    user = models.OneToOneField("auth.User", on_delete=models.CASCADE, related_name="security", db_constraint=False)
+    phone = models.CharField(max_length=10, default="", db_default="")
+    must_change_password = models.BooleanField(default=False, db_default=False)
+    tokens_after = models.DateTimeField(null=True, blank=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    stopped_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+", db_constraint=False)
+
+
+class SignInSession(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="sign_in_sessions", db_constraint=False)
+    device = models.CharField(max_length=100, default="", db_default="")
+    created_at = models.DateTimeField(default=timezone.now)
+    last_used_at = models.DateTimeField(default=timezone.now)
+    remember = models.BooleanField(default=True, db_default=True)
+    signed_out_at = models.DateTimeField(null=True, blank=True)
+    signed_out_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+", db_constraint=False)
+    ended_how = models.CharField(max_length=20, default="", db_default="")
+
+
+class PasswordResetCode(models.Model):
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="password_reset_codes", db_constraint=False)
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+    tries = models.PositiveSmallIntegerField(default=0, db_default=0)
+    used_at = models.DateTimeField(null=True, blank=True)
+    ip_hash = models.CharField(max_length=64)
+
+
+class RateBoard(models.Model):
+    """Append-only shop quotes; a same-day correction is another setting."""
+
+    on = models.DateField(db_index=True)
+    quoted = models.JSONField()
+    set_at = models.DateTimeField(auto_now_add=True)
+    set_by = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL,
+                               db_constraint=False, related_name="+")
+
+    class Meta:
+        ordering = ["-on", "-set_at", "-id"]

@@ -1,0 +1,30 @@
+import type { ReactNode } from 'react';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { testQueryClient } from '@/test/render';
+import { purchasesServer, SUPPLIER } from '@/core/purchases/fixtures';
+import { useSuppliers, useSupplier, useSupplierMemory, useSaveSupplier } from './suppliers';
+const setup = () => { const qc = testQueryClient(); return { qc, wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> }; };
+test('supplier queries wait for IDs, scope list figures, read memory and detail in paise', async () => {
+  const calls = purchasesServer(), { wrapper, qc } = setup();
+  const waiting = renderHook(() => { useSuppliers(null, '2026-27'); useSupplier(null); useSupplierMemory(null); }, { wrapper });
+  await act(async () => { await qc.refetchQueries(); }); expect(calls).toHaveLength(0); waiting.unmount();
+  const list = renderHook(() => useSuppliers(3, '2026-27', 'Udaipur'), { wrapper });
+  const detail = renderHook(() => useSupplier(21, 3, '2026-27'), { wrapper });
+  const memory = renderHook(() => useSupplierMemory(21, 3), { wrapper });
+  await waitFor(() => expect(list.result.current.isSuccess && detail.result.current.isSuccess && memory.result.current.isSuccess).toBe(true));
+  expect(list.result.current.data?.pages[0].results[0].figures.total).toBe(49264500);
+  expect(calls.find((c) => c.url === 'suppliers/')?.params).toMatchObject({ business_id: 3, fy: '2026-27', q: 'Udaipur', page_size: 100 });
+  expect(memory.result.current.data?.next_number).toBe('UBS/26-27/0851');
+});
+test('supplier save sends pan_number, receives pan, and invalidates both customer roles and purchases', async () => {
+  const calls = purchasesServer({ 'POST suppliers/': { ...SUPPLIER, pan: 'AACFU5521R' }, 'PUT suppliers/21/': { ...SUPPLIER, name: 'Updated supplier', pan: 'AACFU5521R' } });
+  const { wrapper, qc } = setup();
+  ['suppliers', 'customers', 'purchases', 'sales', 'search'].forEach((key) => qc.setQueryData([key, 'other'], 'old'));
+  const save = renderHook(() => useSaveSupplier(), { wrapper });
+  const body = { name: SUPPLIER.name, gst_number: SUPPLIER.gst_number, state_name: 'RAJASTHAN', city: 'Udaipur', address: '', mobile_number: '', pan_number: 'AACFU5521R', email: '' };
+  await act(async () => { const result = await save.result.current.mutateAsync({ body }); expect(result.pan).toBe('AACFU5521R'); await save.result.current.mutateAsync({ id: 21, body }); });
+  expect(calls.filter((c) => c.method !== 'GET').map((c) => c.url)).toEqual(['suppliers/', 'suppliers/21/']);
+  expect(calls[0].data).toEqual(body);
+  ['suppliers', 'customers', 'purchases', 'sales', 'search'].forEach((key) => expect(qc.getQueryState([key, 'other'])?.isInvalidated).toBe(true));
+});

@@ -1,0 +1,54 @@
+{
+  "roles": {
+    "owner": {
+      "label": "Owner",
+      "blurb": "Everything, including deleting bills, locking months and managing users."
+    },
+    "accountant": {
+      "label": "Accountant",
+      "blurb": "Sees everything, books purchase bills, files GST and locks months. Can't change or delete sales bills."
+    },
+    "staff": {
+      "label": "Counter staff",
+      "blurb": "Makes and sends bills, books purchase bills, adds customers and sets today's rates. Can't delete or file."
+    },
+    "viewer": {
+      "label": "View only",
+      "blurb": "Can look at everything and download reports. Changes nothing."
+    }
+  },
+  "perms": {
+    "owner": "*",
+    "accountant": [
+      "view",
+      "reports.export",
+      "gst.file",
+      "gst.lock",
+      "gst.download",
+      "backup.download",
+      "audit.view",
+      "purchase.create",
+      "purchase.edit",
+      "purchase.import",
+      "capture",
+      "supplier.edit",
+      "customer.edit"
+    ],
+    "staff": [
+      "view",
+      "bill.create",
+      "bill.send",
+      "capture",
+      "purchase.create",
+      "purchase.import",
+      "supplier.edit",
+      "customer.edit",
+      "rates.edit",
+      "reports.export"
+    ],
+    "viewer": [
+      "view",
+      "reports.export"
+    ]
+  }
+}

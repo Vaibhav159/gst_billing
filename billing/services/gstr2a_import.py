@@ -55,6 +55,7 @@ from django.db import transaction
 from billing.api.inward_bills_service import find_duplicate
 from billing.constants import INVOICE_TYPE_INWARD
 from billing.models import Business, Customer, Invoice, LineItem
+from billing.numbering import lock_firms
 from billing.period_lock import locked_period_or_none
 
 logger = logging.getLogger(__name__)
@@ -313,84 +314,85 @@ def preview_file(file_path_or_buffer, filename: str | None = None) -> FilePrevie
             parse_errors=[f"Could not open file: {e!s}"],
         )
 
-    if "invoice" not in xl.sheet_names:
-        return FilePreview(
-            filename=fname, recipient_header="", recipient_gstin="",
-            matched_business_id=None, matched_business_name="",
-            parsed_rows=[],
-            parse_errors=[f"Missing 'invoice' sheet. Found: {xl.sheet_names}"],
+    with xl:
+        if "invoice" not in xl.sheet_names:
+            return FilePreview(
+                filename=fname, recipient_header="", recipient_gstin="",
+                matched_business_id=None, matched_business_name="",
+                parsed_rows=[],
+                parse_errors=[f"Missing 'invoice' sheet. Found: {xl.sheet_names}"],
+            )
+
+        df_raw = xl.parse("invoice", header=None)
+        if df_raw.shape[0] < 4:
+            return FilePreview(
+                filename=fname, recipient_header="", recipient_gstin="",
+                matched_business_id=None, matched_business_name="",
+                parsed_rows=[],
+                parse_errors=["File has no data rows."],
+            )
+
+        header_row_0 = " ".join(
+            str(x) for x in df_raw.iloc[0].dropna().tolist() if str(x).strip()
         )
+        recipient_gstin = _extract_recipient_gstin(header_row_0)
 
-    df_raw = xl.parse("invoice", header=None)
-    if df_raw.shape[0] < 4:
+        # Row 2 is the column headers; data starts row 3.
+        headers = [str(x).strip() for x in df_raw.iloc[2].tolist()]
+        df = df_raw.iloc[3:].copy()
+        df.columns = headers
+        df = df[df.get("Supplier Name").notna()].reset_index(drop=True)
+
+        matched_biz = None
+        if recipient_gstin:
+            matched_biz = Business.objects.filter(gst_number=recipient_gstin).first()
+
+        rows: list[GSTR2ARow] = []
+        for idx, r in df.iterrows():
+            try:
+                inv_date = _to_date(r.get("Invoice Date"))
+                if not inv_date:
+                    parse_errors.append(
+                        f"Row {idx + 4}: unparseable invoice date {r.get('Invoice Date')!r}"
+                    )
+                    continue
+                rows.append(GSTR2ARow(
+                    supplier_name=str(r.get("Supplier Name", "")).strip(),
+                    supplier_gstin=str(r.get("GSTIN", "")).strip().upper(),
+                    supplier_state=str(r.get("State", "")).strip().upper(),
+                    pos=str(r.get("POS", "")).strip().upper(),
+                    invoice_number=str(r.get("Invoice No", "")).strip(),
+                    invoice_date=inv_date,
+                    invoice_value=_to_decimal(r.get("Invoice Value")),
+                    taxable_value=_to_decimal(r.get("Taxable Value")),
+                    igst=_to_decimal(r.get("IGST")),
+                    cgst=_to_decimal(r.get("CGST")),
+                    sgst=_to_decimal(r.get("SGST")),
+                    cess=_to_decimal(r.get("CESS")),
+                    filed_3b=str(r.get("3B Status", "")).strip().lower() == "filed",
+                    reverse_charge=str(r.get("RC", "")).strip().upper() in ("YES", "Y", "TRUE"),
+                ))
+            except Exception as e:
+                parse_errors.append(f"Row {idx + 4}: {e!s}")
+
+        # Parse the note sheet and net it against invoices. Fully-matched
+        # credit notes cancel out their invoices (skipped on import).
+        # Unmatched / partial CNs are reported but not auto-applied.
+        notes = _parse_note_sheet(xl)
+        cancelled_keys, partials = _match_credit_notes(rows, notes)
+
         return FilePreview(
-            filename=fname, recipient_header="", recipient_gstin="",
-            matched_business_id=None, matched_business_name="",
-            parsed_rows=[],
-            parse_errors=["File has no data rows."],
+            filename=fname,
+            recipient_header=header_row_0,
+            recipient_gstin=recipient_gstin,
+            matched_business_id=matched_biz.id if matched_biz else None,
+            matched_business_name=matched_biz.name if matched_biz else "",
+            parsed_rows=rows,
+            parsed_notes=notes,
+            cancelled_invoice_keys=cancelled_keys,
+            partial_notes=partials,
+            parse_errors=parse_errors,
         )
-
-    header_row_0 = " ".join(
-        str(x) for x in df_raw.iloc[0].dropna().tolist() if str(x).strip()
-    )
-    recipient_gstin = _extract_recipient_gstin(header_row_0)
-
-    # Row 2 is the column headers; data starts row 3.
-    headers = [str(x).strip() for x in df_raw.iloc[2].tolist()]
-    df = df_raw.iloc[3:].copy()
-    df.columns = headers
-    df = df[df.get("Supplier Name").notna()].reset_index(drop=True)
-
-    matched_biz = None
-    if recipient_gstin:
-        matched_biz = Business.objects.filter(gst_number=recipient_gstin).first()
-
-    rows: list[GSTR2ARow] = []
-    for idx, r in df.iterrows():
-        try:
-            inv_date = _to_date(r.get("Invoice Date"))
-            if not inv_date:
-                parse_errors.append(
-                    f"Row {idx + 4}: unparseable invoice date {r.get('Invoice Date')!r}"
-                )
-                continue
-            rows.append(GSTR2ARow(
-                supplier_name=str(r.get("Supplier Name", "")).strip(),
-                supplier_gstin=str(r.get("GSTIN", "")).strip().upper(),
-                supplier_state=str(r.get("State", "")).strip().upper(),
-                pos=str(r.get("POS", "")).strip().upper(),
-                invoice_number=str(r.get("Invoice No", "")).strip(),
-                invoice_date=inv_date,
-                invoice_value=_to_decimal(r.get("Invoice Value")),
-                taxable_value=_to_decimal(r.get("Taxable Value")),
-                igst=_to_decimal(r.get("IGST")),
-                cgst=_to_decimal(r.get("CGST")),
-                sgst=_to_decimal(r.get("SGST")),
-                cess=_to_decimal(r.get("CESS")),
-                filed_3b=str(r.get("3B Status", "")).strip().lower() == "filed",
-                reverse_charge=str(r.get("RC", "")).strip().upper() in ("YES", "Y", "TRUE"),
-            ))
-        except Exception as e:
-            parse_errors.append(f"Row {idx + 4}: {e!s}")
-
-    # Parse the note sheet and net it against invoices. Fully-matched
-    # credit notes cancel out their invoices (skipped on import).
-    # Unmatched / partial CNs are reported but not auto-applied.
-    notes = _parse_note_sheet(xl)
-    cancelled_keys, partials = _match_credit_notes(rows, notes)
-
-    return FilePreview(
-        filename=fname,
-        recipient_header=header_row_0,
-        recipient_gstin=recipient_gstin,
-        matched_business_id=matched_biz.id if matched_biz else None,
-        matched_business_name=matched_biz.name if matched_biz else "",
-        parsed_rows=rows,
-        parsed_notes=notes,
-        cancelled_invoice_keys=cancelled_keys,
-        partial_notes=partials,
-        parse_errors=parse_errors,
-    )
 
 
 # ── import ─────────────────────────────────────────────────────────────
@@ -496,6 +498,7 @@ def import_file(
 
     try:
       with transaction.atomic():
+        lock_firms(business_id)
         for row in preview.parsed_rows:
             # Skip rows that a credit note fully cancelled. This is the
             # main behaviour change from v1 — previously these slipped

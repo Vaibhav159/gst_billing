@@ -25,6 +25,13 @@ export interface DjangoInvoice {
   total_amount: string;
   is_igst_applicable?: boolean;
   payment_mode?: string | null;
+  readonly itc_month?: string | null;
+  readonly itc_eligible?: boolean;
+  readonly needs_review?: boolean;
+  readonly buyer_gstin?: string;
+  readonly buyer_ack?: boolean;
+  readonly source?: "" | "typed" | "capture" | "photos" | "excel";
+  readonly linked_sale?: number | null;
   // Signed /api/media/ links to the AI-import scan; the raw fields are write-only.
   source_file_url?: string | null;
   source_preview_url?: string | null;
@@ -87,6 +94,7 @@ export interface DjangoBusiness {
 
 export interface DjangoCustomer {
   id: number;
+  readonly is_supplier?: boolean;
   name: string;
   gst_number?: string;
   pan_number?: string;

@@ -1,0 +1,445 @@
+// Add or change a customer (PROTO pages/records/CustomerForm.jsx). While a name is typed, customers already on file
+// with a name like it show up; the GSTIN is checked as it's typed and fills the state, type and PAN; a GSTIN or phone
+// another customer has is named; every problem is said in plain words next to its field. A GSTIN that fails only its
+// check character saves with a warning and stays B2B (part 1 design, decision 3). The GST registry lookup and Merge
+// use the shared registry and merge preview in Records.
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { flushSync } from "react-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { AlertTriangle, Check, CheckCircle2, Info, UserPlus, UserRound } from "lucide-react";
+import { customerKeys, customerSaveErrors, useCustomerSearch, useSaveCustomer, type Customer, type CustomerBody, type CustomerField, type Statement } from "@/core/api/customers";
+import type { ApiProblem } from "@/core/api/errors";
+import { useAuth } from "@/core/auth/AuthProvider";
+import { cn } from "@/core/cn";
+import { date, plural, possessive } from "@/core/format";
+import { checkGstin, cleanGstin, cleanPan, emailProblem, formatMobile, gstinPan, gstinPlaceholder, hasGstin, mobileDigits, mobileProblem, panProblem, stateLabel, stateOptions, stateTitle } from "@/core/ids";
+import { MOD } from "@/core/modifierKeys";
+import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
+import { useFirms, useScope, type Firm } from "@/core/scope";
+import { Banner, Button, ButtonLink, Card, ConfirmDialog, Field, Input, ListSkeleton, LoadError, Page, QueryView, Segmented, Select, scrollIntoViewSafe } from "@/core/ui";
+import { useDebounced } from "@/core/useDebounced";
+import { useView } from "@/core/view";
+import { firstName, historyIndex, homeState, keepFocus, markSaved, safeReturn, tableState, useBack, useCtrlS, useOnFile, useRouteCustomer } from "./lib";
+import { useCustomerDuplicates } from "@/core/api/customerMerge";
+import { CustomerRegistry } from "./CustomerRegistry";
+import { ErrorSummary, FirmToggles, MissingRecord, NoAccess, SaveError, useEcho } from "./parts";
+
+type Values = { name: string; phone: string; email: string; type: "person" | "business"; gstin: string; pan: string; address: string; city: string; state: string; firms: number[] };
+/** What a GSTIN fills in. */
+type Filled = Pick<Values, "state" | "type" | "pan">;
+const IDS: Record<CustomerField, string> = {
+  name: "cu-name", phone: "cu-phone", email: "cu-email", gstin: "cu-gstin", pan: "cu-pan", address: "cu-address", city: "cu-city", state: "cu-state", firms: "cu-firms", type: "cu-type",
+};
+const ORDER: CustomerField[] = ["name", "phone", "email", "type", "gstin", "pan", "address", "city", "state", "firms"];
+
+function initialValues(existing: Customer | null, firms: Firm[], home: string, query: URLSearchParams): Values {
+  const all = firms.map((f) => f.id);
+  if (existing) {
+    const ticked = all.filter((id) => existing.businesses.includes(id));
+    const g = checkGstin(existing.gst_number);
+    return {
+      name: existing.name, phone: formatMobile(existing.mobile_number), email: existing.email, type: existing.type === "business" ? "business" : "person",
+      gstin: gstinPlaceholder(existing.gst_number) ? "" : existing.gst_number, pan: existing.pan_number || gstinPan(existing.gst_number), address: existing.address, city: existing.city,
+      // in the table's spelling, as the picker and a GSTIN name it: a stored "JAMMU & KASHMIR" is the GSTIN's own state
+      state: tableState(existing.state_name) || (g.status === "valid" || g.status === "check" ? g.state : home), firms: ticked.length ? ticked : all,
+    };
+  }
+  // a GSTIN in the address (?gstin=) fills the state, type and PAN, as typing it would
+  const gstin = cleanGstin(query.get("gstin") ?? "");
+  const g = checkGstin(gstin);
+  const fromGstin = g.status === "valid" || g.status === "check";
+  return {
+    name: query.get("name") ?? "", phone: formatMobile(query.get("phone")), email: "", type: fromGstin ? "business" : "person", gstin,
+    pan: g.status === "valid" ? g.pan : "", address: "", city: "", state: fromGstin ? g.state : home, firms: all,
+  };
+}
+
+/** Customers whose names look like the one typed, best first (PROTO records/data.js nameMatches), never the walk-in record. */
+function nameMatches<T extends Customer>(list: T[], typed: string): T[] {
+  const t = typed.trim().toLowerCase();
+  if (t.length < 3) return [];
+  const words = t.split(/\s+/).filter((w) => w.length >= 3);
+  return list.filter((c) => c.type !== "walkin").map((c) => {
+    const n = c.name.trim().toLowerCase();
+    const score = n === t ? 3 : n.startsWith(t) || n.includes(t) ? 2 : words.some((w) => n.split(/\s+/).includes(w)) ? 1 : 0;
+    return { c, score };
+  }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || a.c.name.localeCompare(b.c.name)).slice(0, 4).map((x) => x.c);
+}
+
+export default function CustomerForm() {
+  // an address like /customers/c-anil/edit names no customer: it gets the missing-record page without asking the server
+  const { id: editId, one, missing } = useRouteCustomer();
+  const [query] = useSearchParams();
+  const { can, whyNot } = useAuth();
+  const { firms, loading: firmsLoading, error: firmsError } = useFirms();
+  const { firmId } = useScope();
+  const existing = editId !== null && one.data && !one.isPlaceholderData ? one.data : null;
+  const back = useBack(editId !== null ? `/customers/${editId}` : "/customers");
+  const crumbs = [{ label: "Customers", to: "/customers" }];
+  // what the form on screen started from: the customer, or a new one's ?name=, ?phone= and ?gstin=. A link to this same
+  // page with others starts it afresh: at once when nothing would be lost (or the page changed, where its own guard
+  // asked), else once the person says Leave to the guard's question. ponytail: React Router allows one blocker per
+  // router, and useUnsavedGuard's blocks only a change of page, so the form holds the new start here until answered;
+  // upgrade: a "would this lose the changes" option on useUnsavedGuard, which this then gives way to
+  const location = useLocation();
+  const navigate = useNavigate();
+  const startKey = editId ?? `new?${query.get("name") ?? ""}&${query.get("phone") ?? ""}&${query.get("gstin") ?? ""}`;
+  const here = { key: startKey, query, path: location.pathname, url: `${location.pathname}${location.search}`, at: location.key };
+  const [shown, setShown] = useState(() => ({ ...here, idx: historyIndex() }));
+  const [dirty, setDirty] = useState(false);
+  const asking = shown.key !== startKey && dirty && shown.path === here.path;
+  // the router on another entry (a link, Back or Forward): its place in the tab's history is read then, and only then. A
+  // render while the browser puts back a Back the guard stopped would read the entry being left
+  if (shown.at !== here.at && !asking) { setShown({ ...here, idx: historyIndex() }); if (shown.key !== startKey) setDirty(false); }
+  // Stay: back to the form's own entry by the steps between (a link, Back or Forward), so no entry in the tab's history
+  // is lost; a history without numbers (in memory) has the form's address put back in place
+  const stay = () => {
+    const now = historyIndex();
+    if (shown.idx !== null && now !== null && now !== shown.idx) navigate(shown.idx - now);
+    else navigate(shown.url, { replace: true });
+  };
+  const restart = asking ? (
+    // the words of the form's guard (useUnsavedGuard)
+    <ConfirmDialog open title="Leave without saving?" confirmLabel="Leave" cancelLabel="Stay" tone="danger" onClose={stay}
+      onConfirm={() => { setShown({ ...here, idx: historyIndex() }); setDirty(false); }}>Your changes aren't saved. Leave this page and lose them?</ConfirmDialog>
+  ) : null;
+  if (missing) return <MissingRecord icon={UserRound} title="This customer isn't on file" to="/customers" label="All customers" />;
+  if (existing?.type === "walkin") {
+    return (
+      <Page icon={UserRound} breadcrumbs={crumbs} title="Walk-in customer" back={`/customers/${existing.id}`} narrow>
+        <NoAccess icon={Info} title="The walk-in record can't be edited"
+          actions={<><ButtonLink to={`/customers/${existing.id}`}>Back to walk-in sales</ButtonLink>{can("customer.edit") ? <ButtonLink variant="primary" icon={UserPlus} to="/customers/new?from=list">Add a customer</ButtonLink> : null}</>}>
+          It collects cash sales made without a name, so there's no name, phone or GSTIN to change. To keep a buyer's bills together, add them as a customer.
+        </NoAccess>
+      </Page>
+    );
+  }
+  const title = editId !== null ? `Edit ${one.data?.name ?? "customer"}` : "Add customer";
+  if (!can("customer.edit")) {
+    return (
+      <Page icon={UserRound} breadcrumbs={crumbs} title={title} back={editId !== null ? `/customers/${editId}` : "/customers"} narrow>
+        <NoAccess title="You can't add or change customers" actions={<ButtonLink to={editId !== null ? `/customers/${editId}` : "/customers"}>{one.data ? `Back to ${one.data.name}` : "All customers"}</ButtonLink>}>
+          {whyNot("customer.edit", "add or change customers")}
+        </NoAccess>
+      </Page>
+    );
+  }
+  const backTo = editId !== null ? `/customers/${editId}` : "/customers";
+  // the customer's loading, slow, offline and failed states, as every page draws them (the kit's QueryView)
+  if (editId !== null && !existing) {
+    const skeleton = <ListSkeleton rows={5} what={`${possessive(one.data?.name ?? "the customer")} details`} />;
+    return <Page narrow icon={UserRound} breadcrumbs={crumbs} title={title} back={backTo}><QueryView query={one} what="this customer" skeleton={skeleton}>{() => skeleton}</QueryView></Page>;
+  }
+  // the firms (for the firm cards) come with the app; a list that couldn't load is said, as the firm picker says it
+  if (firmsError) return <Page narrow icon={UserRound} breadcrumbs={crumbs} title={title} back={backTo}><LoadError problem={{ kind: "unreachable", message: "The app couldn't get through" }} what="the firms" /></Page>;
+  if (firmsLoading) return <Page narrow icon={UserRound} breadcrumbs={crumbs} title={title} back={backTo}><ListSkeleton rows={5} what="the form" /></Page>;
+  return <><Form key={shown.key} existing={existing} firms={firms} home={homeState(firms, firmId)} query={shown.query} back={back} onDirty={setDirty} />{restart}</>;
+}
+
+type FormProps = { existing: Customer | null; firms: Firm[]; home: string; query: URLSearchParams; back: () => void; onDirty: (dirty: boolean) => void };
+function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
+  const { isPhone } = useView();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const save$ = useSaveCustomer();
+  const { can } = useAuth();
+  const initial = useMemo(() => initialValues(existing, firms, home, query), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [v, setV] = useState(initial);
+  const [touched, setTouched] = useState<Partial<Record<CustomerField, boolean>>>({});
+  const [tried, setTried] = useState(false);
+  const [serverErrs, setServerErrs] = useState<Partial<Record<CustomerField, string>>>({});
+  const [saveError, setSaveError] = useState<ApiProblem | null>(null);
+  const [stateNote, setStateNote] = useState<{ n: number; text: string } | null>(null);
+  // what a GSTIN filled in (put) over what was there before it (was): when it's cleared or changed, each field it filled
+  // goes back, unless the person has changed that field since. A GSTIN from the address (?gstin=) filled a new
+  // customer's start: a person in the firm's state, with no PAN
+  const [auto, setAuto] = useState<{ was: Filled; put: Filled } | null>(() => {
+    const at = checkGstin(initial.gstin).status;
+    return !existing && (at === "valid" || at === "check") ? { was: { state: home, type: "person", pan: "" }, put: { state: initial.state, type: initial.type, pan: initial.pan } } : null;
+  });
+  const [done, setDone] = useState<{ to: string; back: boolean } | null>(null);
+  const dirty = JSON.stringify(v) !== JSON.stringify(initial);
+  const guard = useUnsavedGuard(dirty && !done);
+  // the page around the form holds a link that would start it afresh while this has changes
+  useEffect(() => { onDirty(dirty && !done); }, [dirty, done, onDirty]);
+  useEffect(() => () => onDirty(false), [onDirty]);
+  useEffect(() => {
+    if (!done) return;
+    if (done.back && (historyIndex() ?? 0) > 0) navigate(-1);
+    else navigate(done.to, { replace: true });
+  }, [done, navigate]);
+  // a link like ?focus=pan (the customer page's "PAN needed · Add PAN") lands on that field
+  useEffect(() => {
+    const target = ({ pan: IDS.pan, address: IDS.address, gstin: IDS.gstin, phone: IDS.phone } as Record<string, string>)[query.get("focus") ?? ""];
+    if (!target) return undefined;
+    const t = setTimeout(() => document.getElementById(target)?.focus(), 80);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // what a refusal says while the cursor stays in the refused field (Enter, or a Save that keeps the cursor)
+  const { echo, say } = useEcho();
+  const set = <K extends keyof Values>(k: K) => (x: Values[K]) => {
+    setV((o) => ({ ...o, [k]: x }));
+    say("");
+    setSaveError(null);
+    setServerErrs((e) => { if (!(k in e)) return e; const n = { ...e }; delete n[k as CustomerField]; return n; });
+  };
+  const touch = (k: CustomerField) => () => setTouched((t) => ({ ...t, [k]: true }));
+
+  const g = checkGstin(v.gstin);
+  const gValid = g.status === "valid";
+  // customers already on file: a name like this one (a search once typing pauses), the same phone, the same GSTIN
+  const nameChanged = !existing || v.name.trim().toLowerCase() !== existing.name.trim().toLowerCase();
+  const nameTerm = useDebounced(nameChanged && v.name.trim().length >= 3 ? v.name.trim() : "");
+  const nameHits = useCustomerSearch(nameTerm, { enabled: nameChanged });
+  const named = nameChanged && nameTerm === v.name.trim() ? (nameHits.data ?? []).filter((c) => c.id !== existing?.id) : [];
+  const dupName = named.find((c) => c.name.trim().toLowerCase() === v.name.trim().toLowerCase()) ?? null;
+  const suggestions = !existing && !dupName ? nameMatches(named, v.name) : [];
+  const digits = mobileDigits(v.phone);
+  const phoneChanged = !existing || v.phone !== initial.phone;
+  const gstinChanged = !existing || v.gstin !== initial.gstin;
+  const gstinStored = existing !== null && !gstinChanged;
+  const storedBusinessWithoutGstin = gstinStored && g.status === "empty" && v.type === "business" && v.type === initial.type;
+  const storedGstinWarning = gstinStored && hasGstin(v.gstin) && g.status === "invalid"
+    ? `“${v.gstin}” doesn't look like a GSTIN. It was on file and saves unchanged. Check it against their GST certificate.` : "";
+  const storedStateWarning = gValid && g.state !== v.state && gstinStored && v.state === initial.state
+    ? `The GSTIN is registered in ${stateLabel(g.state)}, but ${stateLabel(v.state)} is on file. It saves unchanged; check the state before making a bill.` : "";
+  const onFile = useOnFile(phoneChanged ? v.phone : "", gstinChanged ? v.gstin : "", existing?.id);
+  const duplicateGroups = useCustomerDuplicates(existing !== null);
+  const knownDuplicate = (what: "phone" | "gstin", value: string) => duplicateGroups.data?.find(group =>
+    group.what === what && group.value === value && group.customers.some(customer => customer.id === existing?.id)
+  )?.customers.find(customer => customer.id !== existing?.id);
+  const dupPhone = onFile.samePhone ?? knownDuplicate("phone", digits);
+  const dupGstin = onFile.sameGstin ?? knownDuplicate("gstin", v.gstin);
+  // A page visited before may have left statements in the cache. Their bills prove a firm has billed them; a partial
+  // period or one firm's statement cannot prove another firm has no bills. Opening the form never fetches a statement.
+  const statements = existing ? qc.getQueriesData<Statement>({ queryKey: customerKeys.statement(existing.id, null).slice(0, 3) }) : [];
+  const billed = new Set(statements.flatMap(([, statement]) => statement?.bills.map((b) => b.business) ?? []));
+  const storedPlaceholder = existing && gstinPlaceholder(existing.gst_number) ? existing.gst_number : "";
+
+  const errs: Partial<Record<CustomerField, string>> = {};
+  if (!v.name.trim()) errs.name = "Enter the customer's name, as it should print on bills.";
+  else if (dupName) errs.name = `There's already a customer called ${dupName.name}. Add the area or the father's name to tell them apart${dupName.city ? ` (like ${v.name.trim()}, ${dupName.city})` : ""}, or open ${dupName.name}.`;
+  if (phoneChanged && mobileProblem(v.phone)) errs.phone = mobileProblem(v.phone);
+  if (emailProblem(v.email)) errs.email = emailProblem(v.email);
+  if ((g.status === "short" || g.status === "invalid") && !storedGstinWarning) errs.gstin = gstinStored ? `“${v.gstin}” isn't a GSTIN. Clear it, or type the GSTIN.` : g.problem;
+  else if (v.type === "business" && g.status === "empty" && !storedBusinessWithoutGstin) errs.gstin = "A business customer needs its GSTIN: without one, its bills block GSTR-1. Add the GSTIN, or choose Person.";
+  if (gValid && g.state !== v.state && !storedStateWarning) errs.state = `This GSTIN is registered in ${stateLabel(g.state)}. Pick that state, or check the GSTIN.`;
+  // a PAN stored before v3 checked them (v2's imports kept "N/A") shows as it is, said in words of its own from the
+  // start, as any save sends it and the server refuses it; what the person types gets the usual words
+  const panStored = existing !== null && v.pan === existing.pan_number;
+  if (!gValid && panProblem(v.pan)) errs.pan = panStored ? `“${v.pan.trim()}” isn't a PAN. Clear it, or type the PAN.` : panProblem(v.pan);
+  if (!v.firms.length) errs.firms = "Tick at least one firm so they show first somewhere.";
+  for (const [k, msg] of Object.entries(serverErrs) as [CustomerField, string][]) if (!errs[k]) errs[k] = msg;
+  // empty required fields wait for a save attempt; typed (or cleared) values are checked on leaving the field; a stored
+  // PAN that isn't one is said from the start
+  const show = (k: CustomerField): string => {
+    const has = (x: Values) => { const val = x[k as keyof Values]; return Array.isArray(val) ? true : Boolean(String(val ?? "").trim()); };
+    return tried || (k === "name" && dupName) || (k === "pan" && panStored) || serverErrs[k] || (touched[k] && (k === "firms" || has(v) || has(initial))) ? errs[k] ?? "" : "";
+  };
+  const gstinErr = errs.gstin && (gstinStored || tried || touched.gstin || v.gstin.length === 15 || serverErrs.gstin) ? errs.gstin : "";
+
+  const onGstin = (raw: string) => {
+    const gstin = cleanGstin(raw);
+    const c = checkGstin(gstin);
+    const next = { ...v, gstin };
+    say("");
+    setSaveError(null);
+    setServerErrs((e) => { const n = { ...e }; delete n.gstin; return n; });
+    // each field as it was before the last GSTIN filled it, or as the person has changed it since
+    const keep = <K extends keyof Filled>(k: K): Filled[K] => (auto && v[k] === auto.put[k] ? auto.was[k] : v[k]);
+    const before: Filled = { state: keep("state"), type: keep("type"), pan: keep("pan") };
+    if (c.status === "valid" || c.status === "check") {
+      // a GSTIN that fails its check isn't read for a PAN: what was there before stays
+      const put: Filled = { state: c.state, type: "business", pan: c.status === "valid" ? c.pan : before.pan };
+      if (v.state !== c.state) setStateNote({ n: (stateNote?.n ?? 0) + 1, text: `Set to ${stateLabel(c.state)} from the GSTIN` });
+      Object.assign(next, put);
+      setAuto({ was: before, put });
+    } else if (auto) {
+      Object.assign(next, before);
+      setAuto(null);
+      setStateNote(null);
+    }
+    setV(next);
+  };
+
+  /**
+   * Puts the cursor on a refused field with its words drawn first (draw), so a screen reader reads them with the field as
+   * the cursor lands. Where the cursor is already (Enter in that field, or a Save or Ctrl S that keeps the cursor there),
+   * landing again fires nothing to read: the echo says the words instead, and only then, so a Save isn't read twice.
+   */
+  const refuse = (k: CustomerField, words: string, draw: () => void): HTMLElement | null => {
+    const el = document.getElementById(IDS[k]);
+    flushSync(draw);
+    if (el && el === document.activeElement) say(words);
+    el?.focus({ preventScroll: true });
+    return el;
+  };
+  const ret = safeReturn(query.get("return"));
+  const save = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (save$.isPending) return;
+    const first = ORDER.find((k) => errs[k]);
+    if (first) { scrollIntoViewSafe(refuse(first, errs[first]!, () => setTried(true)), { block: "center" }); return; }
+    setTried(true);
+    setSaveError(null);
+    const body: CustomerBody = {
+      name: v.name.trim().replace(/\s+/g, " "), mobile_number: existing && !phoneChanged ? existing.mobile_number : digits, email: v.email.trim(), customer_type: v.type, gst_number: v.gstin,
+      pan_number: gValid ? gstinPan(v.gstin) : v.pan, address: v.address.trim(), city: v.city.trim(), state_name: v.state, businesses: v.firms,
+    };
+    // mutate's callbacks run only while this form is still on screen: an answer after the person left takes no one anywhere
+    save$.mutate({ id: existing?.id, body }, {
+      onSuccess: (c) => {
+        // the record flashes where it lands (first in the list, or its own page): that's the confirmation
+        markSaved("customer", c.id);
+        if (ret) setDone({ back: false, to: `${ret}${ret.includes("?") ? "&" : "?"}customer=${c.id}` });
+        else if (existing) setDone({ back: true, to: `/customers/${c.id}` });
+        else setDone({ back: query.get("from") === "list", to: "/customers" });
+      },
+      onError: (err) => {
+        const { problem, fields } = customerSaveErrors(err, v.name);
+        const firstField = ORDER.find((k) => fields[k]);
+        if (firstField) refuse(firstField, fields[firstField]!, () => setServerErrs(fields));
+        else { setServerErrs(fields); setSaveError(problem); }
+      },
+    });
+  };
+  useCtrlS(save);
+
+  const busy = save$.isPending;
+  const errorItems = ORDER.filter((k) => errs[k]).map((k) => ({ field: IDS[k], text: errs[k]! }));
+  const allTicked = v.firms.length === firms.length;
+  const title = existing ? `Edit ${existing.name}` : "Add customer";
+  const saveLabel = busy ? "Saving…" : existing ? "Save changes" : "Save customer";
+  const grid = isPhone ? "flex flex-col gap-4" : "grid grid-cols-2 gap-x-5 gap-y-4";
+  const desc = (k: CustomerField, extra?: string | null) => [show(k) ? `${IDS[k]}-error` : null, extra].filter(Boolean).join(" ") || undefined;
+  const homeTitle = stateTitle(home) || "the firm's state";
+  const states = stateOptions(home);
+  if (v.state && !states.some((o) => o.value === v.state)) states.push({ value: v.state, label: stateLabel(v.state) });
+  const stateErr = show("state") || (gValid ? errs.state ?? "" : "");
+
+  return (
+    <Page narrow icon={existing ? UserRound : UserPlus} title={title} back={existing ? `/customers/${existing.id}` : "/customers"}
+      breadcrumbs={[{ label: "Customers", to: "/customers" }, ...(existing ? [{ label: existing.name, to: `/customers/${existing.id}` }] : [])]}
+      context={existing ? "Changes show on new bills from now on" : "A name and phone are enough to start. Add the GSTIN for businesses."}
+      phoneSubtitle={existing ? "Changes show on new bills" : "Name and phone are enough to start"}
+      actions={<><Button variant="ghost" onClick={back} disabled={busy}>Cancel</Button><Button variant="primary" icon={Check} onClick={() => save()} loading={busy} title={`${MOD} S`} {...keepFocus}>{saveLabel}</Button></>}
+      actionBar={<Button variant="primary" size="lg" icon={Check} onClick={() => save()} loading={busy} {...keepFocus}>{saveLabel}</Button>}>
+      {guard}
+      <form id="customer-form" onSubmit={save} noValidate className="flex flex-col gap-5">
+        {tried && errorItems.length ? <ErrorSummary items={errorItems} /> : null}
+        <SaveError problem={saveError} onRetry={() => save()} />
+        {echo}
+
+        <Card title="Customer">
+          <div className={grid}>
+            <Field label="Name" htmlFor={IDS.name} required error={show("name")} className={isPhone ? "" : "col-span-2"}>
+              <Input id={IDS.name} value={v.name} maxLength={255} onChange={(e) => set("name")(e.target.value)} onBlur={touch("name")} autoComplete="off" autoFocus={!existing && !isPhone && !query.get("focus")}
+                aria-describedby={desc("name", suggestions.length ? "cu-name-found" : null)} placeholder="As it should print on bills" />
+              {suggestions.length ? (
+                <div id="cu-name-found" className="rounded-ctl border border-brand-line bg-brand-tint/50 anim-rise" role="status">
+                  <p className="px-3.5 pt-2.5 text-sm font-medium text-brand">Already on file? {plural(suggestions.length, "customer")} with a name like this</p>
+                  <ul className="py-1">
+                    {suggestions.map((c) => (
+                      <li key={c.id} className="flex items-center gap-3 px-3.5 py-1.5">
+                        <span className="flex-1 min-w-0">
+                          <span className="block font-medium truncate">{c.name}</span>
+                          <span className="block text-sm text-muted truncate">{[formatMobile(c.mobile_number) || "No phone", c.city, c.figures?.last_bill ? `last bill ${date(c.figures.last_bill.invoice_date)}` : "no bills yet"].filter(Boolean).join(" · ")}</span>
+                        </span>
+                        <ButtonLink size="sm" to={`/customers/${c.id}`}>Open</ButtonLink>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {dupName ? <p className="text-sm text-fg2 anim-rise"><Link to={`/customers/${dupName.id}`} className="link">Open {dupName.name}</Link></p> : null}
+            </Field>
+            <Field label="Type" htmlFor={IDS.type} error={show("type")} hint={v.type === "business" ? "Bills go to GSTR-1 as B2B; the buyer can claim the GST." : "Bills go to GSTR-1 as B2C sales."}>
+              <div id={IDS.type} role="group" aria-label="Type" tabIndex={-1} aria-invalid={show("type") ? true : undefined} aria-describedby={show("type") ? desc("type") : `${IDS.type}-hint`}>
+                <Segmented label="Customer type" full options={[{ value: "person", label: "Person" }, { value: "business", label: "Business" }]} value={v.type} onChange={set("type")} />
+              </div>
+            </Field>
+            <Field label="Mobile number" htmlFor={IDS.phone} error={show("phone")} hint={dupPhone && !show("phone") ? null : "10 digits. Bills are sent here on WhatsApp."}>
+              <Input id={IDS.phone} type="tel" inputMode="numeric" autoComplete="off" value={v.phone} prefix="+91" placeholder="10-digit mobile" inputClassName="!pl-12 tnum"
+                onChange={(e) => set("phone")(formatMobile(e.target.value))} onBlur={touch("phone")} aria-describedby={desc("phone", dupPhone ? "cu-phone-dup" : null)} />
+              {dupPhone && !show("phone") ? (
+                <p id="cu-phone-dup" className="text-sm text-fg2 anim-rise"><AlertTriangle size={14} className="inline -mt-0.5 mr-1 text-neg" aria-hidden="true" />
+                  <Link to={`/customers/${dupPhone.id}`} className="underline underline-offset-2">{dupPhone.name}</Link> has this number too. Fine for family members; if it's the same person, use {dupPhone.name} instead. {existing && can("customer.merge") ? <Link to={`/customers/${existing.id}?merge=${dupPhone.id}`} className="link">Merge into {dupPhone.name}</Link> : null}
+                </p>
+              ) : null}
+            </Field>
+            <Field label="Email" htmlFor={IDS.email} error={show("email")} hint="Optional. For statements and bills by email." className={isPhone ? "" : "col-span-2"}>
+              <Input id={IDS.email} type="email" inputMode="email" value={v.email} onChange={(e) => set("email")(e.target.value.trim())} onBlur={touch("email")} autoComplete="off" aria-describedby={desc("email")} />
+            </Field>
+          </div>
+        </Card>
+
+        <Card title="GST" subtitle="Optional for people. Businesses need it for B2B bills.">
+          <div className={grid}>
+            <Field label="GSTIN" htmlFor={IDS.gstin}>
+              <Input id={IDS.gstin} value={v.gstin} onChange={(e) => onGstin(e.target.value)} onBlur={touch("gstin")} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                placeholder="15 characters" inputClassName="tnum tracking-wide uppercase placeholder:normal-case placeholder:tracking-normal" invalid={Boolean(gstinErr)} aria-describedby={`${IDS.gstin}-status`} maxLength={15} />
+              <div id={`${IDS.gstin}-status`} aria-live="polite" className="min-h-5 flex flex-col gap-1">
+                {gstinErr ? <p key={`e-${gstinErr}`} className="text-sm text-neg anim-rise">{gstinErr}</p>
+                  : storedGstinWarning ? <p key="stored" className="text-sm text-brand">{storedGstinWarning}</p>
+                  : g.status === "valid" ? <p key="ok" className="text-sm text-sale flex items-center gap-1.5 anim-rise"><CheckCircle2 size={15} aria-hidden="true" />Valid GSTIN · {stateLabel(g.state)} · PAN {g.pan}</p>
+                    : g.status === "check" ? <p key="check" className="text-sm text-brand flex items-start gap-1.5 anim-rise"><AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />{g.warning}</p>
+                      : v.gstin ? <p key="typing" className="text-sm text-muted tnum">{v.gstin.length} of 15 characters</p>
+                        : <p key="empty" className="text-sm text-muted">{storedPlaceholder ? `“${storedPlaceholder}” was on file; it means no GSTIN.` : "The state and PAN fill in from it."}</p>}
+                {storedBusinessWithoutGstin ? <p className="text-sm text-brand">This business has no GSTIN on file. It saves unchanged; add the GSTIN before making B2B bills.</p> : null}
+              </div>
+            </Field>
+            <Field label="PAN" htmlFor={IDS.pan} error={show("pan")}
+              hint={gValid ? "From the GSTIN (characters 3 to 12)." : g.status === "check" ? "Type the PAN: the app reads it only from a GSTIN that checks out." : "Needed when one bill is more than ₹2,00,000. 10 characters, like ABCDE1234F."}>
+              <Input id={IDS.pan} value={gValid ? g.pan : v.pan} disabled={gValid} maxLength={10} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                onChange={(e) => set("pan")(cleanPan(e.target.value))} onBlur={touch("pan")} inputClassName="tnum tracking-wide uppercase" aria-describedby={desc("pan")} />
+            </Field>
+          </div>
+          <CustomerRegistry gstin={v.gstin} stored={existing && !gstinPlaceholder(existing.gst_number) ? existing.gst_number : ""} values={v} onFill={(patch) => setV(old => ({ ...old, ...Object.fromEntries(Object.entries(patch).filter(([key]) => !String(old[key as keyof Values] ?? "").trim())) }))} onName={set("name")} />
+          {dupGstin ? (
+            <div className="mt-4 anim-rise">
+              <Banner tone="brand" icon={AlertTriangle} title={`${dupGstin.name} already has this GSTIN`} actions={<ButtonLink size="sm" to={existing && can("customer.merge") ? `/customers/${existing.id}?merge=${dupGstin.id}` : `/customers/${dupGstin.id}`}>{existing && can("customer.merge") ? "Merge into" : "Open"} {dupGstin.name}</ButtonLink>}>
+                One GSTIN on two customers splits one buyer's bills in two. If it's the same business, bill {dupGstin.name} instead.
+              </Banner>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card title="Address" subtitle="Printed on bills. The state decides IGST or CGST + SGST.">
+          <div className={grid}>
+            <Field label="Address" htmlFor={IDS.address} error={show("address")} className={isPhone ? "" : "col-span-2"}>
+              <Input id={IDS.address} value={v.address} maxLength={255} onChange={(e) => set("address")(e.target.value)} autoComplete="off" placeholder="House, street, area" aria-describedby={desc("address")} />
+            </Field>
+            <Field label="City" htmlFor={IDS.city} error={show("city")}>
+              <Input id={IDS.city} value={v.city} maxLength={100} onChange={(e) => set("city")(e.target.value)} autoComplete="off" aria-describedby={desc("city")} />
+            </Field>
+            <Field label="State" htmlFor={IDS.state} error={stateErr}
+              hint={storedStateWarning || (stateNote && !errs.state ? null : v.state && v.state !== home ? `Outside ${homeTitle}: every firm's bills to this customer use IGST.` : `${homeTitle}: bills use CGST + SGST.`)}>
+              <Select id={IDS.state} value={v.state} placeholder="Choose the state" onChange={(e) => { set("state")(e.target.value); setStateNote(null); }} options={states} />
+              {stateNote && !errs.state ? <p key={stateNote.n} className="text-sm text-sale flex items-center gap-1.5 anim-rise"><CheckCircle2 size={15} aria-hidden="true" />{stateNote.text}</p> : null}
+            </Field>
+          </div>
+        </Card>
+
+        <Card title={<span id="cu-firms-label">Firms that usually bill this customer</span>} subtitle="They show first when that firm makes a bill; any firm can still pick them."
+          actions={<Button size="sm" variant="ghost" onClick={() => { set("firms")(allTicked ? [] : firms.map((x) => x.id)); touch("firms")(); }}>{allTicked ? "Untick all" : `Tick all ${firms.length}`}</Button>}>
+          <div id={IDS.firms} tabIndex={-1} className="outline-none flex flex-col gap-2">
+            <FirmToggles firms={firms} value={v.firms} onChange={(ids) => { set("firms")(ids); touch("firms")(); }} labelledBy="cu-firms-label" describedBy={show("firms") ? `${IDS.firms}-error` : undefined}
+              note={existing ? (f) => (billed.has(f.id) ? `Has billed ${firstName(existing.name)}` : null) : undefined} />
+            {show("firms") ? <p id={`${IDS.firms}-error`} className="text-sm text-neg anim-rise">{show("firms")}</p>
+              : <p className="text-sm text-muted">{allTicked ? `All ${firms.length} firms ticked.` : `${plural(v.firms.length, "firm")} ticked: ${firms.filter((f) => v.firms.includes(f.id)).map((f) => f.name).join(", ")}.`}</p>}
+          </div>
+        </Card>
+
+        {!isPhone ? (
+          <div className="flex items-center justify-end gap-2">
+            <span className={cn("text-sm mr-auto", dirty ? "text-fg2" : "text-muted")}>{!existing ? `${MOD} S saves` : dirty ? `Unsaved changes · ${MOD} S saves` : "No changes yet"}</span>
+            <Button variant="ghost" onClick={back} disabled={busy}>Cancel</Button>
+            <Button type="submit" variant="primary" icon={Check} loading={busy} {...keepFocus}>{saveLabel}</Button>
+          </div>
+        ) : null}
+      </form>
+    </Page>
+  );
+}

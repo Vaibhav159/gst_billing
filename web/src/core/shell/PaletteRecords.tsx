@@ -1,0 +1,244 @@
+import { GST_PAGES } from "@/core/gst/palette";
+// Search (Ctrl K, and Today's Search on a phone): pages, actions, the records opened lately, today's bills, and
+// customers, sales bills, deleted bills, products and firms. Ported from PROTO/core/shell.jsx (Palette).
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
+import { useNavigate } from "react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, Building2, Camera, CornerDownLeft, FileText, FileX, Package, Plus, ShoppingBag, Truck, UserRound, type LucideIcon } from "lucide-react";
+import type { DueItem } from "@/core/api/dashboard";
+import { dueLink } from "@/core/due";
+import { api } from "@/core/api/client";
+import { problemOf, type ApiProblem } from "@/core/api/errors";
+import { useBin, useTodaysBills } from "@/core/api/sales";
+import { useAuth } from "@/core/auth/AuthProvider";
+import { cn } from "@/core/cn";
+import { date, dateShort, inr, mobileText, pct, toPaise, todayIST } from "@/core/format";
+import type { BinRow } from "@/core/sales/types";
+import { cancelledMark, dayOf, timeOf } from "@/core/sales/words";
+import { useFirms, type Firm } from "@/core/scope";
+import { Button, Kbd, optionClass } from "@/core/ui";
+import { useView } from "@/core/view";
+import { ALT } from "@/core/modifierKeys";
+import { DESKTOP_NAV, MORE_NAV, NAV_ICON } from "./nav";
+import { recentVisits } from "./recent";
+import { billNumberRank, newBillFor, rankBills, suggestions } from "./suggest";
+
+/** A row: where it goes, under which heading. Actions show their hint as a key; other rows as a second line. */
+type Result = { group: string; label: string; hint?: string; icon?: LucideIcon; to: string };
+
+/** An opened record's icon, by the first part of its address. */
+const RECENT_ICON: Record<string, LucideIcon> = { sales: FileText, customers: UserRound, purchases: ShoppingBag, products: Package, suppliers: Truck };
+
+/** search/quick/'s answer (billing/api/search.py, v2's search too): customers with their latest bills, bills by number (status, paper and firm with part 1), products. */
+type QuickBill = { id: number; invoice_number: string; invoice_date: string; total_amount: string; type_of_invoice: string; status?: string };
+type Quick = {
+  customers: { id: number; name: string; gst_number: string; mobile_number: string; recent_invoices: QuickBill[] }[];
+  invoices: (QuickBill & { customer_name: string })[];
+  // gst_tax_rate: a fraction as a string ("0.0300"); a server from before v3 doesn't send it
+  products: { id: number; name: string; hsn_code: string; gst_tax_rate?: string }[];
+};
+type PurchaseHit = { id: number; invoice_number: string; invoice_date: string; total_amount: string; supplier: { name: string } };
+type SupplierHit = { id: number; name: string; gst_number: string; city: string };
+
+/**
+ * The server's records as rows: customers; sales bills by number or by a customer found, each once, the exact number
+ * first then the newest (rankBills); deleted bills (the owner's), each opening its page to restore; products. A bill
+ * whose number or counter is exactly what's typed puts its kind's rows ahead of the customers: a plain number ("34")
+ * is also in customers' phone numbers, and Enter opens the first row. A live bill comes before a deleted one with the
+ * same number, and a deleted one before the customers (Ruling 1B-24), so Enter on a deleted paper number opens its page
+ * to restore it. Each kind keeps its rows together, under one heading.
+ */
+function recordRows(d: Quick, term: string, deleted: BinRow[]): Result[] {
+  const customers: Result[] = d.customers.map((c) => ({ group: "Customers", label: c.name, icon: UserRound, hint: mobileText(c.mobile_number) || c.gst_number || "Customer", to: `/customers/${c.id}` }));
+  // the prototype's "bills by number or customer": sales only, each once
+  const bills = new Map<number, QuickBill & { customer_name: string }>();
+  for (const b of d.invoices) if (b.type_of_invoice === "outward") bills.set(b.id, b);
+  for (const c of d.customers) for (const b of c.recent_invoices) if (b.type_of_invoice === "outward" && !bills.has(b.id)) bills.set(b.id, { ...b, customer_name: c.name });
+  const ranked = rankBills([...bills.values()], term).slice(0, 5);
+  const sales: Result[] = ranked.map((b) => ({ group: "Sales bills", label: b.invoice_number, icon: FileText, hint: `${b.customer_name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}${cancelledMark(b.status)}`, to: `/sales/${b.id}` }));
+  // deleted bills can still be found: their page offers Restore (PROTO core/shell.jsx:493-496). The one numbered as
+  // typed first, the rest newest deleted first, as the bin lists them
+  const exactGone = deleted.filter((s) => billNumberRank(s.invoice_number, term) < 2);
+  const gone: Result[] = [...exactGone, ...deleted.filter((s) => !exactGone.includes(s))].map((s) => ({
+    group: "Deleted bills", label: s.invoice_number, icon: FileX, hint: `deleted ${dateShort(dayOf(s.deleted_at))} · ${s.customer.name} · open it to restore`, to: `/sales/${s.original_id}`,
+  }));
+  const exact = ranked.some((b) => billNumberRank(b.invoice_number, term) < 2);
+  const rows = exact ? (exactGone.length ? [...sales, ...gone, ...customers] : [...sales, ...customers, ...gone])
+    : exactGone.length ? [...gone, ...customers, ...sales] : [...customers, ...sales, ...gone];
+  return rows;
+}
+
+const NO_BINS: BinRow[] = [];
+
+/** The firms matching t, by name or GSTIN: the app's own list (useFirms), so nothing is asked for them. */
+function firmRows(firms: Firm[], t: string): Result[] {
+  return firms.filter((f) => f.name.toLowerCase().includes(t) || f.short.toLowerCase().includes(t) || f.gstin.toLowerCase().includes(t)).slice(0, 3)
+    .map((f) => ({ group: "Firms", label: f.name, icon: Building2, hint: f.gstin || undefined, to: `/firms/${f.id}` }));
+}
+
+/** Why the server's records weren't searched, in the app's words (LoadError's). */
+function troubleText(p: ApiProblem): string {
+  if (p.kind === "offline") return "You're offline, so customers, bills and products can't be searched.";
+  if (p.kind === "unreachable" || p.kind === "server") return "The app couldn't reach the shop's records just now, so customers, bills and products weren't searched.";
+  return p.message;
+}
+
+export type PaletteRecordsHandle = { onKey(e: KeyboardEvent<HTMLInputElement>): void };
+type Props = { open: boolean; q: string; i: number; setI: Dispatch<SetStateAction<number>>; input: RefObject<HTMLInputElement>; onClose(): void; attention?: DueItem[] };
+
+/** Only the records code is deferred; the dialog and typed text stay in Palette (Ruling 1E-20). */
+const PaletteRecords = forwardRef<PaletteRecordsHandle, Props>(function PaletteRecords({ open, q, i, setI, input, onClose, attention }, ref) {
+  const { me, can } = useAuth();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { isPhone } = useView();
+  const { firms } = useFirms();
+  const [term, setTerm] = useState("");
+  const text = q.trim();
+  // what the server is asked for: the name in "new anil"; a phone number typed in groups ("98290 41122") as the digits
+  // it keeps; a hyphen stays ("2026-27")
+  const named = newBillFor(text) ?? text;
+  const asked = /^\d[\d ]*\d$/.test(named) ? named.replace(/ /g, "") : named;
+  // the server is asked about what's typed once it has rested 250 ms, from two characters: one request per term, kept
+  // 30 s, and a newer term cancels the one still out. Nothing asks on a timer (the database is Neon's free plan)
+  useEffect(() => { const t = setTimeout(() => setTerm(asked), 250); return () => clearTimeout(t); }, [asked]);
+  const search = useQuery({
+    queryKey: ["search", term],
+    queryFn: async ({ signal }) => (await api.get("search/quick/", { params: { q: term }, signal })).data as Quick,
+    enabled: open && term.length >= 2,
+    // a search that fails says so at once: no retry, and offline it still asks (and fails) instead of waiting
+    retry: false, networkMode: "always", staleTime: 30_000,
+  });
+  const purchases = useQuery({
+    queryKey: ['purchases', 'search', term], enabled: open && term.length >= 2,
+    queryFn: async ({ signal }) => (await api.get('purchases/', { params: { q: term, page_size: 5, summary: 0 }, signal })).data.results as PurchaseHit[],
+    retry: false, networkMode: 'always', staleTime: 30_000,
+  });
+  const suppliers = useQuery({
+    queryKey: ['suppliers', 'search', term], enabled: open && term.length >= 2,
+    queryFn: async ({ signal }) => (await api.get('suppliers/', { params: { q: term, page_size: 5 }, signal })).data.results as SupplierHit[],
+    retry: false, networkMode: 'always', staleTime: 30_000,
+  });
+  // deleted bills, for whoever may restore them (design §6: bill.delete): search/quick/ doesn't hold the bin, so it's a
+  // second request per term, once typing has paused, through the app's one bin reader (Ruling 1B-9), kept 30 s
+  const canBin = can("bill.delete");
+  const bin = useBin({ q: term, page_size: 3 }, open && canBin && term.length >= 2);
+  // today's newest bills, for the empty box: asked once as search opens and kept 30 s, never on a timer (Neon's free
+  // plan), nor again as the box is emptied
+  const today = useTodaysBills(open);
+  // the answer for what's in the box now (an older term's rows never stand in for it); a failure is all of it, and the
+  // reason shows again only once Try again has had its answer
+  const current = open && asked.length >= 2 && term === asked;
+  const records = current && search.data && !search.isError ? search.data : null;
+  const products = records?.products;
+  const problem = current && search.isError && search.fetchStatus !== "fetching" ? problemOf(search.error) : null;
+  // the deleted bills come with the records, never after them (a failure there leaves them out; asked for again, a
+  // failure with nothing loaded is pending once more, so the records wait for that answer too)
+  const binDone = !canBin || bin.isError || bin.data !== undefined;
+  const deleted = current && canBin && bin.data ? bin.data.results : NO_BINS;
+  const settled = Boolean(records || problem) && (Boolean(problem) || binDone);
+  const meId = me?.id;
+  const todays = today.data;
+  const results = useMemo(() => {
+    if (!open) return [];
+    const t = q.trim().toLowerCase();
+    const actions = ([
+      can("bill.create") && { group: "Actions", label: "New sales bill", hint: `${ALT} N`, icon: Plus, to: "/sales/new" },
+      can("bill.create") && { group: "Actions", label: "Enter bills from the paper book", icon: FileText, to: "/sales/paper" },
+      can("capture") && { group: "Actions", label: "Capture a supplier's bill", icon: Camera, to: "/purchases/capture" },
+      can("purchase.create") && { group: "Actions", label: "Add a purchase by hand", hint: `${ALT} P`, icon: ShoppingBag, to: "/purchases/new" },
+      can("customer.edit") && { group: "Actions", label: "Add a customer", icon: UserRound, to: "/customers/new" },
+      can("product.edit") && { group: "Actions", label: "Add a product", icon: Package, to: "/products/new" },
+    ] as (Result | false)[]).filter((a): a is Result => Boolean(a));
+    const pages: Result[] = [
+      ...DESKTOP_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: NAV_ICON[n.section], to: n.to })),
+      ...MORE_NAV.filter((n) => !n.need || can(n.need)).map((n) => ({ group: "Pages", label: n.label, icon: n.icon, to: n.to })),
+      ...(t ? GST_PAGES.map((p): Result => ({ group: "Pages", ...p })) : []),
+    ];
+    const match = (s: string) => !t || s.toLowerCase().includes(t);
+    if (!t) {
+      // what people come back for first: what they opened last, then today's bills after the actions
+      const out: Result[] = [];
+      const recent = meId == null ? [] : recentVisits(meId).filter((v) => typeof v?.to === "string" && typeof v.label === "string");
+      for (const v of recent.slice(0, 5)) out.push({ group: "Opened recently", label: v.label || v.to, icon: RECENT_ICON[v.to.split("/")[1] ?? ""], to: v.to });
+      for (const a of (attention ?? []).slice(0, 3)) out.push({ group: "Needs attention", label: a.title, hint: a.detail, icon: Bell, to: dueLink(a) });
+      out.push(...actions);
+      for (const b of (todays ?? []).slice(0, 3)) {
+        out.push({ group: "Today's bills", label: b.invoice_number, icon: FileText, hint: `${b.customer.name} · ${b.paper ? "paper bill" : timeOf(b.created_at)} · ${inr(b.total_amount)}${cancelledMark(b.status)}`, to: `/sales/${b.id}` });
+      }
+      out.push(...pages);
+      return out.slice(0, 24);
+    }
+    // words that go straight to a list come first ("udhaar sep", "kiran gstr1", "new anil")
+    const out: Result[] = [...suggestions(q, { firms, today: todayIST(), canCreate: can("bill.create"), customers: records?.customers ?? [] }), ...actions.filter((a) => match(a.label)), ...pages.filter((p) => match(p.label))];
+    // the records come in together, once the server has answered for this text (or couldn't: the firms are this app's own)
+    if (settled) {
+      out.push(...(records ? recordRows(records, asked, deleted) : []));
+      for (const product of (products ?? []).slice(0, 5)) out.push({ group: "Products", label: product.name, icon: Package, hint: "HSN " + product.hsn_code + (product.gst_tax_rate == null ? "" : " · GST " + pct(Number(product.gst_tax_rate))), to: "/products/" + product.id });
+      out.push(...firmRows(firms, t));
+    }
+    if (current) {
+      for (const b of rankBills(purchases.data ?? [], asked)) out.push({ group: 'Purchase bills', label: b.invoice_number, icon: ShoppingBag, hint: `${b.supplier.name} · ${date(b.invoice_date)} · ${inr(toPaise(b.total_amount))}`, to: `/purchases/${b.id}` });
+      for (const s of suppliers.data ?? []) out.push({ group: 'Suppliers', label: s.name, icon: Truck, hint: [s.gst_number, s.city].filter(Boolean).join(' · ') || 'Supplier', to: `/suppliers/${s.id}` });
+    }
+    return out.slice(0, 24);
+  }, [open, q, can, meId, records, settled, firms, todays, asked, deleted, products, current, purchases.data, suppliers.data, attention]);
+  const go = (r: Result) => { onClose(); navigate(r.to); };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setI((x) => Math.max(0, Math.min(results.length - 1, x + 1))); }
+    if (e.key === "ArrowUp") { e.preventDefault(); setI((x) => Math.max(0, x - 1)); }
+    if (e.key === "Home") { e.preventDefault(); setI(0); }
+    if (e.key === "End") { e.preventDefault(); setI(Math.max(0, results.length - 1)); }
+    if (e.key === "Enter" && results[i]) { e.preventDefault(); go(results[i]); }
+  };
+  useImperativeHandle(ref, () => ({ onKey }));
+  // The records own this relationship: the eager box never points to an option that has not loaded or was removed.
+  useLayoutEffect(() => {
+    const box = input.current;
+    if (results[i]) box?.setAttribute("aria-activedescendant", `pal-${i}`);
+    else box?.removeAttribute("aria-activedescendant");
+    return () => box?.removeAttribute("aria-activedescendant");
+  }, [input, results, i]);
+  useEffect(() => { document.getElementById(`pal-${i}`)?.scrollIntoView({ block: "nearest" }); }, [i]);
+  if (!open) return null;
+  // what the box says above the rows: why records weren't searched, else (with no rows) what to do next
+  const trouble = problem ? troubleText(problem) : null;
+  const status = trouble ?? (results.length ? null
+    : text.length < 2 ? "Keep typing to search customers and bills."
+      : !settled ? "Searching…"
+        : `Nothing matches “${q}”. Try a phone number, or a bill number like 31 or KGH/2026-27/31.`);
+  // Try again asks through the client (Ruling 1B-11): this term's search, and its deleted bills when asking for them failed too
+  const retry = () => {
+    input.current?.focus();
+    if (search.isError) void qc.refetchQueries({ queryKey: ["search", term] });
+    if (bin.isError) void qc.refetchQueries({ queryKey: ["bin"], type: "active", predicate: (x) => x.state.status === "error" });
+  };
+  let lastGroup: string | null = null;
+  return (
+    <>
+        {current && (purchases.isError || suppliers.isError) ? <div className="px-3 py-2"><p role="status" className="text-muted">Some purchases or suppliers could not be searched. Try again.</p><Button size="sm" onClick={() => { void qc.refetchQueries({ queryKey: ['purchases', 'search', term] }); void qc.refetchQueries({ queryKey: ['suppliers', 'search', term] }); }}>Try again</Button></div> : null}
+        {status ? <p role="status" className={cn("px-3 text-center text-muted", trouble ? "pt-6 pb-1" : "py-6")}>{status}</p> : null}
+        {trouble ? <div className="flex justify-center pb-3"><Button size="sm" onClick={retry}>Try again</Button></div> : null}
+        <ul id="palette-list" role="listbox" aria-label="Results" className={cn("flex flex-col max-h-[52vh] overflow-y-auto -mx-2", !results.length && "hidden")}>
+          {results.map((r, k) => {
+            const head = r.group !== lastGroup ? r.group : null;
+            lastGroup = r.group;
+            return (
+              <li key={k} role="presentation">
+                {head ? <p className="caps px-3 pt-3 pb-1" aria-hidden="true">{head}</p> : null}
+                <div id={`pal-${k}`} role="option" aria-selected={k === i} onMouseEnter={() => setI(k)} onClick={() => go(r)}
+                  className={cn("flex items-center gap-3 px-3 rounded-ctl cursor-pointer", isPhone ? "min-h-14" : "min-h-11", optionClass(k === i))}>
+                  {r.icon ? <r.icon size={18} className={cn("shrink-0", r.group === "Needs attention" ? "text-brand" : r.group === "Deleted bills" ? "text-neg" : "text-fg2")} aria-hidden="true" /> : null}
+                  <span className="flex-1 min-w-0"><span className="block truncate">{r.label}</span>{r.hint && r.group !== "Actions" ? <span className="block text-sm text-muted truncate">{r.hint}</span> : null}</span>
+                  {r.group === "Actions" && r.hint && !isPhone ? <Kbd>{r.hint}</Kbd> : null}
+                  {k === i && !isPhone ? <CornerDownLeft size={16} className="text-muted" aria-hidden="true" /> : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+    </>
+  );
+});
+
+export default PaletteRecords;

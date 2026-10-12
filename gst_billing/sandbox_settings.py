@@ -21,6 +21,14 @@ if (
         "(GST_SANDBOX=1, DB_HOST=db, DB_NAME=gst_sandbox*) — see deploy/sandbox/."
     )
 
+# Explicit browser-test harness, enabled only after the sandbox DB guard.
+# Leave environment SMS_PROVIDER unset: production settings refuse fake.
+if os.environ.get("SANDBOX_FAKE_SMS") == "1":
+    DEBUG = True
+    SMS_PROVIDER = "fake"
+    SMS_RESET_ENABLED = True
+    SMS_FAKE_OUTBOX_FILE = os.environ.get("SANDBOX_SMS_OUTBOX_FILE") or "/tmp/gst-sandbox-sms/outbox.json"
+
 # Reached on localhost ports through an SSH tunnel, and by service name from
 # the Vite container's proxy (which rewrites Host to "nginx").
 ALLOWED_HOSTS = [*ALLOWED_HOSTS, "nginx", "web"]
@@ -33,3 +41,17 @@ CSRF_TRUSTED_ORIGINS = [
 # appending to X-Forwarded-For. Production's 2 would key throttles on a hop
 # the client wrote.
 REST_FRAMEWORK = {**REST_FRAMEWORK, "NUM_PROXIES": 1}
+
+# The end-to-end suites run here as the shop's owner, about 600 requests a run and several runs a day across
+# helpers, so production's 5000 a day per user would lock the owner out of the sandbox for the rest of the day.
+# Acceptance signs in many generated accounts from the same localhost proxy.
+# Keep finite sandbox limits; production's login, reset and anonymous limits are unchanged.
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    **REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"],
+    "user": "50000/day", "anon": "10000/day", "login": "120/min",
+    **({"reset": "120/hour"} if SMS_PROVIDER == "fake" else {}),
+}
+
+# Only this settings module can enable deterministic synthetic reads.
+AI_READER = os.environ.get("AI_READER", "fake")
+AI_READER_ALLOW_FAKE = True

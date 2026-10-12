@@ -64,7 +64,7 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
 
-# --timeout: a request budget. Without one a wedged upstream (a Gemini
-# brownout during month-end) held a worker forever; with 16 threads that
-# was the whole server.
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "90", "--graceful-timeout", "30", "gst_billing.wsgi:application"]
+# Match compose's threaded workers: active backup/export streams may exceed
+# 90 seconds while the worker continues its heartbeat. Upstream calls retain
+# their own timeouts; gunicorn's timeout detects an unresponsive worker.
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--threads", "4", "--timeout", "90", "--graceful-timeout", "30", "gst_billing.wsgi:application"]

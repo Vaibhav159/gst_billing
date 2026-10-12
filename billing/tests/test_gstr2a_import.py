@@ -3,7 +3,10 @@
 import io
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
+import pandas as pd
+import pytest
 from django.test import TestCase
 from openpyxl import Workbook
 
@@ -90,3 +93,33 @@ class GSTR2AImportTests(TestCase):
         p = preview_file(portal_file(rows=rows), filename="2A.xlsx")
         self.assertEqual(len(p.parsed_rows), 0)
         self.assertEqual(len(p.parse_errors), 1)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("outcome", ["success", "missing_sheet", "no_data", "parse_failure"])
+def test_preview_closes_workbook_and_keeps_callers_buffer(outcome):
+    source = portal_file(rows=[] if outcome == "no_data" else None)
+    if outcome == "missing_sheet":
+        workbook = Workbook()
+        source = io.BytesIO()
+        workbook.save(source)
+        source.seek(0)
+    book = pd.ExcelFile(source)
+    try:
+        with (patch("billing.services.gstr2a_import.pd.ExcelFile", return_value=book),
+              patch.object(book, "close", wraps=book.close) as close,
+              patch.object(book, "parse", wraps=book.parse) as parse):
+            if outcome == "parse_failure":
+                parse.side_effect = ValueError("bad sheet")
+                with pytest.raises(ValueError, match="bad sheet"):
+                    preview_file(source)
+            else:
+                result = preview_file(source)
+                assert bool(result.parse_errors) == (outcome != "success")
+            close.assert_called_once()
+            assert not source.closed
+            source.seek(0)
+            assert source.read(2) == b"PK"
+    finally:
+        book.close()
+        source.close()

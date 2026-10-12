@@ -11,13 +11,17 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.response import Response
 
 from billing.api.inward_bills_service import fy_start, gstin_conflict, inward_number_key, supplier_key
+from billing.cache import uncached
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
-from billing.period_lock import locked_period_or_none
+from billing.numbering import lock_firms
+from billing.period_lock import locked_period_or_none, sales_month_closed
+from billing.services.sales import frozen_firms
 from billing.tax_rules import (
     LINE_MONEY_TOLERANCE,
     clean_gstin,
@@ -397,6 +401,19 @@ def run_bulk_import(request):
             })
         return lines, problems
 
+    def business_for(inv_data):
+        firm_name = (inv_data.get("firmName") or "").strip()
+        firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
+        business = forced_business
+        if not business and firm_gstin:
+            business = biz_by_gstin.get(firm_gstin.lower())
+        if not business and firm_name:
+            business = biz_by_name.get(firm_name.lower())
+            if not business:
+                business = next((b for nm, b in biz_by_name.items()
+                                 if firm_name.lower() in nm or nm in firm_name.lower()), None)
+        return business
+
     # ---------- PHASE 2: process invoices in a single transaction ----------
     invoices_to_create = []  # [(Invoice instance, source dict for line items)]
     line_items_to_create = []
@@ -408,6 +425,13 @@ def run_bulk_import(request):
     new_customers_added_to_biz = []  # (customer, business) pairs
 
     with transaction.atomic():
+        # Every firm in the file is locked in one call, in id order. Sales freeze their firm at create (X-64),
+        # read under that lock; re-locking a held row below adds no wait.
+        business_ids = {business.pk for row in invoices_data if (business := business_for(row)) is not None}
+        lock_firms(*business_ids)
+        current_businesses = {business.pk: business for business in uncached(Business).filter(pk__in=business_ids)}
+        frozen = frozen_firms(*(business.pk for row in invoices_data if row.get("type") != "INWARD"
+                                if (business := business_for(row)) is not None))
         for inv_data in invoices_data:
             try:
                 # Savepoint per row: on Postgres a failed statement aborts the whole
@@ -416,19 +440,9 @@ def run_bulk_import(request):
                 with transaction.atomic():
                     firm_name = (inv_data.get("firmName") or "").strip()
                     firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
-
-                    # Resolve business from cache
-                    business = forced_business
-                    if not business and firm_gstin:
-                        business = biz_by_gstin.get(firm_gstin.lower())
-                    if not business and firm_name:
-                        # icontains substitute: try exact, then any name containing
-                        business = biz_by_name.get(firm_name.lower())
-                        if not business:
-                            for nm, b in biz_by_name.items():
-                                if firm_name.lower() in nm or nm in firm_name.lower():
-                                    business = b
-                                    break
+                    business = business_for(inv_data)
+                    if business is not None:
+                        business = current_businesses.get(business.pk)
 
                     if not business:
                         errors.append(
@@ -557,7 +571,8 @@ def run_bulk_import(request):
 
                     # Filed-and-locked month: never silently mutate a filed
                     # period from a bulk sheet — surface it as a row error.
-                    if locked_period_or_none(business.pk, str(invoice_date)):
+                    if (locked_period_or_none(business.pk, str(invoice_date)) or
+                        (type_of_invoice == INVOICE_TYPE_OUTWARD and sales_month_closed(business.pk, parse_date(str(invoice_date))))):
                         skipped_count += 1
                         errors.append(
                             f"Invoice {invoice_number}: its month is filed & locked "
@@ -575,6 +590,7 @@ def run_bulk_import(request):
                         total_amount=Decimal(str(inv_data.get("total", 0))),
                         payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                         workspace_id=1,
+                        firm_snapshot=frozen.get(business.pk) if type_of_invoice == INVOICE_TYPE_OUTWARD else None,
                     )
                     # The bill's GSTIN decides the head too, so the party carries
                     # it while the lines are built; it is saved only if they are.
@@ -763,5 +779,3 @@ def run_bulk_import(request):
         },
         status=status.HTTP_201_CREATED,
     )
-
-

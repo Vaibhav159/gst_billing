@@ -220,6 +220,12 @@ EXPLORER_PERMISSION_CHANGE = lambda r: r.user.is_superuser  # noqa: E731
 
 # REST Framework settings
 REST_FRAMEWORK = {
+    # Ruling 7-D15: deep JSON is a 400 (billing/api/parsers.py).
+    "DEFAULT_PARSER_CLASSES": [
+        "billing.api.parsers.SafeJSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 15,
     "DEFAULT_THROTTLE_CLASSES": [
@@ -234,6 +240,9 @@ REST_FRAMEWORK = {
         # touching a human; refresh is authenticated-adjacent and more frequent.
         "login": "10/min",
         "token_refresh": "60/min",
+        # v3's unfinished bills (billing.api.drafts, Ruling 1A-42): a keep at every pause while a bill is typed, so
+        # they don't spend the user's daily requests; one open form keeps at most about 50 times a minute.
+        "drafts": "120/min",
     },
     "DEFAULT_RENDERER_CLASSES": (
         [
@@ -247,7 +256,7 @@ REST_FRAMEWORK = {
     ),
     # JWT Authentication only
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "billing.api.auth.SessionJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -316,8 +325,6 @@ if REDIS_PASSWORD:
         "password": os.getenv("REDIS_PASSWORD", None),  # Redis password (optional)
         "ssl": True,
     }
-
-    print(f"Using Redis with password: {CACHEOPS_REDIS=}")
 
     CACHEOPS_DEFAULTS = {
         "timeout": 60 * 15,  # 15 minutes default cache timeout
@@ -432,3 +439,14 @@ LOGGING = {
         },
     },
 }
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})
+
+# Password codes ship off; a fake outbox file is only for DEBUG sandbox tests.
+SMS_RESET_ENABLED = os.environ.get("SMS_RESET_ENABLED", "").lower() in {"1", "true", "yes"}
+SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "msg91")
+SMS_FAKE_OUTBOX_FILE = os.environ.get("SMS_FAKE_OUTBOX_FILE", "")
+MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
+MSG91_TEMPLATE_ID = os.environ.get("MSG91_TEMPLATE_ID", "")
+MSG91_SENDER = os.environ.get("MSG91_SENDER", "")

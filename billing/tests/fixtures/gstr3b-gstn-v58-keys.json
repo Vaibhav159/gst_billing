@@ -1,0 +1,19 @@
+{
+  "top_level_since_2025_11": [
+    "eco_dtls",
+    "gstin",
+    "intr_ltfee",
+    "inward_sup",
+    "itc_elg",
+    "ret_period",
+    "sup_details"
+  ],
+  "eco_dtls": [
+    "eco_reg_sup",
+    "eco_sup"
+  ],
+  "itc_inelg_types": [
+    "RUL",
+    "OTH"
+  ]
+}

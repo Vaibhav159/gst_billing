@@ -7,6 +7,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -156,6 +158,8 @@ if SENTRY_DSN:
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES", "0") or 0),
         # Books data: never ship request bodies / user PII with events.
         send_default_pii=False,
+        max_request_body_size="never",
+        include_local_variables=False,
     )
 
 # Media files
@@ -185,8 +189,14 @@ EXPLORER_PERMISSION_CHANGE = lambda r: r.user.is_superuser  # noqa: E731
 
 # REST Framework settings
 REST_FRAMEWORK = {
+    # Ruling 7-D15: deep JSON is a 400 (billing/api/parsers.py).
+    "DEFAULT_PARSER_CLASSES": [
+        "billing.api.parsers.SafeJSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "billing.api.auth.SessionJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -205,6 +215,8 @@ REST_FRAMEWORK = {
         "user": "5000/day",
         "login": "10/min",
         "token_refresh": "60/min",
+        # v3's unfinished bills: their own rate, so keeps never spend the user's day (Ruling 1A-42).
+        "drafts": "120/min",
     },
     # Throttles key on the client IP. Requests reach gunicorn through two
     # proxies, Cosmos (TLS edge) then nginx, and each appends the address it
@@ -417,3 +429,18 @@ APPYFLOW_API_URL = os.getenv("APPYFLOW_API_URL", "https://appyflow.in/api/verify
 # How long a taxpayer lookup stays cached (default 180 days). Longer = fewer
 # metered requests; names/addresses rarely change.
 GSTIN_CACHE_SECONDS = int(os.getenv("GSTIN_CACHE_SECONDS", 60 * 60 * 24 * 180))
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["registry"] = "120/hour"
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({"password": "10/hour", "reset": "10/hour"})
+
+# Password codes ship off. The fake provider must never boot in production.
+SMS_RESET_ENABLED = os.environ.get("SMS_RESET_ENABLED", "").lower() in {"1", "true", "yes"}
+SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "msg91")
+if SMS_PROVIDER == "fake":
+    raise ImproperlyConfigured("SMS_PROVIDER=fake is not allowed in production settings.")
+if os.environ.get("SMS_FAKE_OUTBOX_FILE"):
+    raise ImproperlyConfigured("SMS_FAKE_OUTBOX_FILE is not allowed in production settings.")
+SMS_FAKE_OUTBOX_FILE = ""
+MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
+MSG91_TEMPLATE_ID = os.environ.get("MSG91_TEMPLATE_ID", "")
+MSG91_SENDER = os.environ.get("MSG91_SENDER", "")

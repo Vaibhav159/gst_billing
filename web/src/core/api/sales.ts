@@ -1,0 +1,372 @@
+import { shopSettingsQuery, toShopSettings } from "./shopSettings";
+export { shopSettingsQuery, useShopSettings } from "./shopSettings";
+// The sales/, bin/ and shop-settings/ endpoints (contract §2, §3, §5) as TanStack Query hooks, each answer read through
+// core/sales/wire.ts into paise-based types. A list that follows a firm asks nothing until the firm is known (firmId !==
+// null), so it never asks for every firm first (part 0 carry); a page's Try again goes through the client
+// (qc.refetchQueries, invalidateQueries), which passes over a list still waiting. Writes take the app client's defaults
+// (core/api/query.ts): no retry and no queue, so offline a save fails at once. After any bill write, every bill, bin,
+// customer and search query asks again, except a bill whose own answer the write brought back.
+import { queryOptions, skipToken, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { invalidateDashboard, putDashboardSent } from "@/core/due/fresh";
+import { todayIST } from "@/core/format";
+import type { BillDetail, BillInput, BillRow, BillStatus, BinRow, EwayInput, SalesPage, Segment, Sent, ShopSettings } from "@/core/sales/types";
+import {
+  toBillDetail, toBinPage, toBinRow, toCancelResult, toFacets, toMoveResult, toNextNumber, toNumberCheck, toPaperBook, toRenumberResult, toSalesPage,
+  toSent,
+} from "@/core/sales/wire";
+import type { FirmId } from "@/core/scope";
+import { api } from "./client";
+import { problemOf } from "./errors";
+
+export const SALES_PAGE_SIZE = 40;
+export type SalesOrdering = "-date" | "date" | "number" | "-number" | "total" | "-total";
+/** GET sales/'s filters (contract §2.1); every one combines with the others. */
+export type SalesQuery = {
+  fy?: string; month?: string; start_date?: string; end_date?: string; customer_id?: number;
+  payment_mode?: "cash" | "bank" | "credit" | "mixed" | "none"; status?: BillStatus;
+  unsent?: boolean; credit?: boolean; cash?: boolean; itax?: boolean; check?: boolean; paper?: boolean;
+  gst_rate?: string; segment?: Segment; empty?: boolean; no_hsn?: boolean; dups?: boolean;
+  number?: string; q?: string; ordering?: SalesOrdering; facets?: boolean | "months" | "elsewhere"; summary?: 0;
+};
+
+/** A list query as the API's params: one firm (or none for all), a true flag as 1, paper as 1 or 0, nothing for what isn't set. */
+export function salesParams(firmId: FirmId, query: SalesQuery, page?: number, pageSize?: number): Record<string, string | number> {
+  const p: Record<string, string | number> = {};
+  if (firmId !== "all") p.business_id = firmId;
+  for (const [k, v] of Object.entries(query) as [keyof SalesQuery, SalesQuery[keyof SalesQuery]][]) {
+    if (k === "paper") { if (typeof v === "boolean") p.paper = v ? 1 : 0; continue; }
+    if (v === undefined || v === null || v === "" || v === false) continue;
+    p[k] = v === true ? 1 : (v as string | number);
+  }
+  if (page) p.page = page;
+  if (pageSize) p.page_size = pageSize;
+  return p;
+}
+
+/**
+ * Every bill query's key, all under one "sales" root (the bin is ["bin", …], the shop's settings ["shop-settings"]).
+ * Invalidating ["sales"] refreshes every bill screen at once: 1B's writes do (invalidateSales), and so does plan 1C's
+ * customer save, so a bill's PAN and address flags follow its customer.
+ */
+export const salesKeys = {
+  all: ["sales"] as const,
+  list: (firmId: FirmId | null, query: SalesQuery, scopeFy = query.fy) => ["sales", "list", firmId, query, scopeFy] as const,
+  facets: (firmId: FirmId | null, fy: string) => ["sales", "facets", firmId, fy, todayIST()] as const,
+  months: (firmId: FirmId | null, fy: string) => ["sales", "months", firmId, fy, todayIST()] as const,
+  page: (firmId: FirmId | null, query: SalesQuery, pageSize: number) => ["sales", "page", firmId, query, pageSize] as const,
+  today: (day: string) => ["sales", "today", day] as const,
+  one: (id: number | null) => ["sales", "bill", id] as const,
+  nextNumber: (business: number | null, invoiceDate: string) => ["sales", "next-number", business, invoiceDate] as const,
+  checkNumber: (args: NumberCheckArgs | null) => ["sales", "check-number", args] as const,
+  paperBook: (business: number | null, month: string | null) => ["sales", "paper-book", business, month] as const,
+  v2Invoice: (id: number | null) => ["sales", "v2-invoice", id] as const,
+  v2Purchase: (number: string) => ["sales", "v2-purchase", number] as const,
+};
+// A list that can't ask yet (no firm known) has skipToken for its queryFn, and its key (null for the firm) never holds
+// every firm's answer. TanStack counts it as disabled, so qc.refetchQueries and qc.invalidateQueries pass it over, and a
+// page's Try again goes through them. The hook's own refetch() wouldn't ask either, but it would end the list in an
+// error ("Missing queryFn") and log one, so nothing calls it. (QueryView offers Try again only after an error, which a
+// list still waiting never has.)
+
+/**
+ * The bills list, 40 at a time: the summary covers the whole filtered set and comes with the first page, as do the
+ * facets when asked for. While another filter is asked for, the last list stays on screen until the new one comes; a
+ * new firm or year doesn't keep it, so one firm's bills and money never show under another's name.
+ */
+export function useSalesList(firmId: FirmId | null, query: SalesQuery, scopeFy = query.fy) {
+  return useInfiniteQuery({
+    queryKey: salesKeys.list(firmId, query, scopeFy),
+    initialPageParam: 1,
+    queryFn: firmId === null ? skipToken : async ({ pageParam, signal }) => toSalesPage((await api.get("sales/", {
+      params: salesParams(firmId, pageParam === 1 ? query : { ...query, facets: false, summary: 0 }, pageParam, SALES_PAGE_SIZE), signal,
+    })).data),
+    getNextPageParam: (last, all) => (last.next ? all.length + 1 : undefined),
+    // (after queryFn: TypeScript reads the page's type from it before it types this function's arguments)
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === firmId && prevQuery.queryKey[4] === scopeFy ? prev : undefined),
+  });
+}
+
+/** Every row loaded so far, each once (a page boundary that moved between two requests can repeat one). */
+export function rowsOf(data: InfiniteData<SalesPage> | undefined): BillRow[] {
+  const seen = new Set<number>();
+  const out: BillRow[] = [];
+  for (const page of data?.pages ?? []) for (const r of page.results) if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
+  return out;
+}
+
+/** The month chips and views of a firm and FY (facets ignore every other filter, so one request serves them all). */
+export function useSalesFacets(firmId: FirmId | null, fy: string) {
+  return useQuery({
+    queryKey: salesKeys.facets(firmId, fy),
+    staleTime: 5 * 60_000,
+    queryFn: firmId === null ? skipToken : async ({ signal }) => toFacets((await api.get("sales/", { params: salesParams(firmId, { fy, facets: true }, 1, 1), signal })).data?.facets),
+  });
+}
+
+/** The form's closed months, kept apart from the list's complete facets and view counts. */
+export function useSalesMonths(firmId: FirmId | null, fy: string, enabled = true) {
+  return useQuery({
+    queryKey: salesKeys.months(firmId, fy), enabled,
+    staleTime: 5 * 60_000,
+    queryFn: firmId === null ? skipToken : async ({ signal }) => toFacets((await api.get("sales/", { params: salesParams(firmId, { fy, facets: "months", summary: 0 }, 1, 1), signal })).data?.facets).months,
+  });
+}
+
+/** One page of bills (a customer's latest, a number's bills). */
+export function useSalesPage(firmId: FirmId | null, query: SalesQuery, pageSize = SALES_PAGE_SIZE, enabled = true) {
+  return useQuery({
+    queryKey: salesKeys.page(firmId, query, pageSize),
+    enabled,
+    queryFn: firmId === null ? skipToken : async ({ signal }) => toSalesPage((await api.get("sales/", { params: salesParams(firmId, query, 1, pageSize), signal })).data),
+  });
+}
+
+/** Today's three newest bills, every firm, for search (Ctrl K) as it opens. Asked once per opening, kept 30 s. */
+export function useTodaysBills(enabled: boolean) {
+  const today = todayIST();
+  return useQuery({
+    queryKey: salesKeys.today(today),
+    enabled, staleTime: 30_000, retry: false, networkMode: "always",
+    queryFn: async ({ signal }) => toSalesPage((await api.get("sales/", { params: { start_date: today, end_date: today, page_size: 3 }, signal })).data).results,
+  });
+}
+
+/** One bill, or the bin row of a deleted one (its 404 carries it, contract §2.2). Any other 404 is an error. */
+export type BillOutcome = { kind: "bill"; bill: BillDetail } | { kind: "deleted"; binned: BinRow };
+async function fetchBill(id: number, signal: AbortSignal): Promise<BillOutcome> {
+  try {
+    return { kind: "bill", bill: toBillDetail((await api.get(`sales/${id}/`, { signal })).data) };
+  } catch (e) {
+    const p = problemOf(e);
+    const binned = p.kind === "notfound" && p.code === "deleted" ? (p.body as { binned?: unknown }).binned : undefined;
+    if (binned) return { kind: "deleted", binned: toBinRow(binned) };
+    throw e;
+  }
+}
+/** useBill's query, for useQueries and queryClient.fetchQuery (plan 1E: batch print, bulk PDFs, a send's PDF). */
+export function billQuery(id: number) {
+  return queryOptions({ queryKey: salesKeys.one(id), queryFn: ({ signal }) => fetchBill(id, signal) });
+}
+export function useBill(id: number | null) {
+  return useQuery({ ...billQuery(id as number), enabled: id !== null });
+}
+/** The same query as useBill, its data the bill itself (null for a deleted one): for the preview, the dialogs, the form and print. */
+export function useBillDetail(id: number | null) {
+  return useQuery({ ...billQuery(id as number), enabled: id !== null, select: (o: BillOutcome) => (o.kind === "bill" ? o.bill : null) });
+}
+
+/** Deleted bills (owner: bill.delete), newest first; q finds a number or a customer's name. */
+export type BinQuery = { business_id?: number; fy?: string; q?: string; page_size?: number };
+export function useBin(query: BinQuery, enabled = true) {
+  return useQuery({ queryKey: ["bin", "list", query], enabled, queryFn: async ({ signal }) => toBinPage((await api.get("bin/", { params: query, signal })).data) });
+}
+
+/** The next paper number in a firm's series for a date (contract §2.11). */
+export function useNextNumber(business: number | null, invoiceDate: string, enabled = true) {
+  return useQuery({
+    queryKey: salesKeys.nextNumber(business, invoiceDate),
+    enabled: enabled && business !== null && invoiceDate !== "",
+    queryFn: async ({ signal }) => toNextNumber((await api.get("sales/next-number/", { params: { business_id: business, invoice_date: invoiceDate }, signal })).data),
+  });
+}
+
+/** Whether a typed number is free, and a soft note (contract §2.12). The caller debounces what it passes; an empty number isn't asked about. */
+export type NumberCheckArgs = { business: number; invoice_date: string; invoice_number: string; exclude_id?: number };
+export function useCheckNumber(args: NumberCheckArgs | null, enabled = true) {
+  return useQuery({
+    queryKey: salesKeys.checkNumber(args),
+    enabled: enabled && args !== null && args.invoice_number.trim() !== "",
+    retry: false, staleTime: 10_000,
+    queryFn: async ({ signal }) => {
+      const a = args as NumberCheckArgs;
+      const params = { business_id: a.business, invoice_date: a.invoice_date, invoice_number: a.invoice_number.trim(), ...(a.exclude_id ? { exclude_id: a.exclude_id } : {}) };
+      return toNumberCheck((await api.get("sales/check-number/", { params, signal })).data);
+    },
+  });
+}
+
+/** A firm's month as the paper book sees it (contract §2.13): the saved panel's next number, and 1D's paper book. */
+export function usePaperBook(business: number | null, month: string | null, enabled = true) {
+  return useQuery({
+    queryKey: salesKeys.paperBook(business, month),
+    enabled: enabled && business !== null && Boolean(month),
+    queryFn: async ({ signal }) => toPaperBook((await api.get("sales/paper-book/", { params: { business_id: business, month }, signal })).data),
+  });
+}
+
+/**
+ * After any bill write: every bill list and bill, the bin, customers' figures and search results ask again. keep: the
+ * bill whose own answer the write brought back (keepBill), already in place, so its page doesn't ask for it again (as
+ * plan 1C's customer save keeps its customer).
+ */
+export function invalidateSales(qc: QueryClient, keep?: number): void {
+  void qc.invalidateQueries({ queryKey: salesKeys.all, predicate: (q) => !(keep !== undefined && q.queryKey[1] === "bill" && q.queryKey[2] === keep) });
+  for (const queryKey of [["bin"], ["customers"], ["search"], ["gst"], ["reports"], ["catalog"], ["setup"]]) void qc.invalidateQueries({ queryKey });
+  // firm numbers and figures change with a bill; the shell's slim list (no params) carries neither, so it isn't fetched again
+  void qc.invalidateQueries({ queryKey: ["firms"], predicate: (q) => !(q.queryKey[1] === "list" && Object.keys((q.queryKey[2] as object | undefined) ?? {}).length === 0) });
+  invalidateDashboard(qc);
+}
+
+/** A write that answers with the bill: its page shows that answer at once, and everything else asks again. */
+function keepBill(qc: QueryClient, d: BillDetail) {
+  // typed first: TanStack 5.104's setQueryData<T>() with an object literal reads the union's other member wrongly
+  const o: BillOutcome = { kind: "bill", bill: d };
+  qc.setQueryData(billQuery(d.id).queryKey, o);
+  invalidateSales(qc, d.id);
+}
+
+export function useSaveShopSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<Pick<ShopSettings, "copies" | "show_bank" | "share_message" | "default_business">>) => toShopSettings((await api.put("shop-settings/", patch)).data),
+    onMutate: () => qc.cancelQueries({ queryKey: shopSettingsQuery.queryKey }),
+    onSuccess: (saved, patch) => qc.setQueryData<ShopSettings>(shopSettingsQuery.queryKey, (before) => {
+      if (!before) return saved;
+      // Rows save independently. A slower response must not roll another successful row back.
+      const changed = Object.fromEntries(Object.keys(patch).map((key) => [key, saved[key as keyof ShopSettings]]));
+      return { ...before, ...changed,
+        ...("default_business" in patch ? { default_business_name: saved.default_business_name } : {}),
+        ...("share_message" in patch ? { warnings: saved.warnings } : {}),
+        updated_at: saved.updated_at, updated_by: saved.updated_by,
+      };
+    }),
+  });
+}
+
+export function useCreateBill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (body: BillInput) => toBillDetail((await api.post("sales/", body)).data), onSuccess: (d) => keepBill(qc, d) });
+}
+export function useUpdateBill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, body }: { id: number; body: BillInput }) => toBillDetail((await api.put(`sales/${id}/`, body)).data), onSuccess: (d) => keepBill(qc, d) });
+}
+export function useCancelBill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, reason }: { id: number; reason: string }) => toCancelResult((await api.post(`sales/${id}/cancel/`, { reason })).data), onSuccess: () => invalidateSales(qc) });
+}
+/** To the bin: the answer is the bin row, whose id Undo and Restore use. */
+export function useDeleteBill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason: string }) => toBinRow((await api.delete(`sales/${id}/`, { data: { reason } })).data),
+    onSuccess: (binned, { id }) => {
+      const outcome: BillOutcome = { kind: "deleted", binned };
+      qc.setQueryData(salesKeys.one(id), outcome);
+      invalidateSales(qc, id);
+    },
+  });
+}
+/** Back from the bin under the bill's own id (binId is the bin row's id). */
+export function useRestoreBill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (binId: number) => toBillDetail((await api.post(`bin/${binId}/restore/`)).data), onSuccess: (d) => keepBill(qc, d) });
+}
+
+/**
+ * Several bills to the bin, one at a time, then one refresh of every bill screen, not one per bill. Each bill's outcome
+ * goes to onEach as it comes: its bin row, or null when it had gone already (a 404: deleted elsewhere, or a try whose
+ * answer was lost), and the batch carries on past it. Any other failure stops the batch there and rejects with it.
+ */
+export function useDeleteBills() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, reason, onEach }: { ids: number[]; reason: string; onEach: (id: number, binned: BinRow | null) => void }) => {
+      for (const id of ids) {
+        let binned: BinRow | null = null;
+        try { binned = toBinRow((await api.delete(`sales/${id}/`, { data: { reason } })).data); }
+        catch (e) { if (problemOf(e).kind !== "notfound") throw e; }
+        onEach(id, binned);
+      }
+    },
+    onSettled: () => invalidateSales(qc),
+  });
+}
+/** Several bills back from the bin (by bin row ids), as useDeleteBills sends them: one refresh at the end; a bin row that has gone (404) gives null. */
+export function useRestoreBins() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ binIds, onEach }: { binIds: number[]; onEach: (binId: number, bill: BillDetail | null) => void }) => {
+      for (const binId of binIds) {
+        let bill: BillDetail | null = null;
+        try { bill = toBillDetail((await api.post(`bin/${binId}/restore/`)).data); }
+        catch (e) { if (problemOf(e).kind !== "notfound") throw e; }
+        onEach(binId, bill);
+      }
+    },
+    onSettled: () => invalidateSales(qc),
+  });
+}
+export function useRenumberBill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, invoice_number }: { id: number; invoice_number: string }) => toRenumberResult((await api.post(`sales/${id}/renumber/`, { invoice_number })).data), onSuccess: () => invalidateSales(qc) });
+}
+export function useMoveBill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, business, invoice_number }: { id: number; business: number; invoice_number: string }) => toMoveResult((await api.post(`sales/${id}/move/`, { business, invoice_number })).data), onSuccess: () => invalidateSales(qc) });
+}
+export function useSaveEway() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, eway }: { id: number; eway: EwayInput }) => toBillDetail((await api.put(`sales/${id}/eway/`, eway)).data), onSuccess: (d) => keepBill(qc, d) });
+}
+export function useFixHeads() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: number) => toBillDetail((await api.post(`sales/${id}/fix-heads/`)).data), onSuccess: (d) => keepBill(qc, d) });
+}
+export type SendVia = "whatsapp" | "share";
+/**
+ * A send just recorded, written into every list, page and bill on this device that holds the bill, so each reads "Sent"
+ * at once, before (or without) its refresh.
+ */
+function putSent(qc: QueryClient, id: number, sent: Sent | null): void {
+  if (!sent) return;
+  putDashboardSent(qc, id, sent);
+  const has = (rows: { id: number }[]) => rows.some((r) => r.id === id);
+  const row = <T extends { id: number; sent: Sent | null }>(r: T): T => (r.id === id ? { ...r, sent } : r);
+  const page = (p: SalesPage): SalesPage => (has(p.results) ? { ...p, results: p.results.map(row) } : p);
+  // (undefined leaves a query as it was: one that doesn't hold the bill isn't touched)
+  qc.setQueriesData<InfiniteData<SalesPage>>({ queryKey: ["sales", "list"] }, (d) => (d && d.pages.some((p) => has(p.results)) ? { ...d, pages: d.pages.map(page) } : undefined));
+  qc.setQueriesData<SalesPage>({ queryKey: ["sales", "page"] }, (d) => (d && has(d.results) ? page(d) : undefined));
+  qc.setQueriesData<BillRow[]>({ queryKey: ["sales", "today"] }, (d) => (d && has(d) ? d.map(row) : undefined));
+  qc.setQueriesData<BillOutcome>({ queryKey: billQuery(id).queryKey }, (d) => {
+    if (d?.kind !== "bill") return undefined;
+    const o: BillOutcome = { kind: "bill", bill: row(d.bill) }; // (typed first, as keepBill's)
+    return o;
+  });
+}
+/** Records a send: how, and the number typed for this bill ("" for the customer's own). Its answer shows at once (putSent). */
+export function useRecordSent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, via, to = "" }: { id: number; via: SendVia; to?: string }): Promise<{ id: number; sent: Sent | null }> => {
+      const d = (await api.post(`sales/${id}/sent/`, { via, to })).data;
+      return { id: Number(d?.id ?? id), sent: toSent(d?.sent) };
+    },
+    onSuccess: (r) => { putSent(qc, r.id, r.sent); invalidateSales(qc); },
+  });
+}
+
+/** The bills a cached answer holds: a list's pages, a page's results, or today's array. */
+function rowsIn(data: unknown): { id: number; invoice_number: string }[] {
+  if (!data || typeof data !== "object") return [];
+  if (Array.isArray(data)) return data.filter((r): r is BillRow => Boolean(r && typeof r === "object" && "invoice_number" in r));
+  const d = data as { pages?: SalesPage[]; results?: BillRow[] };
+  if (Array.isArray(d.pages)) return d.pages.flatMap((p) => p.results ?? []);
+  return Array.isArray(d.results) ? d.results : [];
+}
+
+/** The number of a bill already in a list, today's bills or a search on this device, so its page can name it before its own answer comes (part 0 carry: record titles set early). */
+export function cachedBillNumber(qc: QueryClient, id: number): string | null {
+  const own = qc.getQueryData(billQuery(id).queryKey);
+  if (own) return own.kind === "bill" ? own.bill.invoice_number : own.binned.invoice_number;
+  for (const [, data] of qc.getQueriesData<unknown>({ queryKey: salesKeys.all })) {
+    const hit = rowsIn(data).find((r) => r.id === id);
+    if (hit) return hit.invoice_number;
+  }
+  for (const [, data] of qc.getQueriesData<unknown>({ queryKey: ["search"] })) {
+    const d = data as { invoices?: { id: number; invoice_number: string }[]; customers?: { recent_invoices?: { id: number; invoice_number: string }[] }[] } | undefined;
+    const hit = [...(d?.invoices ?? []), ...(d?.customers ?? []).flatMap((c) => c.recent_invoices ?? [])].find((r) => r.id === id);
+    if (hit) return hit.invoice_number;
+  }
+  return null;
+}

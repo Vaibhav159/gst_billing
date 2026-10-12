@@ -129,7 +129,7 @@ def fy_start(day):
     return date(day.year if day.month >= 4 else day.year - 1, 4, 1)
 
 
-def find_duplicate(business, invoice_number, supplier=None, invoice_date=None):
+def find_duplicate(business, invoice_number, supplier=None, invoice_date=None, exclude_id=None, *, queryset=None):
     """Return an existing purchase that is really the same bill, or None.
 
     The one rule for every inward door: inward bills, AI import, GSTR-2A
@@ -144,9 +144,16 @@ def find_duplicate(business, invoice_number, supplier=None, invoice_date=None):
     key = inward_number_key(invoice_number)
     if not key:
         return None
-    qs = Invoice.objects.defer("source_file", "source_preview").filter(
-        business=business, type_of_invoice=INVOICE_TYPE_INWARD,
-    )
+    # A v3 caller supplies a narrow uncached Invoice or live BinnedInvoice queryset.
+    # Legacy callers keep the same queryset and matching behavior.
+    if queryset is None:
+        queryset = Invoice.objects.nocache().select_related("business", "customer").only(
+            "id", "invoice_number", "invoice_date", "total_amount", "business_id", "business__id", "business__name",
+            "customer_id", "customer__id", "customer__name", "customer__gst_number",
+        )
+    qs = queryset.filter(business=business, type_of_invoice=INVOICE_TYPE_INWARD)
+    if exclude_id is not None:
+        qs = qs.exclude(pk=exclude_id)
     if supplier is not None:
         kind, value = supplier_key(supplier)
         if kind == "gstin":

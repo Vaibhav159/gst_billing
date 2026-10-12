@@ -1,0 +1,536 @@
+{
+   "properties":{
+      "gstin":{
+         "description":"Supplier GSTIN",
+         "type":"string",
+         "maxLength":15,
+         "minLength":15,
+         "pattern":"[0-9]{2}[a-zA-Z]{5}[0-9]{4}[a-zA-Z]{1}[1-9A-Za-z]{1}[Zz1-9A-Ja-j]{1}[0-9a-zA-Z]{1}"
+      },
+      "ret_period":{
+         "description":"Return period",
+         "type":"string",
+         "pattern":"^((0[1-9]|1[012])((19|20)\\d\\d))$"
+      },
+      "sup_details":{
+         "type":"object",
+         "properties":{
+            "osup_det":{
+               "type":"object",
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "iamt":{
+                     "description":"integrated Taxamount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "camt":{
+                     "description":"central tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "samt":{
+                     "description":"State Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "csamt":{
+                     "description":"Cess Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval",
+                  "iamt",
+                  "camt",
+                  "samt",
+                  "csamt"
+               ]
+            },
+            "osup_zero":{
+               "type":"object",
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "iamt":{
+                     "description":"integrated Taxamount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "csamt":{
+                     "description":"Cess Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval",
+                  "iamt",
+                  "csamt"
+               ]
+            },
+            "osup_nil_exmp":{
+               "type":"object",
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval"
+               ]
+            },
+            "isup_rev":{
+               "type":"object",
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "iamt":{
+                     "description":"integrated Taxamount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "camt":{
+                     "description":"central tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "samt":{
+                     "description":"State Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "csamt":{
+                     "description":"Cess Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval",
+                  "iamt",
+                  "camt",
+                  "samt",
+                  "csamt"
+               ]
+            },
+            "osup_nongst":{
+               "type":"object",
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval"
+               ]
+            }
+         }
+      },
+      "inter_sup":{
+         "type":"object",
+         "additionalProperties":false,
+         "properties":{
+            "comp_details":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "properties":{
+                     "iamt":{
+                        "description":"Igst amount",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "pos":{
+                        "description":"POS",
+                        "type":"string",
+                        "$ref":"#/definitions/state_cd"
+                     },
+                     "txval":{
+                        "description":"Taxable value",
+                        "$ref":"#/definitions/negVal"
+                     }
+                  },
+                  "required":[
+                     "iamt",
+                     "txval",
+                     "pos"
+                  ]
+               }
+            },
+            "uin_details":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "properties":{
+                     "iamt":{
+                        "description":"Igst amount",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "pos":{
+                        "description":"POS",
+                        "type":"string",
+                        "$ref":"#/definitions/state_cd"
+                     },
+                     "txval":{
+                        "description":"Taxable value",
+                        "$ref":"#/definitions/negVal"
+                     }
+                  },
+                  "required":[
+                     "iamt",
+                     "txval",
+                     "pos"
+                  ]
+               }
+            },
+            "unreg_details":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "properties":{
+                     "iamt":{
+                        "description":"Igst amount",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "pos":{
+                        "description":"POS",
+                        "type":"string",
+                        "$ref":"#/definitions/state_cd"
+                     },
+                     "txval":{
+                        "description":"Taxable value",
+                        "$ref":"#/definitions/negVal"
+                     }
+                  },
+                  "required":[
+                     "iamt",
+                     "txval",
+                     "pos"
+                  ]
+               }
+            }
+         }
+      },
+      "eco_dtls":{
+         "properties":{
+            "eco_sup":{
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "iamt":{
+                     "description":"integrated Taxamount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "camt":{
+                     "description":"central tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "samt":{
+                     "description":"State Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  },
+                  "csamt":{
+                     "description":"Cess Tax amount available in the current month",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval",
+                  "iamt",
+                  "camt",
+                  "samt",
+                  "csamt"
+               ]
+            },
+            "eco_reg_sup":{
+               "properties":{
+                  "txval":{
+                     "description":"Taxable Value",
+                     "$ref":"#/definitions/negVal"
+                  }
+               },
+               "required":[
+                  "txval"
+               ]
+            }
+         }
+      },
+      "itc_elg":{
+         "type":"object",
+         "properties":{
+            "itc_avl":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "properties":{
+                     "camt":{
+                        "description":"CGST Amount as per invoice",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "samt":{
+                        "description":"SGST Amount as per invoice",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "csamt":{
+                        "description":"cess amount available in the current month",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "iamt":{
+                        "description":"integrated Tax available in the current month",
+                        "$ref":"#/definitions/negVal"
+                     },
+                     "ty":{
+                        "description":"Identifer if Goods or Services",
+                        "type":"string",
+                        "pattern":"(^IMPG$)|(^IMPS$)|(^ISRC$)|(^ISD$)|(^OTH$)"
+                     }
+                  },
+                  "required":[
+                     "camt",
+                     "samt",
+                     "csamt",
+                     "iamt",
+                     "ty"
+                  ]
+               }
+            },
+            "itc_rev":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "properties":{
+                     "camt":{
+                        "description":"Amount of ITC reversal of CGST ",
+                        "$ref":"#/definitions/nonEmptyCost"
+                     },
+                     "csamt":{
+                        "description":"Amount of ITC reversal of CESS ",
+                        "$ref":"#/definitions/nonEmptyCost"
+                     },
+                     "iamt":{
+                        "description":"Amount of ITC reversal of IGST ",
+                        "$ref":"#/definitions/nonEmptyCost"
+                     },
+                     "samt":{
+                        "description":"Amount of ITC reversal of SGST ",
+                        "$ref":"#/definitions/nonEmptyCost"
+                     },
+                     "ty":{
+                        "description":"Identifer if Goods or Services",
+                        "type":"string",
+                        "pattern":"(^RUL$)|(^OTH$)"
+                     }
+                  },
+                  "required":[
+                     "camt",
+                     "samt",
+                     "csamt",
+                     "iamt",
+                     "ty"
+                  ]
+               }
+            },
+            "itc_net":{
+               "type":"object",
+               "additionalProperties":false,
+               "properties":{
+                  "camt":{
+                     "description":"Amount of ITC reversal of CGST ",
+                     "$ref":"#/definitions/nonEmptyCostITCNet"
+                  },
+                  "csamt":{
+                     "description":"Amount of ITC reversal of CESS ",
+                     "$ref":"#/definitions/nonEmptyCostITCNet"
+                  },
+                  "iamt":{
+                     "description":"Amount of ITC reversal of IGST ",
+                     "$ref":"#/definitions/nonEmptyCostITCNet"
+                  },
+                  "samt":{
+                     "description":"Amount of ITC reversal of SGST ",
+                     "$ref":"#/definitions/nonEmptyCostITCNet"
+                  }
+               },
+               "required":[
+                  "camt",
+                  "samt",
+                  "csamt",
+                  "iamt"
+               ]
+            },
+            "itc_inelg":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "oneOf":[
+                     {
+                        "properties":{
+                           "ty":{
+                              "enum":[
+                                 "OTH"
+                              ]
+                           },
+                           "camt":{
+                              "description":"Amount of ITC reversal of CGST ",
+                              "$ref":"#/definitions/negVal"
+                           },
+                           "csamt":{
+                              "description":"Amount of ITC reversal of CESS ",
+                              "$ref":"#/definitions/negVal"
+                           },
+                           "iamt":{
+                              "description":"Amount of ITC reversal of IGST ",
+                              "$ref":"#/definitions/negVal"
+                           },
+                           "samt":{
+                              "description":"Amount of ITC reversal of SGST ",
+                              "$ref":"#/definitions/negVal"
+                           }
+                        }
+                     },
+                     {
+                        "properties":{
+                           "ty":{
+                              "enum":[
+                                 "RUL"
+                              ]
+                           },
+                           "camt":{
+                              "description":"Amount of ITC reversal of CGST ",
+                              "$ref":"#/definitions/nonEmptyCost"
+                           },
+                           "csamt":{
+                              "description":"Amount of ITC reversal of CESS ",
+                              "$ref":"#/definitions/nonEmptyCost"
+                           },
+                           "iamt":{
+                              "description":"Amount of ITC reversal of IGST ",
+                              "$ref":"#/definitions/nonEmptyCost"
+                           },
+                           "samt":{
+                              "description":"Amount of ITC reversal of SGST ",
+                              "$ref":"#/definitions/nonEmptyCost"
+                           }
+                        }
+                     }
+                  ],
+                  "required":[
+                     "camt",
+                     "samt",
+                     "csamt",
+                     "iamt",
+                     "ty"
+                  ]
+               }
+            }
+         }
+      },
+      "inward_sup":{
+         "type":"object",
+         "properties":{
+            "isup_details":{
+               "type":"array",
+               "items":{
+                  "type":"object",
+                  "properties":{
+                     "inter":{
+                        "description":"Inter State supplies",
+                        "$ref":"#/definitions/nonEmptyCost"
+                     },
+                     "intra":{
+                        "description":"Intra State supplies",
+                        "$ref":"#/definitions/nonEmptyCost"
+                     },
+                     "ty":{
+                        "description":"Identifer if Goods or Services",
+                        "type":"string",
+                        "pattern":"(^GST$)|(^NONGST$)"
+                     }
+                  },
+                  "required":[
+                     "inter",
+                     "intra",
+                     "ty"
+                  ]
+               }
+            }
+         },
+         "required":[
+            "isup_details"
+         ]
+      },
+      "intr_ltfee":{
+         "type":"object",
+         "properties":{
+            "intr_details":{
+               "type":"object",
+               "properties":{
+                  "camt":{
+                     "description":"Cgst amount",
+                     "$ref":"#/definitions/nonEmptyCost"
+                  },
+                  "csamt":{
+                     "description":"Cess amount",
+                     "$ref":"#/definitions/nonEmptyCost"
+                  },
+                  "iamt":{
+                     "description":"Igst amount",
+                     "$ref":"#/definitions/nonEmptyCost"
+                  },
+                  "samt":{
+                     "description":"Sgst amount",
+                     "$ref":"#/definitions/nonEmptyCost"
+                  }
+               },
+               "required":[
+                  "csamt",
+                  "iamt",
+                  "samt",
+                  "camt"
+               ]
+            }
+         },
+         "required":[
+            "intr_details"
+         ]
+      }
+   },
+   "required":[
+      "gstin",
+      "ret_period"
+   ],
+   "definitions":{
+      "nonEmptyCost":{
+         "type":"number",
+         "multipleOf":0.01,
+         "maximum":9999999999999.99,
+         "minimum":0
+      },
+      "txval":{
+         "type":"number",
+         "multipleOf":0.01,
+         "maximum":9999999999999.99,
+         "minimum":0
+      },
+      "nonEmptyCostITCNet":{
+         "type":"number",
+         "multipleOf":0.01,
+         "maximum":9999999999999.99,
+         "minimum":-9999999999999.99
+      },
+      "negVal":{
+         "type":"number",
+         "multipleOf":0.01,
+         "maximum":9999999999999.99,
+         "minimum":-9999999999999.99
+      },
+      "state_cd":{
+         "type":"string",
+         "pattern":"^(3[0-8]|[12][0-9]|0[1-9]|97)$",
+         "maxLength":2,
+         "minLength":2
+      }
+   }
+}

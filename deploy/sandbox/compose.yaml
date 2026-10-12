@@ -6,7 +6,13 @@
 #
 # Run it through ./sandbox.sh, which supplies --env-file with the secrets that
 # live outside the repo. See README.md in this directory.
-name: gst-sandbox
+#
+# A second copy runs beside the first as another compose project on other
+# ports: sandbox.sh sets GST_SANDBOX_PROJECT and the GST_SANDBOX_*_PORT
+# variables below (unset, they give gst-sandbox on 8060, 5174 and 5180).
+# Volumes are per project; image tags carry the project name, so a build for
+# one copy never replaces the other's images.
+name: ${GST_SANDBOX_PROJECT:-gst-sandbox}
 
 x-defaults: &defaults
   restart: unless-stopped
@@ -52,10 +58,11 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: gst-sandbox-web:dev
+    image: ${GST_SANDBOX_PROJECT:-gst-sandbox}-web:dev
     environment:
       DJANGO_SETTINGS_MODULE: gst_billing.sandbox_settings
       GST_SANDBOX: "1"
+      SANDBOX_FAKE_SMS: ${SANDBOX_FAKE_SMS:-0}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?run through sandbox.sh so the env file is loaded}
       DB_HOST: db
       DB_PORT: "5432"
@@ -65,7 +72,7 @@ services:
       REDIS_HOST: redis
       GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      SANDBOX_TRUSTED_ORIGINS: http://localhost:8060,http://127.0.0.1:8060,http://localhost:5174,http://127.0.0.1:5174
+      SANDBOX_TRUSTED_ORIGINS: http://localhost:${GST_SANDBOX_NGINX_PORT:-8060},http://127.0.0.1:${GST_SANDBOX_NGINX_PORT:-8060},http://localhost:${GST_SANDBOX_VITE_PORT:-5174},http://127.0.0.1:${GST_SANDBOX_VITE_PORT:-5174},http://localhost:${GST_SANDBOX_VITE3_PORT:-5180},http://127.0.0.1:${GST_SANDBOX_VITE3_PORT:-5180}
     volumes:
       - static:/app/staticfiles
       - media:/app/media
@@ -100,9 +107,9 @@ services:
     build:
       context: ../..
       dockerfile: nginx/Dockerfile
-    image: gst-sandbox-nginx:dev
+    image: ${GST_SANDBOX_PROJECT:-gst-sandbox}-nginx:dev
     ports:
-      - "127.0.0.1:8060:80"
+      - "127.0.0.1:${GST_SANDBOX_NGINX_PORT:-8060}:80"
     volumes:
       - static:/var/www/static:ro
       - media:/var/www/media:ro
@@ -121,7 +128,7 @@ services:
     image: node:20-alpine
     working_dir: /app
     environment:
-      VITE_DEV_PORT: "5174"
+      VITE_DEV_PORT: "${GST_SANDBOX_VITE_PORT:-5174}"
       VITE_API_TARGET: http://nginx:80
     volumes:
       - ../../sweet-rebuild-suite-main:/app
@@ -130,9 +137,34 @@ services:
       sh -c "if ! cmp -s package-lock.json node_modules/.sandbox-lock; then
                npm ci --no-audit --no-fund && cp package-lock.json node_modules/.sandbox-lock;
              fi &&
-             exec npx vite --host 0.0.0.0 --port 5174 --strictPort"
+             exec npx vite --host 0.0.0.0 --port ${GST_SANDBOX_VITE_PORT:-5174} --strictPort"
     ports:
-      - "127.0.0.1:5174:5174"
+      - "127.0.0.1:${GST_SANDBOX_VITE_PORT:-5174}:${GST_SANDBOX_VITE_PORT:-5174}"
+    depends_on:
+      - nginx
+    mem_limit: 1g
+    cpus: 1.0
+
+  # v3's app (web/), beside v2's Vite on 5174. Same rule: /api through the sandbox nginx.
+  vite-v3:
+    <<: *defaults
+    profiles: ["dev"]
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      VITE_DEV_HOST: 0.0.0.0
+      VITE_DEV_PORT: "${GST_SANDBOX_VITE3_PORT:-5180}"
+      VITE_API_TARGET: http://nginx:80
+    volumes:
+      - ../../web:/app
+      - node_modules_v3:/app/node_modules
+    command: >
+      sh -c "if ! cmp -s package-lock.json node_modules/.sandbox-lock; then
+               npm ci --no-audit --no-fund && cp package-lock.json node_modules/.sandbox-lock;
+             fi &&
+             exec npx vite"
+    ports:
+      - "127.0.0.1:${GST_SANDBOX_VITE3_PORT:-5180}:${GST_SANDBOX_VITE3_PORT:-5180}"
     depends_on:
       - nginx
     mem_limit: 1g
@@ -144,3 +176,4 @@ volumes:
   static: {}
   media: {}
   node_modules: {}
+  node_modules_v3: {}

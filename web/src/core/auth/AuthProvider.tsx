@@ -1,0 +1,230 @@
+import { readStored, writeStored } from "@/core/storage";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ACCESS_KEY, REFRESH_KEY, api, clearTokens, getTokens, setSessionExpiredHandler, setPasswordNeededHandler, sameTokenSession, setTokens, tabOnly, tokenUser } from "@/core/api/client";
+import { problemOf, type ApiProblem } from "@/core/api/errors";
+import { can as canDo, whyNot as whyNotFor, type Action } from "./permissions";
+import { RoleContext, type Role } from "./role";
+
+export type Me = { id: number; username: string; fullName: string; role: Role; roleLabel: string; permissions: "*" | Action[]; needsRoleChoice: boolean; mustChangePassword?: boolean; sessionId?: string | null };
+type Status = "loading" | "signed-in" | "signed-out" | "error";
+type SignIn = { ok: true } | { ok: false; problem: ApiProblem };
+export type AuthValue = {
+  me: Me | null; status: Status; startProblem: ApiProblem | null; expiredFrom: string | null;
+  /** Signed out on purpose, here or on another tab, since anyone last signed in on this tab (it survives a reload): the sign-in page keeps no page for whoever is next. */
+  signedOutOnPurpose: boolean; expiredReason?: "signed_out";
+  signIn(username: string, password: string, remember?: boolean): Promise<SignIn>; signOut(): Promise<void>; retryStart(): void; refreshMe(): Promise<void>; acceptPasswordChange(pair: {access:string;refresh:string;requestAccess?:string|null}): Promise<void>;
+  can(a: Action): boolean; whyNot(a: Action, what?: string): string;
+};
+
+export const AuthContext = createContext<AuthValue | null>(null);
+const ME_KEY = "gst3.me";
+
+// A tab-only sign-in keeps who it is in this tab too: nothing about the person outlives the tab.
+function readMe(): Me | null { try { const s = tabOnly() ? sessionStorage.getItem(ME_KEY) : readStored(ME_KEY); return s ? (JSON.parse(s) as Me) : null; } catch { return null; } }
+function saveMe(me: Me | null) {
+  const value = me ? JSON.stringify(me) : null;
+  try {
+    // the remembered copy is another tab's: only an explicit tab-only sign-in clears it (below)
+    if (tabOnly()) { if (value) sessionStorage.setItem(ME_KEY, value); else sessionStorage.removeItem(ME_KEY); }
+    else { sessionStorage.removeItem(ME_KEY); writeStored(ME_KEY, value); }
+  } catch { /* storage refused */ }
+}
+
+/** The password changed, but this tab now holds a different sign-in (or none): its new tokens aren't this tab's to keep. */
+export class PasswordChangedElsewhere extends Error {}
+class TabStorageRefused extends Error {}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toMe(d: any): Me { return { id: d.id, username: d.username, fullName: d.full_name, role: d.role, roleLabel: d.role_label, permissions: d.permissions, needsRoleChoice: d.needs_role_choice, mustChangePassword: Boolean(d.must_change_password), sessionId: d.session_id ?? null }; }
+
+/**
+ * This tab saw a sign-out on purpose (Ruling 39). Per tab, in sessionStorage: a reload or a link opened here still starts
+ * the next person on a plain sign-in page, while a new tab is a first visit. Signing in here clears it.
+ */
+const MARK_KEY = "gst3.signedOutHere";
+function readMark(): boolean { try { return sessionStorage.getItem(MARK_KEY) !== null; } catch { return false; } }
+function saveMark(on: boolean) { try { if (on) sessionStorage.setItem(MARK_KEY, "1"); else sessionStorage.removeItem(MARK_KEY); } catch { /* storage refused: the mark lasts this page */ } }
+
+/** False only when the token plainly belongs to someone else (v2 or another tab signed them in). */
+function tokenFits(m: Me, access: string | null): boolean {
+  const u = tokenUser(access);
+  return u === null || u === String(m.id);
+}
+/** Who this browser last signed in as, when the stored token is theirs: the app opens with them straight away, even offline. */
+function remembered(): Me | null {
+  const { access } = getTokens();
+  const m = access ? readMe() : null;
+  return m && tokenFits(m, access) ? m : null;
+}
+
+/**
+ * Who is signed in, for every page. Tabs share one sign-in (the tokens in localStorage, shared with v2), so another tab's
+ * change reaches this one by storage events, never a timer: signed out there, signed out here; a new token there, ask
+ * /api/me/ who it is now. A different person clears the cache and is passed to onSwitchedUser, for App to show
+ * "Signed in as <name>", so a half-filled bill isn't saved under someone else's sign-in unnoticed.
+ */
+export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode; onSwitchedUser?: (me: Me) => void }) {
+  const qc = useQueryClient();
+  const [me, setMe] = useState<Me | null>(remembered);
+  const [status, setStatus] = useState<Status>(() => (!getTokens().access ? "signed-out" : remembered() ? "signed-in" : "loading"));
+  const [startProblem, setStartProblem] = useState<ApiProblem | null>(null);
+  const [expiredFrom, setExpiredFrom] = useState<string | null>(null);
+  const [expiredReason, setExpiredReason] = useState<"signed_out" | undefined>();
+  const [onPurpose, setOnPurpose] = useState(readMark);
+  /** The person this tab last showed (signing out forgets them), for the callbacks below. */
+  const shown = useRef(me);
+  /** The access token whose owner this tab knows, or is asking /api/me/ about. */
+  const checked = useRef<string | null>(null);
+  /** Each question to /api/me/ and each sign-out moves this on, so an answer to an older question is dropped. */
+  const gen = useRef(0);
+  const switched = useRef(onSwitchedUser);
+  switched.current = onSwitchedUser;
+
+  const forget = useCallback(() => {
+    gen.current++; checked.current = null; shown.current = null;
+    clearTokens(); saveMe(null); qc.clear(); setMe(null); setStatus("signed-out");
+  }, [qc]);
+  // On a shared counter computer the next person mustn't land on this person's page: a sign-out here, or one heard
+  // from another tab (which can't be told from a session that ran out there), leaves the sign-in page plain, reloads included.
+  const forgetOnPurpose = useCallback(() => { saveMark(true); setOnPurpose(true); forget(); }, [forget]);
+  const signOut = useCallback(async () => {
+    const sent = getTokens();
+    if (!sent.access) { forgetOnPurpose(); return; }
+    const response = await api.post("auth/sign-out/", { refresh: sent.refresh }, { headers: { Authorization: `Bearer ${sent.access}` } });
+    // Judged by the request that succeeded: a legacy token refreshed for the retry is still this sign-in.
+    const ended = String(response.config.headers.Authorization ?? "").replace(/^Bearer /, "") || sent.access;
+    if (sameTokenSession(ended, getTokens().access)) forgetOnPurpose();
+  }, [forgetOnPurpose]);
+
+  /** This tab's person is now `m`. Someone other than the person shown clears the cache and, unless this tab signed them in, is announced. */
+  const adopt = useCallback((m: Me, announce: boolean) => {
+    const before = shown.current;
+    const other = before !== null && before.id !== m.id;
+    const next = before && JSON.stringify(before) === JSON.stringify(m) ? before : m; // unchanged details keep the object: nothing re-renders
+    // what's on screen refetches for the new person (clear() would leave a mounted list showing the last person's rows)
+    if (other) { void qc.resetQueries(); qc.getMutationCache().clear(); }
+    shown.current = next;
+    saveMe(next); setMe(next); setStatus("signed-in"); setStartProblem(null); setExpiredFrom(null); setExpiredReason(undefined); setOnPurpose(false); saveMark(false);
+    if (other && announce) switched.current?.(next);
+  }, [qc]);
+
+  /** Who the stored token belongs to, from the server. Null when a later question or a sign-out overtook this one. */
+  const ask = useCallback(async (): Promise<Me | null> => {
+    checked.current = getTokens().access;
+    const g = ++gen.current;
+    try {
+      const r = await api.get("me/");
+      return g === gen.current ? toMe(r.data) : null;
+    } catch (e) {
+      if (g !== gen.current) return null;
+      throw e;
+    }
+  }, []);
+
+  /**
+   * The server couldn't say who this is (offline, or it's down). The person last shown carries on if the token is theirs.
+   * Otherwise no one is shown and Try again asks again; `shown` keeps them, so the answer is announced if it's someone else.
+   */
+  const unconfirmed = useCallback((p: ApiProblem) => {
+    const m = shown.current;
+    if (m && tokenFits(m, getTokens().access)) { setMe(m); setStatus("signed-in"); setStartProblem(null); return; }
+    setMe(null); setStartProblem(p); setStatus("error");
+  }, []);
+
+  const start = useCallback(() => {
+    if (!getTokens().access) return;
+    ask().then((m) => { if (m) adopt(m, true); }, (e: unknown) => {
+      const p = problemOf(e);
+      if (p.kind === "auth") forget();
+      // offline or the server is down: a remembered person keeps working; otherwise say so
+      else unconfirmed(p);
+    });
+  }, [ask, adopt, forget, unconfirmed]);
+
+  useEffect(() => {
+    setSessionExpiredHandler((from, reason) => { setExpiredFrom(from); setExpiredReason(reason); forget(); });
+    setPasswordNeededHandler(() => { if (shown.current) adopt({ ...shown.current, mustChangePassword: true }, false); });
+    start();
+    return () => { setSessionExpiredHandler(null); setPasswordNeededHandler(null); };
+  }, [start, forget, adopt]);
+
+  /**
+   * The sign-in stored now, followed (Ruling 30). What's stored decides, not the event that told this tab: a sign-out
+   * heard after a newer sign-in must not wipe that sign-in. No tokens: signed out, to a plain sign-in page, unless this
+   * page never had a token to check (it was signed out already: nothing to sign out of, and no mark to set). A token
+   * this tab hasn't checked (someone else's sign-in, or a refresh): ask who it is now.
+   */
+  const follow = useCallback(() => {
+    const { access } = getTokens();
+    if (!access) { if (checked.current !== null) forgetOnPurpose(); }
+    else if (access !== checked.current) start();
+  }, [forgetOnPurpose, start]);
+
+  // Another tab signed out, signed in or refreshed.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== ACCESS_KEY && e.key !== REFRESH_KEY && e.key !== ME_KEY) return;
+      follow();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [follow]);
+
+  // Back or Forward to this page from the browser's back/forward cache: it's as it was left, and it heard no storage
+  // events while it was away, so it follows what's stored now as if it had (Ruling 42). An unchanged session stays.
+  // A sign-out on purpose in this tab meanwhile counts, as on a reload; only ever to set it: a mark this tab's storage
+  // refused to keep lives on in memory (Ruling 44).
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      if (readMark()) setOnPurpose(true);
+      follow();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, [follow]);
+
+  const signIn = useCallback(async (username: string, password: string, remember = true): Promise<SignIn> => {
+    let mine: string | null = null;
+    try {
+      const r = await api.post("token/", { username, password, remember });
+      mine = r.data.access as string;
+      if (!setTokens(r.data.access, r.data.refresh, remember)) throw new TabStorageRefused("This browser wouldn't keep a sign-in for this tab. Tick Keep me signed in, or allow this site to store data.");
+      // going tab-only now: no older remembered person outlives this tab
+      if (!remember) writeStored(ME_KEY, null);
+      const m = await ask();
+      if (m) adopt(m, false);
+      return { ok: true };
+    } catch (e) {
+      // only this sign-in's own tokens: a failed try here never signs another tab out
+      if (mine && getTokens().access === mine) clearTokens();
+      // and this tab has no sign-in left to end: a sign-out heard later from another tab isn't this tab's (Ruling 63)
+      if (mine && checked.current === mine) checked.current = null;
+      return { ok: false, problem: e instanceof TabStorageRefused ? { kind: "server", message: e.message } : problemOf(e) };
+    }
+  }, [ask, adopt]);
+
+  const refreshMe = useCallback(async () => { const m = await ask(); if (m) adopt(m, false); }, [ask, adopt]);
+  const acceptPasswordChange = useCallback(async (pair: {access:string;refresh:string;requestAccess?:string|null}) => {
+    if (!shown.current || !tokenFits(shown.current, pair.access) || !sameTokenSession(pair.requestAccess === undefined ? pair.access : pair.requestAccess, getTokens().access)) throw new PasswordChangedElsewhere("signed in differently while the password changed");
+    setTokens(pair.access, pair.refresh);
+    // The endpoint has changed the password even if the follow-up read is offline.
+    adopt({ ...shown.current, mustChangePassword: false }, false);
+    await refreshMe().catch(() => {}); // password saved; an unavailable follow-up cannot undo it
+    await qc.invalidateQueries({queryKey:["account"]});
+  }, [adopt, refreshMe, qc]);
+
+  const value = useMemo<AuthValue>(() => ({
+    me, status, startProblem, expiredFrom, expiredReason, refreshMe, acceptPasswordChange, signedOutOnPurpose: onPurpose, signIn, signOut, retryStart: start,
+    can: (a) => canDo(me?.permissions, a),
+    whyNot: (a, what) => (me ? whyNotFor(me.role, a, what) : ""),
+  }), [me, status, startProblem, expiredFrom, expiredReason, refreshMe, acceptPasswordChange, onPurpose, signIn, signOut, start]);
+
+  return <AuthContext.Provider value={value}><RoleContext.Provider value={me?.role ?? null}>{children}</RoleContext.Provider></AuthContext.Provider>;
+}
+
+export function useAuth(): AuthValue {
+  const v = useContext(AuthContext);
+  if (!v) throw new Error("useAuth needs AuthProvider");
+  return v;
+}

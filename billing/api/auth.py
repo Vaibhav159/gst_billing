@@ -13,9 +13,10 @@ import logging
 
 from rest_framework.settings import api_settings
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from .serializers import CustomTokenObtainPairSerializer
+from .session_auth import SessionJWTAuthentication
+
+__all__ = ["DynamicScopedRateThrottle", "LoginRateThrottle", "SessionJWTAuthentication"]
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +66,3 @@ class LoginRateThrottle(DynamicScopedRateThrottle):
         username = str(data.get("username") or "").strip().lower()
         ident = "user-" + hashlib.sha256(username.encode()).hexdigest()[:32]
         return self.cache_format % {"scope": self.scope, "ident": ident}
-
-
-class ThrottledTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
-    throttle_classes = [LoginRateThrottle]
-    throttle_scope = "login"
-
-
-class ThrottledTokenRefreshView(TokenRefreshView):
-    throttle_classes = [DynamicScopedRateThrottle]
-    throttle_scope = "token_refresh"

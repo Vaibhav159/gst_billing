@@ -1,0 +1,371 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createCaptureQueue, type CaptureQueue } from "./queue";
+import { IndexedDbCaptureStore, type CaptureStore, type QueuedCapture } from "./store";
+
+class MemoryStore implements CaptureStore {
+  rows: QueuedCapture[] = [];
+  async list(userId: number) { return this.rows.filter((row) => row.userId === userId).map((row) => ({ ...row })); }
+  async putMany(rows: QueuedCapture[]) { this.rows.push(...rows); }
+  async update(userId: number, clientId: string, patch: Partial<QueuedCapture>) {
+    const index = this.rows.findIndex((row) => row.userId === userId && row.clientId === clientId);
+    if (index < 0) return null;
+    this.rows[index] = { ...this.rows[index], ...patch };
+    return { ...this.rows[index] };
+  }
+  async remove(userId: number, clientId: string) { this.rows = this.rows.filter((row) => row.userId !== userId || row.clientId !== clientId); }
+}
+
+const pdf = (name = "bill.pdf") => new File(["synthetic bill"], name, { type: "application/pdf" });
+const options = { businessId: null, hint: " Solanki ", note: " counter ", asPages: false };
+const queues: CaptureQueue[] = [];
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+function fixture(store = new MemoryStore()) {
+  let online = false; let sequence = 0;
+  const upload = vi.fn(async (_row: QueuedCapture, _signal?: AbortSignal) => ({ id: 12 }));
+  const read = vi.fn(async (_id: number, _signal: AbortSignal | undefined, _owner: number) => ({ id: 12, status: "ready" }));
+  const changed = vi.fn();
+  const queue = createCaptureQueue(store, { upload, read, changed, isOnline: () => online, uuid: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}` });
+  queues.push(queue);
+  return { queue, store, upload, read, changed, online: (value = true) => { online = value; } };
+}
+afterEach(() => { queues.splice(0).forEach((queue) => queue.dispose()); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe("durable capture queue", () => {
+  it("does not announce or upload queued files before the storage transaction commits", async () => {
+    const f = fixture(); const committed = deferred<void>();
+    const save = f.store.putMany.bind(f.store);
+    vi.spyOn(f.store, "putMany").mockImplementation(async (rows) => { await committed.promise; await save(rows); });
+    await f.queue.setUser(7);
+    const adding = f.queue.add([pdf()], options);
+    expect(f.queue.getSnapshot().items).toEqual([]);
+    expect(f.upload).not.toHaveBeenCalled();
+    committed.resolve(); await adding;
+    const [row] = f.queue.getSnapshot().items;
+    expect(row).toMatchObject({ userId: 7, hint: "Solanki", note: "counter", businessId: null, phase: "queued", captureId: null });
+    expect(row.clientId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(row.files[0].name).toBe("bill.pdf");
+  });
+
+  it("storage refusal never claims files are kept; the caller can preserve its chosen files", async () => {
+    const f = fixture(); await f.queue.setUser(7);
+    vi.spyOn(f.store, "putMany").mockRejectedValue(new Error("quota"));
+    await expect(f.queue.add([pdf()], options)).rejects.toThrow("This browser couldn't keep the files. Keep this page open and try again.");
+    expect(f.queue.getSnapshot().items).toEqual([]);
+    expect(f.upload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a complete multipart body over 24 MiB before persisting or announcing any group", async () => {
+    const f = fixture(); await f.queue.setUser(7);
+    const save = vi.spyOn(f.store, "putMany");
+    const files = [new File([new Uint8Array(12 * 1024 * 1024)], "front.pdf", { type: "application/pdf" }),
+      new File([new Uint8Array(12 * 1024 * 1024)], "back.pdf", { type: "application/pdf" })];
+    await expect(f.queue.add(files, { ...options, asPages: true })).rejects.toThrow("These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
+    expect(save).not.toHaveBeenCalled(); expect(f.store.rows).toEqual([]);
+    expect(f.queue.getSnapshot().items).toEqual([]); expect(f.upload).not.toHaveBeenCalled();
+    // The unchanged selection remains usable: the person can explicitly choose separate bills.
+    expect(files.map((file) => file.size)).toEqual([12 * 1024 * 1024, 12 * 1024 * 1024]);
+    await f.queue.add(files, options);
+    expect(f.store.rows).toHaveLength(2);
+  });
+
+  it("keeps UUID and all files through offline reload, then uploads and reads serially", async () => {
+    const f = fixture(); await f.queue.setUser(7);
+    await f.queue.add([pdf("front.pdf"), pdf("back.pdf")], { ...options, asPages: true });
+    const before = f.store.rows[0]; f.queue.dispose();
+    const reloaded = fixture(f.store); reloaded.online();
+    await reloaded.queue.setUser(7);
+    expect(reloaded.upload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ clientId: before.clientId, files: before.files }), expect.any(AbortSignal));
+    expect(reloaded.read).toHaveBeenCalledExactlyOnceWith(12, expect.any(AbortSignal), 7);
+    expect(reloaded.store.rows).toEqual([]);
+  });
+
+  it("reuses the UUID after an uncertain upload response", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    f.upload.mockRejectedValueOnce(new Error("response lost"));
+    await f.queue.resume();
+    const clientId = f.store.rows[0].clientId;
+    await f.queue.resume();
+    expect(f.upload.mock.calls.map(([row]) => row.clientId)).toEqual([clientId, clientId]);
+    expect(f.read).toHaveBeenCalledOnce();
+  });
+
+  it("two tabs send the same client UUID, so the server can answer one capture", async () => {
+    const first = fixture(); await first.queue.setUser(7); await first.queue.add([pdf()], options);
+    const second = fixture(first.store); await second.queue.setUser(7);
+    const server = new Map<string, number>();
+    const upload = async (row: QueuedCapture) => {
+      if (!server.has(row.clientId)) server.set(row.clientId, 80 + server.size);
+      return { id: server.get(row.clientId)! };
+    };
+    first.upload.mockImplementation(upload); second.upload.mockImplementation(upload);
+    first.online(); second.online(); await Promise.all([first.queue.resume(), second.queue.resume()]);
+    expect(first.upload).toHaveBeenCalledOnce(); expect(second.upload).toHaveBeenCalledOnce();
+    expect(first.upload.mock.calls[0][0].clientId).toBe(second.upload.mock.calls[0][0].clientId);
+    expect(server.size).toBe(1); expect(first.store.rows).toEqual([]);
+  });
+
+  it("clears a stale local snapshot when another tab removed the pending capture", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    await f.store.remove(7, f.store.rows[0].clientId);
+    expect(f.queue.getSnapshot().items).toHaveLength(1);
+    f.online(); await f.queue.resume();
+    expect(f.queue.getSnapshot().items).toEqual([]);
+    expect(f.upload).not.toHaveBeenCalled();
+  });
+
+  it("sends a capture added while an earlier queue pass is about to finish empty", async () => {
+    const f = fixture(); await f.queue.setUser(7); f.online();
+    const entered = deferred<void>(); const emptyList = deferred<QueuedCapture[]>();
+    vi.spyOn(f.store, "list").mockImplementationOnce(async () => { entered.resolve(); return emptyList.promise; });
+    const finishing = f.queue.resume(); await entered.promise;
+    await f.queue.add([pdf()], options);
+    emptyList.resolve([]); await finishing; await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledOnce();
+    expect(f.queue.getSnapshot().items).toEqual([]);
+  });
+
+  it("persists the server receipt before reading; failed reads never cause another upload", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    f.read.mockImplementationOnce(async () => {
+      expect(f.store.rows[0]).toMatchObject({ captureId: 12, phase: "uploaded" });
+      throw new Error("read reply lost");
+    });
+    await f.queue.resume();
+    expect(f.store.rows[0]).toMatchObject({ captureId: 12, phase: "uploaded", error: expect.any(String) });
+    await f.queue.resume(f.store.rows[0].clientId);
+    expect(f.upload).toHaveBeenCalledOnce(); expect(f.read).toHaveBeenCalledTimes(2);
+    expect(f.store.rows).toEqual([]);
+  });
+
+  it("online/visible never automatically retry an errored read", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();
+    f.queue.start();
+    window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange"));
+    await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledOnce(); expect(f.read).toHaveBeenCalledOnce();
+    expect(f.store.rows).toHaveLength(1);    expect(f.changed.mock.calls.every(([id]) => id === 12)).toBe(true); expect(f.changed).toHaveBeenCalledTimes(2);
+  });
+
+  it("a receipt recovered after a crash asks the safe read adapter without uploading", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    f.store.rows[0] = { ...f.store.rows[0], phase: "uploaded", captureId: 55 };
+    f.online(); await f.queue.resume();
+    expect(f.upload).not.toHaveBeenCalled(); expect(f.read).toHaveBeenCalledExactlyOnceWith(55, expect.any(AbortSignal), 7);
+  });
+
+  it("keeps a purged capture receipt as missing and permits only local removal, including after reload", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    const clientId = f.store.rows[0].clientId;
+    await f.store.update(7, clientId, { phase: "uploaded", captureId: 55 });
+    f.read.mockRejectedValue({ isAxiosError: true, response: { status: 404, data: { detail: "That photo isn't in the inbox any more." } } });
+    f.online(); await f.queue.resume();
+    expect(f.queue.getSnapshot().items[0]).toMatchObject({ phase: "uploaded", captureId: 55, missing: true,
+      error: "This photo is no longer in the inbox. Remove this saved upload from this device." });
+    await f.queue.resume(clientId);
+    f.queue.start(); window.dispatchEvent(new Event("online")); await f.queue.idle();
+    expect(f.read).toHaveBeenCalledOnce(); expect(f.upload).not.toHaveBeenCalled();
+    f.queue.dispose();
+    const reloaded = fixture(f.store); reloaded.online(); await reloaded.queue.setUser(7);
+    expect(reloaded.queue.getSnapshot().items[0]).toMatchObject({ clientId, missing: true, captureId: 55 });
+    expect(reloaded.upload).not.toHaveBeenCalled(); expect(reloaded.read).not.toHaveBeenCalled();
+    await expect(reloaded.queue.remove(clientId)).resolves.toBeUndefined();
+    expect(f.store.rows).toEqual([]); expect(reloaded.queue.getSnapshot().items).toEqual([]);
+  });
+
+  it.each([403, 500, null])("does not make an uploaded receipt removable after a %s failure", async (status) => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    const clientId = f.store.rows[0].clientId;
+    await f.store.update(7, clientId, { phase: "uploaded", captureId: 55 });
+    f.read.mockRejectedValue({ isAxiosError: true, ...(status === null ? {} : { response: { status,
+      data: { detail: "This photo is no longer in the inbox. Remove this saved upload from this device." } } }) });
+    f.online(); await f.queue.resume();
+    expect(f.queue.getSnapshot().items[0]).not.toMatchObject({ missing: true });
+    await expect(f.queue.remove(clientId)).rejects.toThrow("This photo is in the inbox. Remove it there.");
+    expect(f.store.rows).toHaveLength(1); expect(f.upload).not.toHaveBeenCalled();
+  });
+
+  it("does not label an unacknowledged upload as a missing receipt when the upload endpoint returns 404", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    f.upload.mockRejectedValue({ isAxiosError: true, response: { status: 404, data: { detail: "Not found." } } });
+    f.online(); await f.queue.resume();
+    expect(f.queue.getSnapshot().items[0]).toMatchObject({ phase: "queued", captureId: null });
+    expect(f.queue.getSnapshot().items[0]).not.toMatchObject({ missing: true });
+    expect(f.read).not.toHaveBeenCalled();
+  });
+
+  it("isolates pending files by person and preserves them through sign-out", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("seven.pdf")], options);
+    await f.queue.setUser(null); expect(f.queue.getSnapshot().items).toEqual([]);
+    await f.queue.setUser(9); expect(f.queue.getSnapshot().items).toEqual([]);
+    await f.queue.add([pdf("nine.pdf")], options);
+    await f.queue.remove(f.store.rows[0].clientId);
+    expect(f.store.rows).toHaveLength(2);
+    await f.queue.setUser(7); expect(f.queue.getSnapshot().items[0].files[0].name).toBe("seven.pdf");
+    await f.queue.remove(f.queue.getSnapshot().items[0].clientId);
+    expect(f.store.rows.map((row) => row.userId)).toEqual([9]);
+  });
+
+  it("aborts an old person's request and never reads it with the next person's session", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    const entered = deferred<void>(); const response = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return response.promise; });
+    const sending = f.queue.resume(); await entered.promise;
+    const switched = f.queue.setUser(9);
+    expect(f.queue.getSnapshot().items).toEqual([]);
+    expect(f.upload.mock.calls[0][1]?.aborted).toBe(true);
+    response.resolve({ id: 21 }); await sending; await switched;
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.store.rows[0]).toMatchObject({ userId: 7, captureId: 21, phase: "uploaded" });
+  });
+
+  it("coalesces concurrent resume calls and never sends separate bills in parallel", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf"), pdf("b.pdf")], options); f.online();
+    const entered = deferred<void>(); const first = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return first.promise; });
+    const sending = f.queue.resume(); await entered.promise;
+    const again = f.queue.resume(); expect(f.upload).toHaveBeenCalledOnce();
+    first.resolve({ id: 11 }); await sending; await again;
+    expect(f.upload).toHaveBeenCalledTimes(2);
+    expect(f.read.mock.calls.map(([id]) => id)).toEqual([11, 12]);
+  });
+
+  it("resumes from online and visible events, installs no polling timer and cleans listeners", async () => {
+    vi.useFakeTimers(); const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    const stop = f.queue.start(); f.online(); window.dispatchEvent(new Event("online")); await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    f.online(false); await f.queue.add([pdf("second.pdf")], options); f.online();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange")); await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledTimes(2); stop();
+    f.online(false); await f.queue.add([pdf("third.pdf")], options); f.online();
+    window.dispatchEvent(new Event("online")); await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses metadata overflow without silently truncating it", async () => {
+    const f = fixture(); await f.queue.setUser(7);
+    await expect(f.queue.add([pdf()], { ...options, hint: "x".repeat(121) })).rejects.toThrow("Keep the supplier note to 120 characters.");
+    await expect(f.queue.add([pdf()], { ...options, note: "x".repeat(256) })).rejects.toThrow("Keep the note to 255 characters.");
+    expect(f.store.rows).toEqual([]);
+  });
+
+  it("refuses local removal while uploading or after the server has the capture", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    const entered = deferred<void>(); const response = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return response.promise; });
+    const sending = f.queue.resume(); await entered.promise;
+    await expect(f.queue.remove(f.store.rows[0].clientId)).rejects.toThrow("Wait for this upload to finish.");
+    f.read.mockRejectedValueOnce(new Error("read error")); response.resolve({ id: 12 }); await sending;
+    await expect(f.queue.remove(f.store.rows[0].clientId)).rejects.toThrow("This photo is in the inbox. Remove it there.");
+  });
+
+  it("never resends an upload the server refused (400/403) on online or visible; Try now still sends it", async () => {
+    for (const status of [400, 403]) {
+      const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+      f.upload.mockRejectedValueOnce({ isAxiosError: true, response: { status, data: { detail: "Refused here." } } });
+      await f.queue.resume(); expect(f.upload).toHaveBeenCalledOnce();
+      const stop = f.queue.start(); await f.queue.idle();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange")); await f.queue.idle();
+      expect(f.upload).toHaveBeenCalledOnce();
+      expect(f.queue.getSnapshot().items[0]).toMatchObject({ phase: "queued", error: "Refused here." });
+      await f.queue.resume(f.queue.getSnapshot().items[0].clientId);
+      expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
+    }
+  });
+
+  it("retries offline, unreachable and server failures automatically on online or visible", async () => {
+    const failures = [{ isAxiosError: true, message: "Network Error" }, { isAxiosError: true, response: { status: 502, data: "" } }];
+    for (const failure of failures) {
+      const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+      f.upload.mockRejectedValueOnce(failure); await f.queue.resume();
+      const stop = f.queue.start(); await f.queue.idle();
+      expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
+    }
+  });
+
+  it("a failure that never reached the network waits for Try now instead of retrying on every online or visible", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    f.upload.mockRejectedValueOnce(new Error("body could not be built")); await f.queue.resume();
+    const stop = f.queue.start(); await f.queue.idle();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange")); await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledOnce();
+    expect(f.queue.getSnapshot().items[0]).toMatchObject({ phase: "queued", error: "Something went wrong" });
+    await f.queue.resume(f.queue.getSnapshot().items[0].clientId);
+    expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
+  });
+
+  it("pressing Try now twice for one row during a pass sends it once after the pass", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf")], options); f.online();
+    f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();
+    const [failed] = f.store.rows;
+    f.online(false); await f.queue.add([pdf("b.pdf")], options); f.online();
+    const entered = deferred<void>(); const held = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return held.promise; });
+    const stop = f.queue.start(); await entered.promise;
+    f.read.mockImplementation(async (id: number) => { if (id === 12) throw new Error("reader unavailable"); return { id, status: "ready" }; });
+    const first = f.queue.resume(failed.clientId); const second = f.queue.resume(failed.clientId);
+    held.resolve({ id: 13 }); await Promise.all([first, second]); stop();
+    expect(f.read.mock.calls.map(([id]) => id)).toEqual([12, 13, 12]);
+  });
+
+  it("a Try now pressed during an automatic pass runs after it instead of being dropped", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf")], options); f.online();
+    f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();
+    const [failed] = f.store.rows; expect(failed).toMatchObject({ phase: "uploaded", error: "Something went wrong" });
+    f.online(false); await f.queue.add([pdf("b.pdf")], options); f.online();
+    const entered = deferred<void>(); const held = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return held.promise; });
+    const stop = f.queue.start(); await entered.promise;
+    const pressed = f.queue.resume(failed.clientId);
+    held.resolve({ id: 13 }); await pressed; stop();
+    expect(f.read.mock.calls.map(([id]) => id)).toEqual([12, 13, 12]);
+    expect(f.store.rows).toHaveLength(0);
+  });
+
+  it("an offline Try now says so instead of doing nothing", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    await f.queue.resume(f.queue.getSnapshot().items[0].clientId);
+    expect(f.upload).not.toHaveBeenCalled();
+    expect(f.queue.getSnapshot().error).toBe("You're offline. The photo is kept here and goes up by itself when the internet is back.");
+  });
+
+  it("reuses one IndexedDB connection across store calls and reopens after the browser closes it", async () => {
+    const rows = new Map<string, QueuedCapture>(); const dbs: { close: () => void; onclose?: () => void; onversionchange?: () => void }[] = [];
+    const transaction = () => {
+      const t: { oncomplete?: () => void; onerror?: () => void; onabort?: () => void; objectStore(): unknown; abort(): void } = { abort() { t.onabort?.(); }, objectStore: () => store };
+      let pending = 1; const finish = () => { if (--pending === 0) queueMicrotask(() => t.oncomplete?.()); };
+      const request = (value: () => unknown) => { pending++; const r: { result?: unknown; onsuccess?: () => void } = {}; queueMicrotask(() => { r.result = value(); r.onsuccess?.(); finish(); }); return r; };
+      const store = {
+        index: () => ({ getAll: (userId: number) => request(() => [...rows.values()].filter((row) => row.userId === userId)) }),
+        get: ([userId, clientId]: [number, string]) => request(() => rows.get(`${userId}:${clientId}`)),
+        put: (row: QueuedCapture) => { rows.set(`${row.userId}:${row.clientId}`, row); }, add: (row: QueuedCapture) => { rows.set(`${row.userId}:${row.clientId}`, row); },
+        delete: ([userId, clientId]: [number, string]) => { rows.delete(`${userId}:${clientId}`); },
+      };
+      queueMicrotask(finish); return t;
+    };
+    const open = vi.fn(() => {
+      const db = { transaction, close: vi.fn() } as unknown as { close: () => void; onclose?: () => void; onversionchange?: () => void };
+      const request: { result: unknown; onsuccess?: () => void } = { result: db }; dbs.push(db);
+      queueMicrotask(() => request.onsuccess?.()); return request;
+    });
+    vi.stubGlobal("indexedDB", { open });
+    const store = new IndexedDbCaptureStore("test-reuse");
+    const row: QueuedCapture = { clientId: "a", userId: 7, files: [], businessId: null, hint: "", note: "", createdAt: "2026-10-12T00:00:00Z", captureId: null, phase: "queued", error: null };
+    await store.putMany([row]); await store.list(7); await store.update(7, "a", { error: "x" }); await store.remove(7, "a");
+    expect(await store.list(7)).toEqual([]); expect(open).toHaveBeenCalledOnce(); expect(dbs[0].close).not.toHaveBeenCalled();
+    dbs[0].onclose?.(); await store.list(7); expect(open).toHaveBeenCalledTimes(2);
+    dbs[1].onversionchange?.(); expect(dbs[1].close).toHaveBeenCalled(); await store.list(7); expect(open).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports missing IndexedDB as storage failure instead of falling back to memory", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    await expect(new IndexedDbCaptureStore().list(7)).rejects.toThrow("This browser couldn't keep the files. Keep this page open and try again.");
+  });
+});

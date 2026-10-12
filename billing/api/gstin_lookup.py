@@ -11,11 +11,11 @@ from rest_framework.views import APIView
 
 from billing import gstin as gstin_service
 
-from .permissions import RoleBasedPermission
+from .permissions import RoleBasedPermission, V3PermissionIfPlaced
 
 
 class GstinLookupView(APIView):
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [RoleBasedPermission, V3PermissionIfPlaced]
 
     def get(self, request, gstin: str):
         return Response(gstin_service.lookup(gstin))

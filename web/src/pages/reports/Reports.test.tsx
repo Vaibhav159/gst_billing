@@ -1,0 +1,78 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { Route, Routes } from "react-router";
+import { renderApp } from "@/test/render";
+import { serve } from "@/test/server";
+import Reports from "./Reports";
+const state = vi.hoisted(() => ({ firmId: 3 as number | "all" | null, fy: "2026-27", width: 1400 }));
+vi.mock("@/core/scope", () => ({ useScope: () => ({ ...state, setFirmId: (id: number | "all") => { state.firmId = id; }, setFy: vi.fn(), fyChoices: ["2026-27", "2025-26"], ready: state.firmId !== null }), useFirms: () => ({ firms: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran" }], loading: false, error: false }) }));
+vi.mock("@/core/useBoxWidth", () => ({ useBoxWidth: () => [null, state.width] }));
+vi.mock("@/pages/gst/CaWorkbookDialog", () => ({ CaWorkbookDialog: ({ open }: { open: boolean }) => open ? <div>CA preview opened</div> : null }));
+vi.mock("@/pages/gst/WorkbookDialog", () => ({ WorkbookDialog: () => null }));
+const zero = { bills: 0, taxable: "0.00", igst: "0.00", cgst: "0.00", sgst: "0.00", tax: "0.00", value: "0.00", round_off: "0.00" };
+const sales = { bills: [], totals: { ...zero, cancelled: 0 }, by_firm: [], split: [] };
+const purchases = { split: [], bills: [], totals: sales.totals, credit_by_return: zero, gap: { by_date: "0.00", by_return: "0.00", difference: "0.00", parts: [] } };
+function app(path = "/reports") { return renderApp(<Routes><Route path="/reports" element={<Reports />} /><Route path="/reports/:kind" element={<Reports />} /></Routes>, { path }); }
+beforeEach(() => { Object.assign(window, { __phone: false }); state.firmId = 3; state.width = 1400; state.fy = "2026-27"; localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-08T09:00:00+05:30")); });
+it("has seven report links on desktop and carries the selected period to another report", async () => {
+  const calls = serve({ "GET reports/sales/": sales, "GET reports/purchases/": purchases });
+  app();
+  await screen.findByText("No sales bills in this period");
+  expect(screen.getByRole("navigation", { name: "Reports" }).querySelectorAll("a")).toHaveLength(7);
+  expect(calls.map(c => c.url)).toEqual(["reports/sales/"]);
+  fireEvent.click(screen.getByRole("radio", { name: "This month so far" }));
+  await waitFor(() => expect(calls.some(c => c.params.from === "2026-10-01")).toBe(true));
+  fireEvent.click(screen.getByRole("link", { name: /Purchase register/ }));
+  await screen.findByText("No purchase bills in this period");
+  expect(calls.filter(c => c.url === "reports/purchases/").at(-1)?.params).toMatchObject({ from: "2026-10-01", to: "2026-10-08" });
+});
+it("narrow desktop uses a picker, while phone starts with seven report cards", async () => {
+  const calls = serve({ "GET reports/sales/": sales });
+  state.width = 1100;
+  const ui = app();
+  expect(screen.getByLabelText("Report")).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "Reports" })).not.toBeInTheDocument();
+  ui.unmount();
+  calls.length = 0;
+  Object.assign(window, { __phone: true });
+  app();
+  expect(screen.getByRole("link", { name: /Sales register/ })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /Month by month/ })).toBeInTheDocument();
+  expect(screen.getByLabelText("Period · FY 2026-27")).toBeInTheDocument();
+  expect(calls).toHaveLength(0);
+});
+it("keeps invalid date drafts local, links their errors, and applies valid cross-FY ranges", async () => {
+  const calls = serve({ "GET reports/sales/": sales });
+  app();
+  await screen.findByText("No sales bills in this period");
+  fireEvent.click(screen.getByRole("radio", { name: "Custom range" }));
+  const before = calls.length;
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2022-03-31" } });
+  expect(screen.getByLabelText("From")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("From")).toHaveAttribute("aria-describedby", "rep-from-error");
+  expect(screen.getByText("The app goes back to 01 Apr 2022. Pick that day or later.")).toBeInTheDocument();
+  expect(calls).toHaveLength(before);
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2025-03-31" } });
+  await waitFor(() => expect(calls.at(-1)?.params.from).toBe("2025-03-31"));
+  expect(screen.getByLabelText("From")).toHaveAttribute("min", "2022-04-01");
+  expect(screen.getByLabelText("To")).toHaveAttribute("max", "2026-10-08");
+});
+it("shows a helpful unknown route without requesting it, and opens the CA workbook", async () => {
+  const calls = serve({ "GET reports/sales/": sales });
+  const ui = app("/reports/no-such-report");
+  expect(screen.getByText('There\'s no report called "no-such-report"')).toBeInTheDocument();
+  expect(calls).toHaveLength(0);
+  ui.unmount(); app();
+  await screen.findByText("No sales bills in this period");
+  act(() => { vi.advanceTimersByTime(400); });
+  fireEvent.click(screen.getByRole("button", { name: "Excel for the CA…" }));
+  expect(screen.getByText("CA preview opened")).toBeInTheDocument();
+});
+it("does not show a zero report while loading, and exposes a failed query for retry", async () => {
+  const calls = serve({ "GET reports/sales/": () => ({ status: 500, data: {} }) });
+  app();
+  expect(screen.queryByText("No sales bills in this period")).not.toBeInTheDocument();
+  await screen.findByRole("button", { name: "Try again" });
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(calls.filter(c => c.url === "reports/sales/")).toHaveLength(2));
+});

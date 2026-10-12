@@ -1,0 +1,114 @@
+// What printing's tests share (only tests import this file): a react-pdf document's element tree, a real PDF's plain
+// parts, bills at the edges of the page plan, as overrides of the contract's example (core/sales/fixtures), and the step
+// past ShareHost's dialog's guard.
+import { inflateSync } from "node:zlib";
+import { Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
+import { act, waitFor } from "@testing-library/react";
+import { wireDetail, WIRE_LINES } from "@/core/sales/fixtures";
+
+/**
+ * Past a dialog's guard against the press that opened it (core/ui's useGhostGuard: 350 ms from when its effect runs), in
+ * a test that fakes Date. A dialog that opens outside a press, as ShareHost's does once a PDF is made, can run that effect
+ * a moment after it shows (on a busy machine, after the test has stepped the clock), and the guard then swallows the next
+ * press. The dialog's focus trap, run with that effect, gives it the focus 20 ms later, so once it has the focus the clock
+ * steps past the guard. For a dialog just opened: one opened again while it still closes may hold the focus from before,
+ * so a test waits for it to go first.
+ */
+export async function pastTheGuard(dialog: HTMLElement): Promise<void> {
+  await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+  act(() => { vi.advanceTimersByTime(400); });
+}
+
+/* ── A document's element tree ─────────────────────────── */
+export type PdfNode = { type: string; props: Record<string, unknown>; children: (PdfNode | string)[] };
+/** The tree react-pdf would lay out: function components called, primitives ("PAGE", "TEXT"…) kept with their props. */
+export function expand(node: ReactNode): (PdfNode | string)[] {
+  if (node == null || typeof node === "boolean") return [];
+  if (typeof node === "string" || typeof node === "number") return [String(node)];
+  if (Array.isArray(node)) return node.flatMap(expand);
+  if (!isValidElement(node)) return [];
+  const el = node as ReactElement<Record<string, unknown>>;
+  if (el.type === Fragment) return expand(el.props.children as ReactNode);
+  if (typeof el.type === "function") return expand((el.type as (p: unknown) => ReactNode)(el.props));
+  const { children, ...props } = el.props;
+  return [{ type: String(el.type), props, children: expand(children as ReactNode) }];
+}
+/** Every node of a type under `n`, itself included, in reading order. */
+export const nodes = (n: PdfNode | string, type: string): PdfNode[] => (typeof n === "string" ? [] : [...(n.type === type ? [n] : []), ...n.children.flatMap((c) => nodes(c, type))]);
+/** A node's words: each TEXT's strings run together as react-pdf draws them, one space between separate texts. */
+export function raw(n: PdfNode | string): string {
+  return typeof n === "string" ? n : n.children.map(raw).join(n.type === "TEXT" ? "" : " ");
+}
+export const words = (n: PdfNode | string) => raw(n).replace(/\s+/g, " ").trim();
+/** A style as react-pdf reads it: a list of styles merged, the later winning. */
+export const flat = (style: unknown): Record<string, unknown> => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+/** The texts that hold a ₹ someone could see: each must hold only that ₹, in the RupeeSign font (Ruling 1E-5). */
+export const rupeeTexts = (n: PdfNode) => nodes(n, "TEXT").filter((t) => t.children.some((c) => typeof c === "string" && c.includes("₹")));
+
+/* ── A real file ───────────────────────────────────────── */
+/** Node's Blob reads directly; jsdom's Blob uses FileReader. */
+async function pdfBytes(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === "function") return blob.arrayBuffer();
+  return new Promise<ArrayBuffer>((done, fail) => {
+    const r = new FileReader();
+    r.onload = () => done(r.result as ArrayBuffer);
+    r.onerror = () => fail(r.error);
+    r.readAsArrayBuffer(blob);
+  });
+}
+/** A PDF's plain objects (compressed streams only read intact in the Node environment). */
+export async function pdfText(blob: Blob): Promise<string> {
+  return new TextDecoder("latin1").decode(await pdfBytes(blob));
+}
+/**
+ * Each page's text in drawing order, inflated from a real PDF in a Node-environment test. Built-in Times and Helvetica
+ * use Windows-1252; only the ₹ in its own one-glyph font doesn't decode. jsdom's PDF browser build garbles compressed
+ * streams, so its tests read only the plain objects with pdfText.
+ */
+export async function pdfWords(blob: Blob): Promise<string[]> {
+  const buf = Buffer.from(await pdfBytes(blob));
+  const win = new TextDecoder("windows-1252");
+  const pages: string[] = [];
+  for (const m of buf.toString("latin1").matchAll(/\/Length (\d+)[^>]*>>\s*stream\r?\n/g)) {
+    const start = m.index + m[0].length;
+    let body: string;
+    try { body = inflateSync(buf.subarray(start, start + Number(m[1]))).toString("latin1"); } catch { continue; }
+    if (!/\bBT\b/.test(body)) continue; // a font, not a page
+    pages.push([...body.matchAll(/\[([^\]]*)\]\s*TJ/g)].map((tj) => [...tj[1].matchAll(/<([0-9a-f]*)>/gi)].map((h) => win.decode(Buffer.from(h[1], "hex"))).join("")).join(""));
+  }
+  return pages;
+}
+/** The sheets react-pdf made: its page tree's count. */
+export const sheetsIn = (pdf: string) => Number(pdf.match(/\/Type \/Pages\s*\/Count (\d+)/)?.[1]);
+
+/* ── Bills at the edges of the page plan ───────────────── */
+/** n rows of the contract's ring, each named on one line; over: what a row changes, by its place. */
+export const rows = (n: number, over: (i: number) => Record<string, unknown> = () => ({})) =>
+  Array.from({ length: n }, (_, i) => ({ ...WIRE_LINES[0], id: i + 1, product_name: `Gold Ring 22K ${i + 1}`, ...over(i) }));
+export const firmWith = (over: Record<string, unknown>) => ({ ...(wireDetail().firm as object), ...over });
+export const buyerWith = (over: Record<string, unknown>) => ({ ...(wireDetail().customer as object), ...over });
+/** A counter sale in the firm's own state: no name, address or GSTIN on the bill. */
+export const WALKIN = { id: 9, name: "Walk-in Customer", type: "walkin", address: "", city: "", state_name: "RAJASTHAN", state_code: "08", gst_number: "", gstin_valid: null, pan_number: "", pan: "", mobile_number: "", email: "" };
+/** A business buyer whose name, in capitals as the GST portal spells it, is too long for one line of its block. */
+export const LONG_BUYER = buyerWith({ type: "business", name: "M/S SHREE MAHAVEER JEWELLERS AND ORNAMENT MANUFACTURERS", gst_number: "08AAKFS4821M1ZQ" });
+/** Goods sent by road with a transporter whose name and GSTIN wrap in their box. */
+export const TRANSPORTED = {
+  eway_bill_number: "123456789012", transporter_name: "SHREE GANESH ROADWAYS AND LOGISTICS COMPANY", transporter_gstin: "08AAKFS4821M1ZQ",
+  vehicle_number: "RJ14AB1234", vehicle_type: "Regular", transport_mode: "Road", distance_km: 1200, may_be_needed: false,
+};
+/** Ruling 1E-9's bill: the firm's and the buyer's addresses typed on two lines each, and 30 one-line rows (23 and 7). */
+export const TWO_LINE_ADDRESSES = {
+  firm: firmWith({ address: "12 Sandbox Bazaar\nJaipur, Rajasthan" }),
+  customer: buyerWith({ address: "Shop 12, Ground Floor\nBapu Bazaar" }),
+  lines: rows(30),
+};
+/** The contract's bill sent to Gujarat: IGST on each line, by slab and by HSN. */
+export const IGST = {
+  interstate: true, cgst: "0.00", sgst: "0.00", igst: "2536.40", place_of_supply: "24",
+  lines: WIRE_LINES.map((l) => ({ ...l, cgst: "0.00", sgst: "0.00", igst: l.tax })),
+  slabs: [{ gst_percent: "3", taxable: "84546.81", cgst: "0.00", sgst: "0.00", igst: "2536.40", tax: "2536.40" }],
+  hsn_summary: [
+    { hsn_code: "711319", gst_percent: "3", unit: "gms", quantity: "12.345", taxable: "80396.81", cgst: "0.00", sgst: "0.00", igst: "2411.90", tax: "2411.90" },
+    { hsn_code: "711319", gst_percent: "3", unit: "pcs", quantity: "1.000", taxable: "4150.00", cgst: "0.00", sgst: "0.00", igst: "124.50", tax: "124.50" },
+  ],
+};

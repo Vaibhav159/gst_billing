@@ -1,0 +1,172 @@
+[
+  {
+    "id": 1,
+    "action": "created",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Udaipur Bullion Suppliers · ₹254.45",
+    "changes": {},
+    "timestamp": "2026-10-08T14:01:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 2,
+    "action": "updated",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Changed the date and the credit month",
+    "changes": {
+      "invoice_date": {
+        "old": "2026-09-04",
+        "new": "2026-09-05"
+      },
+      "itc_month": {
+        "old": "2026-09-01",
+        "new": "2026-10-01"
+      }
+    },
+    "timestamp": "2026-10-08T14:02:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 3,
+    "action": "checked",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Checked against the photo",
+    "changes": {},
+    "timestamp": "2026-10-08T14:03:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 4,
+    "action": "credit_set",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Credit claimed in October 2026 (was September 2026)",
+    "changes": {
+      "itc_month": {
+        "old": "2026-09",
+        "new": "2026-10"
+      }
+    },
+    "timestamp": "2026-10-08T14:04:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 5,
+    "action": "deleted",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Udaipur Bullion Suppliers · ₹254.45 · restorable",
+    "changes": {},
+    "timestamp": "2026-10-08T14:05:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 6,
+    "action": "restored",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Back in Purchases and in the month's input tax credit",
+    "changes": {},
+    "timestamp": "2026-10-08T14:06:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 7,
+    "action": "restored",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Back in Purchases; outside the credit ledger",
+    "changes": {},
+    "timestamp": "2026-10-08T14:07:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 8,
+    "action": "imported",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "From Purchases.csv · ₹254.45 · ITC ₹7.41",
+    "changes": {},
+    "timestamp": "2026-10-08T14:08:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 9,
+    "action": "exported",
+    "entity": "invoice",
+    "entity_id": 905,
+    "entity_name": "UBS/26-27/0850",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Purchases · September 2026 · Excel",
+    "changes": {},
+    "timestamp": "2026-10-08T14:09:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 10,
+    "action": "captured",
+    "entity": "capture",
+    "entity_id": 12,
+    "entity_name": "Bill photo 4",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "KIRAN GOLD HOUSE · 2 pages",
+    "changes": {},
+    "timestamp": "2026-10-08T14:10:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 11,
+    "action": "discarded",
+    "entity": "capture",
+    "entity_id": 12,
+    "entity_name": "Bill photo 4",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Photo removed from the inbox",
+    "changes": {},
+    "timestamp": "2026-10-08T14:11:00+05:30",
+    "can_undo": false
+  },
+  {
+    "id": 12,
+    "action": "restored",
+    "entity": "capture",
+    "entity_id": 12,
+    "entity_name": "Bill photo 4",
+    "user": 1,
+    "user_name": "Sandbox Owner",
+    "details": "Photo put back in the inbox",
+    "changes": {},
+    "timestamp": "2026-10-08T14:12:00+05:30",
+    "can_undo": false
+  }
+]

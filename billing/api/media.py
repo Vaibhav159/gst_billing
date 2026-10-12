@@ -16,27 +16,13 @@ import posixpath
 from urllib.parse import quote
 
 from django.conf import settings
-from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.core.signing import BadSignature, SignatureExpired
 from django.http import FileResponse, HttpResponse, HttpResponseForbidden
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 
-_signer = TimestampSigner(salt="billing.media")
-
-# How long a minted URL stays valid. API responses are consumed immediately
-# and re-fetched on every page visit, so hours is generous.
-MAX_AGE_SECONDS = 6 * 60 * 60
-
-
-def sign_media_path(name: str) -> str:
-    """Storage-relative file name → same-origin signed URL.
-
-    Relative on purpose (see serializers._abs): the SPA is same-origin with
-    the API everywhere, and absolute URLs would be built from the proxied
-    plain-http request and get blocked as mixed content.
-    """
-    token = _signer.sign(name)
-    return f"/api/media/{quote(name)}?s={quote(token)}"
+# Minting a link lives in billing.media, so services can sign without this view module.
+from billing.media import MAX_AGE_SECONDS, _signer, sign_media_path  # noqa: F401  (sign_media_path: its importers)
 
 
 class SignedMediaView(APIView):

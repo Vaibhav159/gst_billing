@@ -1,0 +1,182 @@
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { X } from "lucide-react";
+import { cn } from "@/core/cn";
+import { useView } from "@/core/view";
+import { Button, IconButton } from "./Button";
+import { DL, type DLRow } from "./Card";
+import { Checkbox } from "./Choice";
+import { focusables, Portal, useDragClose, useFocusTrap, useGhostGuard, usePresence } from "./Overlay";
+
+/** Last value seen while open, so content doesn't blank out during the exit animation. */
+function useHeld<T>(open: boolean, value: T): T {
+  const held = useRef(value);
+  if (open) held.current = value;
+  return open ? value : held.current;
+}
+
+/**
+ * Whether the body is a region the keyboard reaches (WCAG 2.1.1, Ruling 1D-18): while it overflows with nothing focusable
+ * inside (the bill's review once payment is picked; in the bills list, the preview of a walk-in's bill), so Tab reaches
+ * it and the arrows scroll it. Asked again as the body resizes or its content changes, and forgotten as the dialog
+ * closes, so it reopens as no region until measured; the focus trap never puts the first focus there.
+ */
+export function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): boolean {
+  const [region, setRegion] = useState(false);
+  useEffect(() => {
+    const el = body.current;
+    if (!open || !el) return undefined;
+    const check = () => setRegion(el.scrollHeight > el.clientHeight && !focusables(el).length);
+    check();
+    const resized = new ResizeObserver(check);
+    resized.observe(el);
+    const changed = new MutationObserver(check);
+    changed.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
+    return () => { resized.disconnect(); changed.disconnect(); setRegion(false); };
+  }, [open, body]);
+  return region;
+}
+
+export type DialogSize = "sm" | "md" | "lg" | "xl";
+export type DialogProps = {
+  open: boolean; onClose: () => void; title: string; description?: ReactNode; size?: DialogSize;
+  /** Footer close controls can reuse the dialog's discard confirmation. */
+  footer?: ReactNode | ((requestClose: () => void) => ReactNode);
+  initialFocus?: RefObject<HTMLElement>;
+  /** Re-arm the tap guard when an open dialog moves to a fresh step. */
+  ghostGuardKey?: string | number;
+  /** What typing would be lost ("Discard this item?"); closing then asks first. */
+  confirmClose?: string;
+  children: ReactNode;
+};
+
+/** Modal dialog. On phones it rises from the bottom; Esc and the scrim close it; it animates out. */
+export function Dialog({ open, onClose, title, description, children, footer, size = "md", initialFocus, ghostGuardKey, confirmClose }: DialogProps) {
+  const { isPhone, isEasy } = useView();
+  const ref = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const { mounted, closing } = usePresence(open, isPhone ? 220 : 170);
+  // confirmClose: what typing would be lost ("Discard this item?"); closing then asks first
+  const [asking, setAsking] = useState(false);
+  useEffect(() => { if (!open) setAsking(false); }, [open]);
+  const tryClose = confirmClose ? () => setAsking(true) : onClose;
+  useFocusTrap(ref, open, tryClose, initialFocus);
+  const guard = useGhostGuard(open, ghostGuardKey);
+  const drag = useDragClose(tryClose, isPhone && open);
+  const region = useScrollRegion(bodyRef, open);
+  const heldChildren = useHeld(open, children);
+  const heldFooter = useHeld(open, typeof footer === "function" ? footer(tryClose) : footer);
+  const heldTitle = useHeld(open, title);
+  const heldDesc = useHeld(open, description);
+  if (!mounted) return null;
+  children = heldChildren; footer = heldFooter; title = heldTitle; description = heldDesc;
+  const w = { sm: "max-w-[440px]", md: "max-w-[580px]", lg: "max-w-[780px]", xl: "max-w-[1000px]" }[size];
+  return (
+    <Portal>
+      <div onClickCapture={guard} className={cn("absolute inset-0 z-sheet flex", closing ? "pointer-events-none" : "pointer-events-auto", isPhone ? "items-end" : "items-center justify-center p-6")}>
+        <div className={cn("absolute inset-0 bg-scrim/60", closing ? "anim-fade-out" : "anim-fade")} onClick={tryClose} aria-hidden="true" />
+        <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id + "t"} aria-describedby={description ? id + "d" : undefined} tabIndex={-1} data-closing={closing ? "" : undefined}
+          style={isPhone ? { transform: drag.dy ? `translateY(${drag.dy}px)` : undefined, transition: drag.dy ? "none" : undefined, maxHeight: "calc(94% - var(--kb, 0px))", marginBottom: "var(--kb, 0px)" } : undefined}
+          className={cn("relative flex flex-col bg-card border border-line shadow-pop min-h-0 outline-none", isPhone ? cn("w-full rounded-t-xl", closing ? "anim-sheet-out" : "anim-sheet") : cn("w-full rounded-xl max-h-full", closing ? "anim-pop-out" : "anim-pop", w))}>
+          {isPhone ? <div {...drag.handlers} className="pt-2 pb-1 flex justify-center touch-none cursor-grab" aria-hidden="true"><span className="w-10 h-1 rounded-full bg-ctl-line" /></div> : null}
+          <div {...(isPhone ? drag.handlers : {})} className={cn("flex items-start gap-3 px-5 pt-4 pb-2", isPhone && "touch-none")}>
+            <div className="flex-1 min-w-0">
+              <h2 id={id + "t"} tabIndex={-1} data-dialog-title="" className="text-lg font-semibold leading-snug outline-none">{title}</h2>
+              {description ? <p id={id + "d"} className={cn("text-muted mt-1", isEasy ? "text-[15px] leading-[21px]" : "text-sm")}>{description}</p> : null}
+            </div>
+            <IconButton label="Close" icon={X} onClick={tryClose} size="sm" className="-mr-2 -mt-1" />
+          </div>
+          {asking ? (
+            <div role="alert" className="mx-5 mb-2 rounded-ctl border border-neg-line bg-neg-tint px-3 py-2 flex flex-wrap items-center gap-2 anim-rise">
+              <span className="flex-1 min-w-[10rem] font-medium">{confirmClose}</span>
+              <Button size="sm" onClick={() => setAsking(false)} autoFocus>Keep editing</Button>
+              <Button size="sm" variant="danger" onClick={() => { setAsking(false); onClose(); }}>Discard</Button>
+            </div>
+          ) : null}
+          {/* its focus ring is drawn inside it: the dialog's edge is right there */}
+          <div ref={bodyRef} data-dialog-body="" {...(region ? { tabIndex: 0, role: "region", "aria-labelledby": id + "t" } : {})}
+            className="px-5 py-3 overflow-y-auto min-h-0 flex-1 focus-visible:[outline-offset:-2px]">{children}</div>
+          {footer ? <div className={cn("px-5 pt-4 border-t border-rule flex gap-2", isPhone ? "flex-col-reverse [&>*]:w-full pb-[calc(16px+env(safe-area-inset-bottom,0px))]" : "pb-4 justify-end")}>{footer}</div> : null}
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
+export type SheetProps = { open: boolean; onClose: () => void; title: string; description?: ReactNode; footer?: ReactNode; width?: number; confirmClose?: string; children: ReactNode };
+
+/** Side panel on desktop, bottom sheet on phones. */
+export function Sheet({ open, onClose, title, description, children, footer, width = 460, confirmClose }: SheetProps) {
+  const { isPhone } = useView();
+  const ref = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const { mounted, closing } = usePresence(open, 190);
+  const [asking, setAsking] = useState(false);
+  useEffect(() => { if (!open) setAsking(false); }, [open]);
+  const tryClose = confirmClose ? () => setAsking(true) : onClose;
+  useFocusTrap(ref, open && !isPhone, tryClose);
+  const guard = useGhostGuard(open);
+  const held = { children: useHeld(open, children), footer: useHeld(open, footer), title: useHeld(open, title), description: useHeld(open, description) };
+  if (isPhone) return <Dialog open={open} onClose={onClose} title={title} description={description} footer={footer} confirmClose={confirmClose}>{children}</Dialog>;
+  if (!mounted) return null;
+  ({ children, footer, title, description } = held);
+  return (
+    <Portal>
+      <div onClickCapture={guard} className={cn("absolute inset-0 z-sheet flex justify-end", closing ? "pointer-events-none" : "pointer-events-auto")}>
+        <div className={cn("absolute inset-0 bg-scrim/50", closing ? "anim-fade-out" : "anim-fade")} onClick={tryClose} aria-hidden="true" />
+        {/* data-closing while it animates out, as Dialog: the shortcuts and the page frame pass over a sheet on its way out */}
+        <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id + "t"} tabIndex={-1} style={{ width }} data-closing={closing ? "" : undefined}
+          className={cn("relative h-full max-w-full flex flex-col bg-card border-l border-line shadow-pop outline-none", closing ? "anim-side-out" : "anim-side")}>
+          <div className="flex items-start gap-3 px-6 pt-5 pb-3 border-b border-rule">
+            <div className="flex-1 min-w-0">
+              <h2 id={id + "t"} tabIndex={-1} data-dialog-title="" className="text-lg font-semibold outline-none">{title}</h2>
+              {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
+            </div>
+            <IconButton label="Close" icon={X} onClick={tryClose} size="sm" className="-mr-2" />
+          </div>
+          {asking ? (
+            <div role="alert" className="mx-6 mt-3 rounded-ctl border border-neg-line bg-neg-tint px-3 py-2 flex flex-wrap items-center gap-2 anim-rise">
+              <span className="flex-1 min-w-[10rem] font-medium">{confirmClose}</span>
+              <Button size="sm" onClick={() => setAsking(false)} autoFocus>Keep editing</Button>
+              <Button size="sm" variant="danger" onClick={() => { setAsking(false); onClose(); }}>Discard</Button>
+            </div>
+          ) : null}
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">{children}</div>
+          {footer ? <div className="px-6 py-4 border-t border-rule flex justify-end gap-2">{footer}</div> : null}
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
+export type ConfirmDialogProps = {
+  open: boolean; onClose: () => void; onConfirm: () => void; title: string;
+  /** What's being confirmed, as label / value rows: [["Firm", name], ["Bill", number]]. */
+  record?: readonly DLRow[] | null;
+  confirmLabel?: string; cancelLabel?: string; tone?: "primary" | "danger";
+  /** A sentence the person must tick before confirming. */
+  ack?: string;
+  confirmDisabled?: boolean; extra?: ReactNode; busy?: boolean; busyLabel?: string; children?: ReactNode;
+};
+
+/**
+ * Confirmation that names the record. record: [[label, value]] rows.
+ * ack: optional sentence the person must tick before confirming.
+ */
+export function ConfirmDialog({ open, onClose, onConfirm, title, children, record, confirmLabel = "Confirm", cancelLabel = "Cancel", tone = "primary", ack, confirmDisabled, extra, busy, busyLabel }: ConfirmDialogProps) {
+  const [acked, setAcked] = useState(false);
+  useEffect(() => { if (!open) setAcked(false); }, [open]);
+  // while it saves, the dialog stays: Esc, the scrim and Cancel do nothing until the answer comes back
+  const close = busy ? () => {} : onClose;
+  return (
+    <Dialog open={open} onClose={close} title={title} size="sm"
+      footer={<><Button onClick={close} disabled={busy}>{cancelLabel}</Button><Button variant={tone === "danger" ? "danger" : "primary"} disabled={Boolean(ack && !acked) || confirmDisabled} loading={busy} onClick={onConfirm}>{busy ? busyLabel || "Saving…" : confirmLabel}</Button></>}>
+      <div className="flex flex-col gap-3">
+        {record ? <div className="rounded-ctl border border-line bg-field px-4 py-1"><DL rows={record} /></div> : null}
+        {children ? <div className="text-fg2 flex flex-col gap-2">{children}</div> : null}
+        {extra}
+        {ack ? <Checkbox label={ack} checked={acked} onChange={setAcked} /> : null}
+      </div>
+    </Dialog>
+  );
+}

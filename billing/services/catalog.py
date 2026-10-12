@@ -1,0 +1,276 @@
+"""Catalog figures match current and unclaimed earlier names, around cacheops."""
+from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal
+
+from django.db import connection
+from django.db.models import Case, CharField, Count, F, Q, Sum, Value, When
+from django.db.models.functions import Lower, Round
+from django.utils import timezone
+from rest_framework.exceptions import ValidationError
+
+from billing.cache import uncached
+from billing.constants import BILL_CANCELLED, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
+from billing.fy import fy_of, fy_range
+from billing.models import AuditLog, BinnedInvoice, Business, Invoice, LineItem, Product
+from billing.numbering import REF_FIELDS, bill_ref
+from billing.params import PICK_A_FIRM, fy_param, id_param
+from billing.services.firms import firm_ref
+from billing.tax_rules import GST_SLABS
+from billing.text import money, percent, stamp
+
+KINDS = tuple(value for value, _label in Product._meta.get_field("kind").choices)
+PRODUCT_FIELDS = ("id", "name", "hsn_code", "gst_tax_rate", "default_unit", "kind", "purity", "usual_rate",
+                  "purchase_only", "description", "updated_at")
+HSN_TEXT = {
+    "7113": "Jewellery of gold, silver or platinum", "71131910": "Gold jewellery", "71131920": "Silver jewellery",
+    "7114": "Articles of gold or silver (utensils)", "7118": "Coins", "7108": "Gold, unwrought (bullion)",
+    "7106": "Silver, unwrought (bars)", "7102": "Diamonds, cut and polished",
+    "71023100": "Diamonds, rough (non-industrial)", "9988": "Job work on jewellery",
+    "9983": "Hallmarking and other professional services", "4819": "Cartons and jewellery boxes",
+}
+ZERO = Decimal("0")
+
+
+def three(value):
+    return str(Decimal(value or 0).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP))
+
+
+def effective_kind(product):
+    return product.kind_effective
+
+
+def product_row(product):
+    rate = percent(product.gst_tax_rate)
+    return {"id": product.pk, "name": product.name, "hsn_code": product.hsn_code,
+            "hsn_text": HSN_TEXT.get(product.hsn_code, ""), "gst_percent": rate,
+            "slab_ok": Decimal(rate) in GST_SLABS, "unit": product.default_unit, "kind": product.kind or None,
+            "kind_effective": effective_kind(product), "kind_set": bool(product.kind), "purity": product.purity,
+            "usual_rate": three(product.usual_rate) if product.usual_rate is not None else None,
+            "purchase_only": product.purchase_only, "description": product.description}
+
+
+def scope(params):
+    start, end = fy_range(fy_param(params) or fy_of())
+    business = id_param(params, "business_id", PICK_A_FIRM)
+    if business is not None and not uncached(Business).filter(pk=business).exists():
+        raise ValidationError({"business_id": [PICK_A_FIRM]})
+    return start, min(end, timezone.localdate()) if fy_of(start) == fy_of() else end, business
+
+
+def product_names(products):
+    """One audit read for the products; a current holder owns its name over historical aliases."""
+    names = {product.pk: [product.name] for product in products}
+    candidates = defaultdict(list)
+    for pk, changes in uncached(AuditLog).filter(entity="product", entity_id__in=names, changes__has_key="name") \
+            .order_by("timestamp", "id").values_list("entity_id", "changes"):
+        change = changes.get("name")
+        if not isinstance(change, dict):
+            continue
+        for key in ("old", "new"):
+            name = change.get(key)
+            if not isinstance(name, str) or not name or name in names[pk] or name in candidates[pk]:
+                continue
+            candidates[pk].append(name)
+    if not candidates:
+        return names
+    holders = defaultdict(set)
+    keys = {name.lower() for values in candidates.values() for name in values}
+    for pk, name in uncached(Product).alias(name_key=Lower("name")).filter(name_key__in=keys).values_list("id", "name"):
+        holders[name.lower()].add(pk)
+    for pk, values in candidates.items():
+        for name in values:
+            if not holders[name.lower()] - {pk}:
+                names[pk].append(name)
+    return names
+
+
+def matching_lines(names):
+    return uncached(LineItem).alias(product_key=Lower("product_name")).filter(product_key__in={n.lower() for n in names})
+
+
+def scoped_lines(names, period, kind=INVOICE_TYPE_OUTWARD):
+    start, end, business = period
+    lines = matching_lines(names).filter(invoice__type_of_invoice=kind, invoice__invoice_date__range=(start, end))
+    return lines.filter(invoice__business_id=business) if business is not None else lines
+
+
+def _aggregates(active=None):
+    return {"bills": Count("invoice_id", distinct=True, filter=active),
+            "taxable": Sum(Round(F("quantity") * F("rate"), 2), filter=active),
+            "tax": Sum(Round(F("cgst"), 2) + Round(F("sgst"), 2) + Round(F("igst"), 2), filter=active),
+            "quantity": Sum("quantity", filter=active)}
+
+
+def _figures(group, quantities, unit, cancelled=None):
+    unit = "gms" if unit in ("g", "gms") else unit
+    result = {"bills": group.get("bills") or 0, "quantity": three(quantities.get(unit)),
+              "other_units": [{"unit": key, "quantity": three(value)} for key, value in sorted(quantities.items())
+                              if key != unit],
+              "taxable": money(group.get("taxable")), "tax": money(group.get("tax"))}
+    if cancelled is not None:
+        result["cancelled"] = cancelled
+    return result
+
+
+def catalog_figures(products, aliases, period):
+    """SQL groups by matched name; a second narrow group keeps historical units separate."""
+    if not products:
+        return {}
+    # Only renamed products need a WHEN; every other line already carries its product's lowercased name.
+    clauses = [When(product_key__in=[n.lower() for n in aliases[p.pk]], then=Value(p.name.lower()))
+               for p in products if {n.lower() for n in aliases[p.pk]} != {p.name.lower()}]
+    lines = scoped_lines([name for values in aliases.values() for name in values], period).annotate(
+        canonical=Case(*clauses, default=F("product_key"), output_field=CharField()))
+    active = ~Q(invoice__status=BILL_CANCELLED)
+    groups = {r["canonical"]: r for r in lines.values("canonical").annotate(
+        **_aggregates(active), cancelled=Count("invoice_id", distinct=True, filter=~active)).order_by()}
+    quantities = defaultdict(dict)
+    for row in lines.counted().annotate(
+            u=Case(When(unit__in=("g", "gms"), then=Value("gms")), default=F("unit"))) \
+            .values("canonical", "u").annotate(quantity=Sum("quantity")).order_by():
+        quantities[row["canonical"]][row["u"]] = row["quantity"]
+    return {p.pk: _figures(groups.get(p.name.lower(), {}), quantities[p.name.lower()], p.default_unit,
+                           groups.get(p.name.lower(), {}).get("cancelled", 0)) for p in products}
+
+
+def catalog_summary(names, period, show_empty):
+    lines = scoped_lines(names, period)
+    active = ~Q(invoice__status=BILL_CANCELLED)
+    added = lines.aggregate(**_aggregates(active), cancelled=Count("invoice_id", distinct=True, filter=~active))
+    start, end, business = period
+    empty = Invoice.objects.sales().counted().filter(invoice_date__range=(start, end), lineitem__isnull=True)
+    if business is not None:
+        empty = empty.filter(business_id=business)
+    refs = list(empty.select_related("customer").only(*REF_FIELDS).order_by("invoice_date", "id")[:2]) if show_empty else []
+    return {"taxable": money(added["taxable"]), "bills": added["bills"], "cancelled": added["cancelled"],
+            "no_items": [bill_ref(bill) for bill in refs], "no_items_count": empty.count() if show_empty else 0}
+
+
+def product_uses_many(products, names=None):
+    """Two grouped counts; only product ids/counts cross the wire, never a bin's JSON.
+
+    ``names`` optionally supplies product_names()'s {product id: aliases} mapping.
+    Distinct bill ids prevent two matching aliases on the same bill counting twice.
+    """
+    products = list(products)
+    uses = {product.pk: dict.fromkeys(("sales", "cancelled", "purchases", "bin"), 0) for product in products}
+    if not products:
+        return uses
+    names = product_names(products) if names is None else names
+    pairs = [(product.pk, name) for product in products for name in sorted({n.lower() for n in names[product.pk]})]
+    if not pairs:
+        return uses
+    parameters = [value for pair in pairs for value in pair]
+    named = "WITH names(product_id, name_key) AS (VALUES " + ", ".join(["(%s, %s)"] * len(pairs)) + ") "
+    quote = connection.ops.quote_name
+    with connection.cursor() as cursor:
+        cursor.execute(named + f"""
+            SELECT names.product_id,
+                   COUNT(DISTINCT CASE WHEN bill.type_of_invoice = %s AND bill.status <> %s THEN bill.id END),
+                   COUNT(DISTINCT CASE WHEN bill.type_of_invoice = %s AND bill.status = %s THEN bill.id END),
+                   COUNT(DISTINCT CASE WHEN bill.type_of_invoice = %s THEN bill.id END)
+            FROM {quote(LineItem._meta.db_table)} item
+            JOIN {quote(Invoice._meta.db_table)} bill ON bill.id = item.invoice_id
+            JOIN names ON names.name_key = LOWER(item.product_name)
+            GROUP BY names.product_id
+        """, [*parameters, INVOICE_TYPE_OUTWARD, BILL_CANCELLED, INVOICE_TYPE_OUTWARD, BILL_CANCELLED, INVOICE_TYPE_INWARD])
+        for pk, sales, cancelled, purchases in cursor.fetchall():
+            uses[pk].update(sales=sales, cancelled=cancelled, purchases=purchases)
+        # Reuse live() so v2 undo markers and restored rows follow the bin's shared rule.
+        live_sql, live_parameters = uncached(BinnedInvoice).live().order_by().values("id", "data").query.sql_with_params()
+        if connection.vendor == "postgresql":
+            rows = "jsonb_array_elements(CASE WHEN jsonb_typeof(b.data->'lines') = 'array' THEN b.data->'lines' ELSE '[]'::jsonb END) element(value)"
+            name = "element.value->>'product_name'"
+        else:
+            rows = "json_each(CASE WHEN json_type(b.data, '$.lines') = 'array' THEN json_extract(b.data, '$.lines') ELSE '[]' END) element"
+            name = "CASE WHEN element.type = 'object' THEN json_extract(element.value, '$.product_name') END"
+        cursor.execute(named + f"""
+            SELECT names.product_id, COUNT(DISTINCT b.id)
+            FROM ({live_sql}) b CROSS JOIN {rows}
+            JOIN names ON names.name_key = LOWER({name})
+            GROUP BY names.product_id
+        """, [*parameters, *live_parameters])
+        for pk, count in cursor.fetchall():
+            uses[pk]["bin"] = count
+    return uses
+
+
+def product_uses(product, names=None):
+    return product_uses_many([product], {product.pk: names} if names is not None else None)[product.pk]
+
+
+def _line_bills(lines):
+    return lines.select_related("invoice__customer", "invoice__business").only(
+        "invoice_id", "quantity", "rate", "unit", "invoice__business_id",
+        "invoice__business__name", "invoice__business__short_name", *(f"invoice__{field}" for field in REF_FIELDS))
+
+
+def hsn_on_bills(product, names):
+    lines = matching_lines(names)
+    groups = []
+    for row in lines.values("hsn_code").annotate(lines=Count("id")).order_by("-lines", "hsn_code"):
+        key = row["hsn_code"]
+        group = {**row, "matches": key == product.hsn_code, "sales": [], "purchases": []}
+        for kind, target in ((INVOICE_TYPE_OUTWARD, "sales"), (INVOICE_TYPE_INWARD, "purchases")):
+            ids = lines.filter(hsn_code=key, invoice__type_of_invoice=kind).values("invoice_id")
+            bills = uncached(Invoice).filter(pk__in=ids).order_by("-invoice_date", "-id")
+            if target == "sales":
+                group[target] = [bill_ref(b) for b in bills.select_related("customer").only(*REF_FIELDS)[:3]]
+            else:
+                group[target] = [{"id": pk, "bill_no": number} for pk, number in bills.values_list("id", "invoice_number")[:3]]
+        groups.append(group)
+    from billing.period_lock import closed_months
+    closed = closed_months(uncached(Business).values_list("pk", flat=True))
+    ids = lines.filter(hsn_code="", invoice__type_of_invoice=INVOICE_TYPE_OUTWARD).counted().values("invoice_id")
+    bills = uncached(Invoice).filter(pk__in=ids).select_related("customer", "business").only(
+        *REF_FIELDS, "business_id", "business__name", "business__short_name").order_by("invoice_date", "id")
+    blocking = [{"bill": bill_ref(b), "business": firm_ref(b.business), "month": b.invoice_date.strftime("%Y-%m")}
+                for b in bills if (b.business_id, b.invoice_date.year, b.invoice_date.month) not in closed]
+    return {"lines": sum(g["lines"] for g in groups), "groups": groups, "blocking": blocking}
+
+
+def product_detail(product, params):
+    period = scope(params)
+    names = product_names([product])[product.pk]
+    sold = catalog_figures([product], {product.pk: names}, period)[product.pk]
+    bought_lines = scoped_lines(names, period, INVOICE_TYPE_INWARD).counted()
+    quantities = {r["u"]: r["quantity"] for r in bought_lines.annotate(
+        u=Case(When(unit__in=("g", "gms"), then=Value("gms")), default=F("unit"))).values("u")
+        .annotate(quantity=Sum("quantity")).order_by()}
+    bought = _figures(bought_lines.aggregate(**_aggregates()), quantities, product.default_unit)
+    sales = scoped_lines(names, period).counted()
+    unit_filter = Q(unit__in=("g", "gms")) if product.default_unit in ("g", "gms") else Q(unit=product.default_unit)
+    own_unit = sales.filter(unit_filter).aggregate(units=Sum("quantity"), taxable=Sum(Round(F("quantity") * F("rate"), 2)))
+    by_firm = defaultdict(dict)
+    for kind, lines in (("sold", sales), ("bought", bought_lines)):
+        for row in lines.values("invoice__business_id").annotate(**{**_aggregates(), "quantity": Sum("quantity", filter=unit_filter)}).order_by():
+            by_firm[row["invoice__business_id"]][kind] = {"bills": row["bills"], "quantity": three(row["quantity"]), "taxable": money(row["taxable"])}
+    empty = {"bills": 0, "quantity": "0.000", "taxable": "0.00"}
+    firms = [{"business": firm_ref(b), "sold": by_firm[b.pk].get("sold", empty), "bought": by_firm[b.pk].get("bought", empty)}
+             for b in uncached(Business).filter(pk__in=by_firm).only("id", "name", "short_name").order_by("name", "id")]
+    limit = 200 if params.get("lines") == "all" else 8
+    latest = _line_bills(sales).order_by("-invoice__invoice_date", "-invoice_id", "-id")[:limit]
+    return {**product_row(product), "sold": sold, "bought": bought, "by_firm": firms,
+            "average_rate": three(own_unit["taxable"] / own_unit["units"]) if own_unit["units"] else None,
+            "lines": [{"bill": bill_ref(li.invoice), "business": firm_ref(li.invoice.business),
+                       "quantity": three(li.quantity), "unit": li.unit, "rate": three(li.rate),
+                       "taxable": money(li.quantity * li.rate)} for li in latest],
+            "line_count": sales.count(), "hsn_on_bills": hsn_on_bills(product, names),
+            "uses": product_uses(product, names), "earlier_names": [name for name in names if name != product.name],
+            "updated_at": stamp(product.updated_at)}
+
+
+def catalog_names_lock():
+    """Serialize v3 name checks, including audit restores, while keeping exact-case DB uniqueness.
+
+    PostgreSQL is production and CI. SQLite's test database serializes writes itself.
+    """
+    from django.db import connection
+
+    if connection.vendor == "postgresql":
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(41001)")
+
+
+def per_unit(unit):
+    return "per piece" if unit in ("pcs", "nos", "unit") else f"per {'g' if unit == 'gms' else unit}"

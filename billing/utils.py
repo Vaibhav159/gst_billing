@@ -574,6 +574,11 @@ def process_invoice_csv(
 
         # Process each invoice with its line items in a transaction
         with transaction.atomic():
+            from billing.cache import uncached
+            from billing.services.sales import frozen_firms
+            # X-64: every bill in the file freezes the firm as it stands under its lock.
+            snapshot = frozen_firms(business.id)[business.id]
+            business = uncached(Business).get(pk=business.pk)
             # One catalog read for the whole file (Product.name is unique) —
             # the old per-line helper SELECTed the product and the invoice
             # again for every row.
@@ -605,6 +610,7 @@ def process_invoice_csv(
                     invoice_date=invoice_date,
                     type_of_invoice="outward",  # Default to outward invoice
                     workspace_id=1,
+                    firm_snapshot=snapshot,
                 )
 
                 print(f"Invoice {invoice_number} created with {invoice=}")
@@ -756,7 +762,11 @@ class AIInvoiceProcessor:
 
     # ── public API ──────────────────────────────────────────────────
 
-    def process_invoice_image(self, image_file, business_id: int | None = None) -> dict:
+    def process_invoice_pdf(self, pdf_file, business_id=None, *, pages=None):
+        from billing.services.ai_reader import extract_pages
+        return extract_pages(self, pages or [pdf_file])
+
+    def process_invoice_image(self, image_file, business_id: int | None = None, *, pages=None, v3=False) -> dict:
         """Extract structured data from an invoice image.
 
         Routing:
@@ -779,6 +789,9 @@ class AIInvoiceProcessor:
         """
         from billing.models import Customer
 
+        if v3:
+            from billing.services.ai_reader import extract_pages
+            return extract_pages(self, pages or [image_file])
         if not self.gemini_keys:
             raise AIInvoiceProcessingError(
                 "No Gemini API key configured. Add GEMINI_API_KEYS "

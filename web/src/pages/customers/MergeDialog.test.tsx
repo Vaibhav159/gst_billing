@@ -1,0 +1,134 @@
+import { fireEvent, screen, within } from "@testing-library/react";
+import { handClock, pass } from "@/test/clock";
+import { toCustomer } from "@/core/api/customers";
+import type { MergePreview } from "@/core/api/customerMerge";
+import { ANIL, mount, serve, VIEWER, type Call } from "./testing";
+import { MergeDialog } from "./MergeDialog";
+
+const source = toCustomer({ ...ANIL, id: 31, name: "Anil G" });
+const preview = { source, target: ANIL, can_merge: true, refusal: null,
+  bills: { count: 3, cancelled: 1, numbers: ["KGH/2026-27/12"] }, purchases: 2, bin: 1, drafts: 1,
+  changes: [], firms_added: [{ id: 4, name: "MEERA ORNAMENTS", short: "Meera" }],
+  keeps: "Anil Gupta keeps its name, phone, GSTIN and address." };
+const replies = () => ({ "GET customers/": { results: [ANIL] }, "GET customers/7/": ANIL,
+  "GET customers/31/merge-preview/": preview,
+  "POST customers/31/merge-into/": { target: 7, moved: { bills: 3, purchases: 2, bin: 1, drafts: 1 }, refiled: 0, firms_added: 1 } });
+function open(me = {}) {
+  return mount([{ path: "/customers/31", element: <MergeDialog source={source} initialTarget={7} onClose={() => {}} /> },
+    { path: "/customers/7", element: <p>Kept customer</p> }], ["/customers/31"], { me });
+}
+beforeEach(() => handClock());
+afterEach(() => vi.useRealTimers());
+
+test("a warning puts the customer first but never selects them or previews until picked", async () => {
+  const calls = serve(replies()); open(); await pass(400);
+  expect(screen.getByRole("radio", { name: /Anil Gupta/ })).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByRole("button", { name: "Merge" })).toBeDisabled();
+  expect(calls.some(c => c.url.includes("merge-preview"))).toBe(false);
+  fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  expect(calls.find(c => c.url.includes("merge-preview"))?.params).toEqual({ into: 7 });
+  expect(screen.getByText(preview.keeps)).toBeInTheDocument();
+  expect(screen.getByText(/2 purchase bills/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
+});
+
+test("picking a target again always asks for a fresh preview, never a cached one", async () => {
+  const meena = { ...ANIL, id: 8, name: "Meena Jain" };
+  const calls = serve({ ...replies(), "GET customers/": { results: [ANIL, meena] } }); open(); await pass(400);
+  fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  fireEvent.click(screen.getByRole("radio", { name: /Meena Jain/ })); await pass();
+  fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  expect(calls.filter(c => c.url.includes("merge-preview") && (c.params as { into: number }).into === 7)).toHaveLength(2);
+});
+
+test("an explicit irreversible acknowledgement sends only into once and opens the kept customer", async () => {
+  const calls = serve(replies()); const { router } = open(); await pass(400);
+  fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  fireEvent.click(screen.getByRole("checkbox", { name: /can't be undone from the Audit log/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Merge into Anil Gupta" })); await pass();
+  expect(calls.filter(c => c.method === "POST")).toMatchObject([{ url: "customers/31/merge-into/", data: { into: 7 } }]);
+  expect(router.state.location.pathname).toBe("/customers/7");
+});
+
+test.each(["month_closed", "sent_changes", "walkin"])("a %s refusal stays in server words and never enables merge", async code => {
+  const detail = "The paper copy the customer has wouldn't match your return.";
+  const calls = serve({ ...replies(), "GET customers/31/merge-preview/": { ...preview, can_merge: false, refusal: { code, detail, months: [], bills: [] } } });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  expect(screen.getByText(detail)).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
+  expect(calls.some(c => c.method === "POST")).toBe(false);
+});
+
+test("a late conflict clears acknowledgement and reloads the preview without an automatic retry", async () => {
+  const calls = serve({ ...replies(), "POST customers/31/merge-into/": (_c: Call) => ({ status: 409, data: { code: "month_closed", detail: "September is filed and locked." } }) });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Merge into Anil Gupta" })); await pass();
+  expect(screen.getByText("September is filed and locked.")).toBeInTheDocument();
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  expect(calls.filter(c => c.url.endsWith("merge-preview/")).length).toBe(2);
+  expect(calls.filter(c => c.method === "POST")).toHaveLength(1);
+});
+
+test("a viewer cannot open the merge dialog or ask for a preview", async () => {
+  const calls = serve(replies()); open(VIEWER); await pass(400);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(calls.filter(c => c.url.includes("merge") || c.url === "customers/")).toHaveLength(0);
+});
+
+const purchaseRefusal: NonNullable<MergePreview["refusal"]> = {
+  code: "sent_changes", months: [],
+  detail: "Can't merge: under Anil Gupta (08AAMFR5567K1ZG), purchase bills PUR-1 and PUR-2 from Anil G (08AAGPL3375F1ZO) would have a different supplier GSTIN. The supplier's bills wouldn't match your purchase records. Keep both customers.",
+  bills: [1, 2].map((n) => ({ bill: { id: 500 + n, invoice_number: `PUR-${n}`, invoice_date: "2026-10-01", customer_name: "Anil G", status: "active" },
+    sent: false, paper: false, sent_at: null, sent_via: "", heads: null, segment: null, gstin_changes: true, words: "Supplier GSTIN changes" })),
+};
+function expectPurchaseRefusal() {
+  expect(screen.getAllByText(purchaseRefusal.detail).length).toBeGreaterThan(0);
+  const list = screen.getByRole("list", { name: "Bills that prevent this merge" });
+  expect(within(list).getAllByRole("listitem").map((row) => row.textContent)).toEqual(["PUR-1: Supplier GSTIN changes", "PUR-2: Supplier GSTIN changes"]);
+  expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
+  expect(screen.queryByText(/unlock/i)).not.toBeInTheDocument();
+}
+
+test("a different supplier GSTIN refusal lists every affected purchase without offering a merge", async () => {
+  const calls = serve({ ...replies(), "GET customers/31/merge-preview/": { ...preview, can_merge: false, refusal: purchaseRefusal } });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  expectPurchaseRefusal();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(calls.some((c) => c.method === "POST")).toBe(false);
+});
+
+test.each([false, true])("a raced supplier GSTIN refusal retains its purchase list when preview refresh fails: %s", async (refreshFails) => {
+  let refused = false;
+  const calls = serve({ ...replies(),
+    "GET customers/31/merge-preview/": () => refused
+      ? refreshFails ? { status: 503, data: {} } : { status: 200, data: { ...preview, can_merge: false, refusal: purchaseRefusal } }
+      : { status: 200, data: preview },
+    "POST customers/31/merge-into/": () => { refused = true; return { status: 409, data: purchaseRefusal }; },
+  });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Merge into Anil Gupta" })); await pass();
+  expectPurchaseRefusal();
+  expect(screen.queryByRole("checkbox", { checked: true })).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  expect(calls.filter((c) => c.url.endsWith("merge-preview/"))).toHaveLength(2);
+});
+
+
+const duplicatePurchase = {
+  code: "duplicate_purchase", months: [], detail: "Delete one copy first, or keep both customers.",
+  bills: [1, 2].map(n => ({ id: 600 + n, invoice_number: `DUP-${n}`, invoice_date: "2026-10-01", customer_name: "Anil G", status: "active" })),
+};
+test.each([false, true])("duplicate purchase references render in the preview or a raced refusal, raced=%s", async (raced) => {
+  let refused = !raced;
+  const calls = serve({ ...replies(),
+    "GET customers/31/merge-preview/": () => ({ status: 200, data: refused ? { ...preview, can_merge: false, refusal: duplicatePurchase } : preview }),
+    "POST customers/31/merge-into/": () => { refused = true; return { status: 409, data: duplicatePurchase }; },
+  });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  if (raced) { fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Merge into Anil Gupta" })); await pass(); }
+  const list = screen.getByRole("list", { name: "Bills that prevent this merge" });
+  expect(within(list).getAllByRole("listitem").map(row => row.textContent)).toEqual(["DUP-1", "DUP-2"]);
+  expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
+  expect(calls.filter(c => c.method === "POST")).toHaveLength(raced ? 1 : 0);
+});

@@ -15,16 +15,20 @@ from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 
 from billing.api.inward_bills_service import find_duplicate, gstin_conflict
+from billing.cache import uncached
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
+from billing.numbering import lock_firms
 from billing.period_lock import assert_period_unlocked
 from billing.services.line_items import build_line_items
+from billing.services.sales import frozen_firms
 from billing.tax_rules import clean_gstin, gstin_problem, itc_refusal
 from billing.utils import AIInvoiceProcessor
 
 logger = logging.getLogger(__name__)
 
 
+@transaction.atomic
 def create_from_ai(request):
     """Create an invoice from AI-extracted data.
 
@@ -95,6 +99,15 @@ def create_from_ai(request):
                 {"error": "Business not found"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        buyer_business = (Business.objects.filter(id=inter_firm_buyer_id).first()
+                          if inter_firm and inter_firm_buyer_id else None)
+        business_ids = [business.pk, *([buyer_business.pk] if buyer_business else [])]
+        lock_firms(*business_ids)
+        current_businesses = {row.pk: row for row in uncached(Business).filter(pk__in=business_ids)}
+        business = current_businesses[business.pk]
+        if buyer_business is not None:
+            buyer_business = current_businesses[buyer_business.pk]
 
         extracted_name = (invoice_data.get("customer_name") or "").strip()
         if not extracted_name:
@@ -218,7 +231,6 @@ def create_from_ai(request):
         def ensure_inward_mirror(primary_invoice):
             if not (inter_firm and inter_firm_buyer_id):
                 return None, False
-            buyer_business = Business.objects.filter(id=inter_firm_buyer_id).first()
             if buyer_business is None:
                 logger.warning("inter_firm buyer business %s not found", inter_firm_buyer_id)
                 return None, False
@@ -242,7 +254,7 @@ def create_from_ai(request):
             mirror_existing = find_duplicate(buyer_business, inv_number, supplier_cust, inv_date)
             if mirror_existing is not None:
                 return mirror_existing.id, True
-            assert_period_unlocked(buyer_business.id, inv_date, "create")
+            assert_period_unlocked(buyer_business.id, inv_date, "create", invoice_type=INVOICE_TYPE_INWARD)
             mirror = Invoice.objects.create(
                 customer=supplier_cust,
                 business=buyer_business,
@@ -331,7 +343,7 @@ def create_from_ai(request):
                 }
             )
 
-        assert_period_unlocked(business.id, inv_date, "create")
+        assert_period_unlocked(business.id, inv_date, "create", invoice_type=type_of_invoice)
         invoice = Invoice.objects.create(
             customer=customer,
             business=business,
@@ -339,6 +351,8 @@ def create_from_ai(request):
             invoice_date=inv_date,
             type_of_invoice=type_of_invoice,
             total_amount=invoice_data.get("total_amount", 0) or 0,
+            # X-64: a sale freezes its firm at create, read under the firm's lock.
+            firm_snapshot=frozen_firms(business.pk)[business.pk] if type_of_invoice == INVOICE_TYPE_OUTWARD else None,
         )
 
         # Persist the source image as audit trail. Done AFTER
@@ -450,5 +464,3 @@ def create_from_ai(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-

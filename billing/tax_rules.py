@@ -7,6 +7,8 @@ tested without a request.
 
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.db.models import Q
+
 PAISA = Decimal("0.01")
 
 
@@ -149,6 +151,42 @@ def direction_known(business, customer):
     return bool(state_code(business) and state_code(customer))
 
 
+def default_place_of_supply(business, customer):
+    """Today's rule, and what a bill's NULL place of supply means: the customer's state, else the firm's."""
+    return state_code(customer) or state_code(business)
+
+
+def chosen_place(invoice):
+    """The bill's own place of supply (v3), trimmed; "" when it has none, which keeps today's rule."""
+    return (getattr(invoice, "place_of_supply", None) or "").strip()
+
+
+def _crosses(chosen, business):
+    """A chosen place against the firm's state: IGST when they differ. A firm with no state counts
+    as local, as is_interstate counts an unknown side."""
+    firm = state_code(business)
+    return bool(firm) and chosen != firm
+
+
+def place_of_supply(invoice):
+    """The state code a bill's supply goes to: its own choice (v3), else default_place_of_supply."""
+    return chosen_place(invoice) or default_place_of_supply(invoice.business, invoice.customer)
+
+
+def supply_interstate(invoice):
+    """True when the bill is taxed as IGST.
+
+    A chosen place of supply decides against the firm's state (a counter sale to a buyer from
+    another state is local). Without one, today's rule, is_interstate on the two parties, applies
+    unchanged, so every older bill reads as it always has. The builder, the parties following
+    a header change, is_igst_applicable and GSTR-1 all ask this.
+    """
+    chosen = chosen_place(invoice)
+    if not chosen:
+        return is_interstate(invoice.business, invoice.customer)
+    return _crosses(chosen, invoice.business)
+
+
 def classify_b2c(business, invoice):
     """Which GSTR-1 table a sale files in, and against which place of supply.
 
@@ -164,8 +202,15 @@ def classify_b2c(business, invoice):
 
     customer = invoice.customer
     cust_gstin = clean_gstin(getattr(customer, "gst_number", ""))
+    chosen = chosen_place(invoice)
     if cust_gstin:
-        return "b2b", None, cust_gstin[:2], False
+        return "b2b", None, chosen or cust_gstin[:2], False
+    if chosen:
+        # The bill's own place of supply (v3): what was delivered where, whatever the buyer's state.
+        inter = _crosses(chosen, business)
+        if inter and (invoice.total_amount or 0) > B2CL_THRESHOLD:
+            return "b2cl", True, chosen, False
+        return "b2cs", inter, chosen, False
 
     inter = is_interstate(business, customer)
     cust_pos = state_code(customer)
@@ -218,8 +263,20 @@ def has_gstin(value):
     return len(v) == 15 and v[:2].isdigit()
 
 
-# has_gstin for a database filter, matched against the trimmed value.
-GSTIN_SHAPE = r"^[0-9]{2}.{13}$"
+# has_gstin for a database filter, matched against the value as stored: the whitespace around it (spaces, tabs, line
+# breaks; SQL's TRIM strips spaces only), then 15 characters, the first two digits and the last not whitespace. "(?s)"
+# lets "." take a line break in Python's re (SQLite's REGEXP) as it does in Postgres. The whitespace is ASCII's, so
+# both databases read a value alike; str.strip() also trims Unicode's own spaces (a no-break space), which this reads
+# as part of the value.
+_SPACE, _NOT_SPACE = r"[ \t\n\r\f\v]", r"[^ \t\n\r\f\v]"
+GSTIN_SHAPE = rf"(?s)^{_SPACE}*[0-9]{{2}}.{{12}}{_NOT_SPACE}{_SPACE}*$"
+
+
+def registered(path="gst_number"):
+    """has_gstin as a database filter on the GSTIN at `path` ("gst_number", or "customer__gst_number" from a bill): the
+    one expression every list uses to split registered parties from the rest (Ruling 1A-11). Excluded, it keeps the
+    parties with no GSTIN at all (NULL)."""
+    return Q(**{f"{path}__regex": GSTIN_SHAPE})
 
 
 def clean_gstin(value):
@@ -428,3 +485,74 @@ def utilise_by_month(months, opening=None):
             cash[h] += month["cash"][h]
             carry[h] = month["carry_forward"][h]
     return {"cash": _with_total(cash), "carry_forward": _with_total(carry)}
+
+
+def set_off(output, credit):
+    """Rule 88A, in whole paise; Decimal rupees at the public boundary (3-D5).
+
+    Steps coalesce repeated head pairs in order of first use. v2's deliberately
+    different leftover preference remains in utilise_itc above.
+    """
+    def paise(values):
+        result = {}
+        for head in HEADS:
+            value = Decimal(str(values.get(head) or 0))
+            if not value.is_finite() or value < 0:
+                raise ValueError("Tax and credit must be finite, non-negative amounts.")
+            result[head] = int(to_paise(value) * 100)
+        return result
+
+    due, left = paise(output), paise(credit)
+    original, steps = left.copy(), {}
+
+    def pay(source, target, cap=None):
+        amount = min(left[source], due[target], cap if cap is not None else due[target])
+        if amount:
+            left[source] -= amount
+            due[target] -= amount
+            steps[source, target] = steps.get((source, target), 0) + amount
+
+    pay("igst", "igst")
+    for head in ("cgst", "sgst"):
+        pay("igst", head, max(due[head] - left[head], 0))
+    remainder = min(left["igst"], due["cgst"] + due["sgst"])
+    carry_c, carry_s = left["cgst"] - due["cgst"], left["sgst"] - due["sgst"]
+    to_c = max(0, min((carry_s - carry_c + remainder + 1) // 2, due["cgst"], remainder))
+    to_s = min(due["sgst"], remainder - to_c)
+    to_c = min(due["cgst"], remainder - to_s)
+    pay("igst", "cgst", to_c)
+    pay("igst", "sgst", to_s)
+    for head in ("cgst", "sgst"):
+        pay(head, head)
+        pay(head, "igst")
+
+    def rupees(values):
+        return _with_total({head: Decimal(value) / 100 for head, value in values.items()})
+
+    return {
+        "steps": [{"from": source, "to": target, "amount": Decimal(amount) / 100}
+                  for (source, target), amount in steps.items()],
+        "used": rupees({head: original[head] - left[head] for head in HEADS}),
+        "cash": rupees(due), "carry_on": rupees(left),
+    }
+
+
+def uqc_for(unit, hsn):
+    """GST unit code; metric carats are CTM (cross-part ruling X-4)."""
+    if (hsn or "").strip().startswith("99"):
+        return "NA"
+    return {"gms": "GMS", "gm": "GMS", "g": "GMS", "kg": "KGS", "kgs": "KGS",
+            "pcs": "PCS", "pc": "PCS", "nos": "NOS", "carat": "CTM", "ct": "CTM",
+            "pair": "PRS", "set": "SET", "box": "BOX", "dozen": "DOZ", "mtr": "MTR",
+            "ltr": "LTR", "ml": "MLT", "unit": "UNT", "tola": "GMS", "oz": "GMS"}.get(
+                (unit or "").strip().lower(), "OTH")
+
+
+def filed_quantity(unit, qty, hsn=""):
+    """Quantity in the portal's unit; only tola and troy oz convert to grams."""
+    from billing.constants import UNIT_TO_GRAM
+
+    if uqc_for(unit, hsn) == "NA":
+        return Decimal("0")
+    unit = (unit or "").strip().lower()
+    return Decimal(qty or 0) * (UNIT_TO_GRAM[unit] if unit in ("tola", "oz") else 1)

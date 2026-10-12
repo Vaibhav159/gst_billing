@@ -12,7 +12,7 @@ from pathlib import Path
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -44,7 +44,11 @@ class SignedMediaTest(BaseAPITestCase):
         # requests. The signature must be sufficient — and necessary.
         from rest_framework.test import APIClient
 
-        return APIClient().get(url)
+        response = APIClient().get(url)
+        # response.close() signals request_finished and closes TestCase's Postgres connection.
+        if getattr(response, "file_to_stream", None) is not None:
+            self.addCleanup(response.file_to_stream.close)
+        return response
 
     def test_signed_url_serves_the_file_without_login(self):
         url = sign_media_path("inward_bills/scan.pdf")
@@ -156,7 +160,7 @@ class _PlainAnonymousView(APIView):
 
 
 @override_settings(MEDIA_ROOT=_MEDIA)
-class SignedMediaThrottleTest(SimpleTestCase):
+class SignedMediaThrottleTest(TestCase):
     """H2: production's AnonRateThrottle (100 a day) applied to signed media,
     so after about 100 thumbnails and previews every bill image answered 429
     for a rolling 24 hours. The signature is the credential here."""
@@ -176,7 +180,12 @@ class SignedMediaThrottleTest(SimpleTestCase):
         url = sign_media_path("captures/bill.jpg")
         with production_throttling():
             budget = AnonRateThrottle().num_requests  # production: 100 a day
-            media = [APIClient().get(url).status_code for _ in range(budget + 5)]
+            media = []
+            for _ in range(budget + 5):
+                response = APIClient().get(url)
+                if getattr(response, "file_to_stream", None) is not None:
+                    self.addCleanup(response.file_to_stream.close)
+                media.append(response.status_code)
             plain = _PlainAnonymousView.as_view()
             other = [plain(RequestFactory().get("/other")).status_code for _ in range(budget + 1)]
         self.assertEqual(media, [200] * (budget + 5))
@@ -200,7 +209,10 @@ class SignedDocumentLinksTest(BaseAPITestCase):
     def _assert_signed_and_served(self, url):
         self.assertTrue(url and url.startswith("/api/media/") and "?s=" in url, url)
         # Fetched the way an <img> fetches it: no JWT, no session.
-        self.assertEqual(APIClient().get(url).status_code, 200, url)
+        response = APIClient().get(url)
+        if getattr(response, "file_to_stream", None) is not None:
+            self.addCleanup(response.file_to_stream.close)
+        self.assertEqual(response.status_code, 200, url)
 
     def _assert_no_public_media_links(self, data):
         self.assertEqual(re.findall(r"(?<!/api)/media/[^\"]*", json.dumps(data)), [])
