@@ -3,6 +3,8 @@ import { prepareFiles } from "./files";
 import { captureFormData } from "./multipart";
 import { STORAGE_FAILURE, type CaptureStore, type QueuedCapture } from "./store";
 
+export const OFFLINE_RETRY = "You're offline. The photo is kept here and goes up by itself when the internet is back.";
+const RETRYABLE = new Set(["offline", "unreachable", "server"]);
 export type CaptureOptions = { businessId: number | null; hint: string; note: string; asPages: boolean };
 export type QueueSnapshot = { items: QueuedCapture[]; loading: boolean; error: string | null; busy: string | null };
 export type QueueDependencies = {
@@ -19,6 +21,7 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
   let generation = 0;
   let snapshot: QueueSnapshot = { items: [], loading: false, error: null, busy: null };
   let running: Promise<void> | null = null;
+  let runningAutomatic = false;
   let controller: AbortController | null = null;
   const listeners = new Set<() => void>();
   const cleanups = new Set<() => void>();
@@ -39,7 +42,8 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
       while (sameUser(owner, version) && online()) {
         const rows = await store.list(owner);
         const item = rows.find((row) => !row.missing && !attempted.has(row.clientId) && (!clientId || row.clientId === clientId)
-          && !(automatic && row.phase === "uploaded" && row.error));
+          // Automatic passes retry only uploads that failed offline/unreachable/5xx; refusals and failed reads wait for Try now.
+          && !(automatic && row.error && (row.phase === "uploaded" || !row.autoRetry)));
         if (!item || !sameUser(owner, version)) break;
         attempted.add(item.clientId);
         publish({ busy: item.clientId, error: null });
@@ -69,7 +73,7 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
             const missing = reading && sameUser(owner, version) && problem.kind === "notfound";
             await store.update(owner, item.clientId, missing
               ? { missing: true, error: "This photo is no longer in the inbox. Remove this saved upload from this device." }
-              : { error: problem.message });
+              : { error: problem.message, autoRetry: !reading && RETRYABLE.has(problem.kind) });
             dependencies.changed();
           }
         } finally { controller = null; }
@@ -81,8 +85,11 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
   }
 
   function run(clientId?: string, automatic = false): Promise<void> {
-    if (userId === null || !online()) return Promise.resolve();
-    if (running) return running;
+    if (userId === null) return Promise.resolve();
+    if (!online()) { if (!automatic) publish({ error: OFFLINE_RETRY }); return Promise.resolve(); }
+    // A Try now during an automatic pass runs after it: the automatic pass skips rows that wait for Try now.
+    if (running) return clientId || (runningAutomatic && !automatic) ? running.then(() => run(clientId, automatic)) : running;
+    runningAutomatic = automatic;
     running = drain(clientId, automatic).finally(() => { running = null; });
     return running;
   }

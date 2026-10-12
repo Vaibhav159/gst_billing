@@ -264,6 +264,52 @@ describe("durable capture queue", () => {
     await expect(f.queue.remove(f.store.rows[0].clientId)).rejects.toThrow("This photo is in the inbox. Remove it there.");
   });
 
+  it("never resends an upload the server refused (400/403) on online or visible; Try now still sends it", async () => {
+    for (const status of [400, 403]) {
+      const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+      f.upload.mockRejectedValueOnce({ isAxiosError: true, response: { status, data: { detail: "Refused here." } } });
+      await f.queue.resume(); expect(f.upload).toHaveBeenCalledOnce();
+      const stop = f.queue.start(); await f.queue.idle();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange")); await f.queue.idle();
+      expect(f.upload).toHaveBeenCalledOnce();
+      expect(f.queue.getSnapshot().items[0]).toMatchObject({ phase: "queued", error: "Refused here." });
+      await f.queue.resume(f.queue.getSnapshot().items[0].clientId);
+      expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
+    }
+  });
+
+  it("retries offline, unreachable and server failures automatically on online or visible", async () => {
+    const failures = [{ isAxiosError: true, message: "Network Error" }, { isAxiosError: true, response: { status: 502, data: "" } }];
+    for (const failure of failures) {
+      const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+      f.upload.mockRejectedValueOnce(failure); await f.queue.resume();
+      const stop = f.queue.start(); await f.queue.idle();
+      expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
+    }
+  });
+
+  it("a Try now pressed during an automatic pass runs after it instead of being dropped", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf")], options); f.online();
+    f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();
+    const [failed] = f.store.rows; expect(failed).toMatchObject({ phase: "uploaded", error: "Something went wrong" });
+    f.online(false); await f.queue.add([pdf("b.pdf")], options); f.online();
+    const entered = deferred<void>(); const held = deferred<{ id: number }>();
+    f.upload.mockImplementationOnce(async () => { entered.resolve(); return held.promise; });
+    const stop = f.queue.start(); await entered.promise;
+    const pressed = f.queue.resume(failed.clientId);
+    held.resolve({ id: 13 }); await pressed; stop();
+    expect(f.read.mock.calls.map(([id]) => id)).toEqual([12, 13, 12]);
+    expect(f.store.rows).toHaveLength(0);
+  });
+
+  it("an offline Try now says so instead of doing nothing", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options);
+    await f.queue.resume(f.queue.getSnapshot().items[0].clientId);
+    expect(f.upload).not.toHaveBeenCalled();
+    expect(f.queue.getSnapshot().error).toBe("You're offline. The photo is kept here and goes up by itself when the internet is back.");
+  });
+
   it("reports missing IndexedDB as storage failure instead of falling back to memory", async () => {
     vi.stubGlobal("indexedDB", undefined);
     await expect(new IndexedDbCaptureStore().list(7)).rejects.toThrow("This browser couldn't keep the files. Keep this page open and try again.");

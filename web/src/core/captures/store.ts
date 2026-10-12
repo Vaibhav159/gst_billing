@@ -4,6 +4,8 @@ export type QueuedCapture = {
   hint: string; note: string; createdAt: string;
   captureId: number | null; phase: "queued" | "uploaded"; error: string | null;
   missing?: boolean;
+  /** Set when the last upload failed offline, unreachable or with a server failure; only these retry on online/visible. */
+  autoRetry?: boolean;
 };
 export interface CaptureStore {
   list(userId: number): Promise<QueuedCapture[]>;

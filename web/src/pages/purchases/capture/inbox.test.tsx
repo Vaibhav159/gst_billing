@@ -5,7 +5,7 @@ import { serve } from '@/test/server';
 import { captureFixture } from '@/core/captures/fixtures';
 import CaptureInbox from './CaptureInbox';
 
-const upload = vi.hoisted(() => ({ items: [], loading: false, error: null, busy: null, add: vi.fn(), retry: vi.fn(), retryAll: vi.fn(), remove: vi.fn() }));
+const upload = vi.hoisted(() => ({ items: [], loading: false, error: null, busy: null, add: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
 vi.mock('@/core/captures/useUploads', () => ({ useUploads: () => upload }));
 vi.mock('@/core/scope', () => ({ useFirms: () => ({ firms: [{ id: 3, name: 'Kiran Gold House' }], loading: false, error: false }), useScope: () => ({ firmId: 3, ready: true }) }));
 vi.mock('@/core/prefs', () => ({ usePrefs: () => ({ prefs: { defaultBusinessId: '3' }, ready: true }) }));

@@ -26,7 +26,7 @@ export function useUploads() {
   const userId = status === 'signed-in' && can('capture') ? me?.id ?? null : null;
   useEffect(() => { void queue.setUser(userId); }, [queue, userId]);
   const snapshot = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
-  return { ...snapshot, add: queue.add, retry: queue.resume, retryAll: () => queue.resume(), remove: queue.remove };
+  return { ...snapshot, add: queue.add, retry: queue.resume, remove: queue.remove };
 }
 /** Mount once inside AppLayout so switching accounts stops pending work even away from Capture. */
 export function CaptureUploadHost() {

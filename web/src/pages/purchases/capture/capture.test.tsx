@@ -1,13 +1,17 @@
-import { cleanup, fireEvent, screen, waitFor, act } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, act } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
+import { AuthContext, type Me } from "@/core/auth/AuthProvider";
+import { ToastProvider } from "@/core/ui";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { renderApp } from "@/test/render";
+import { OWNER, renderApp, stubAuth, testQueryClient } from "@/test/render";
 import { serve } from "@/test/server";
 import CapturePage from "./CapturePage";
-import { DeviceRows } from "./parts";
+import { AddPhotosCard, DeviceRows } from "./parts";
 import type { QueuedCapture } from "@/core/captures/store";
 import { captureFixture, readFixture } from "@/core/captures/fixtures";
 
-const upload = vi.hoisted(() => ({ items: [], loading: false, error: null, busy: null, add: vi.fn(), retry: vi.fn(), retryAll: vi.fn(), remove: vi.fn() }));
+const upload = vi.hoisted(() => ({ items: [], loading: false, error: null, busy: null, add: vi.fn(), retry: vi.fn(), remove: vi.fn() }));
 vi.mock("@/core/captures/useUploads", () => ({ useUploads: () => upload }));
 vi.mock("@/core/scope", () => ({ useFirms: () => ({ firms: [{ id: 3, name: "Kiran Gold House" }], loading: false, error: false }), useScope: () => ({ firmId: 3, ready: true }) }));
 vi.mock("@/core/prefs", () => ({ usePrefs: () => ({ prefs: { defaultBusinessId: "3" }, ready: true }) }));
@@ -123,4 +127,41 @@ it.each([false, true])('offers only local removal for a missing uploaded capture
   expect(screen.queryByText(/The photo is in the inbox/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: `Remove from this ${phone ? 'phone' : 'computer'}` }));
   expect(remove).toHaveBeenCalledExactlyOnceWith('purged-receipt');
+});
+
+const row = (patch: Partial<QueuedCapture>): QueuedCapture => ({ clientId: 'row-1', userId: 1, businessId: null, hint: 'Synthetic bill', note: '',
+  files: [new File(['synthetic'], 'bill.pdf', { type: 'application/pdf' })], createdAt: '2026-10-12T00:00:00Z',
+  captureId: null, phase: 'queued', error: null, ...patch });
+it('says a refused upload waits for Try now instead of promising it goes up by itself', () => {
+  renderApp(<DeviceRows uploads={{ ...upload, items: [row({ error: 'Choose a firm you can buy for.', autoRetry: false })] }} />);
+  expect(screen.getByText(/Choose a firm you can buy for\. It won't go up by itself: press Try now when it's fixed, or remove it from this computer\./)).toBeVisible();
+  expect(screen.queryByText(/goes up by itself when the internet is back/)).not.toBeInTheDocument();
+  cleanup();
+  renderApp(<DeviceRows uploads={{ ...upload, items: [row({ error: "You're offline", autoRetry: true })] }} />);
+  expect(screen.getByText(/You're offline\. The photo isn't lost: it goes up by itself when the internet is back\./)).toBeVisible();
+});
+it('names the link of an uploaded row for where it goes', () => {
+  renderApp(<DeviceRows uploads={{ ...upload, items: [row({ phase: 'uploaded', captureId: 12 })] }} />);
+  expect(screen.getByRole('link', { name: 'Open the photo' })).toHaveAttribute('href', '/purchases/inbox/12');
+  expect(screen.queryByRole('link', { name: 'Open the inbox' })).not.toBeInTheDocument();
+});
+it('says so when a file is chosen while the last files are still being kept', async () => {
+  upload.add.mockReturnValue(new Promise(() => {}));
+  renderApp(<CapturePage />);
+  const first = new File(['bill'], 'first.png', { type: 'image/png' });
+  fireEvent.change(await screen.findByLabelText('Choose files'), { target: { files: [first] } });
+  await waitFor(() => expect(upload.add).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [new File(['bill'], 'second.png', { type: 'image/png' })] } });
+  expect(await screen.findByText('Wait until the last files are kept on this computer, then choose this one again.')).toBeVisible();
+  expect(upload.add).toHaveBeenCalledOnce();
+});
+it('remembers the buying firm per person when the person changes while the card stays open', () => {
+  localStorage.setItem('gst3.capture.firm.1', 'later'); localStorage.setItem('gst3.capture.firm.2', '3');
+  const client = testQueryClient();
+  const tree = (me: Partial<Me>) => <QueryClientProvider client={client}><AuthContext.Provider value={stubAuth(me)}>
+    <MemoryRouter><ToastProvider><AddPhotosCard uploads={upload} /></ToastProvider></MemoryRouter></AuthContext.Provider></QueryClientProvider>;
+  const view = render(tree(OWNER));
+  expect(screen.getByLabelText('Buying firm')).toHaveValue('');
+  view.rerender(tree({ id: 2 }));
+  expect(screen.getByLabelText('Buying firm')).toHaveValue('3');
 });

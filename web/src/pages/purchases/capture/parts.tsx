@@ -46,19 +46,22 @@ export function DeviceRows({ uploads }: { uploads: ReturnType<typeof useUploads>
         {busy ? <BusyText className="text-file text-sm">{item.phase === 'uploaded' ? 'Reading the bill…' : 'Uploading…'}</BusyText>
           : item.missing ? <p className="text-sm text-muted">Capture no longer available</p> : item.phase === 'uploaded' ? <p className="text-sm text-amber">Uploaded: waiting to be read</p>
             : <span className="inline-flex items-center gap-1.5 text-neg font-medium text-sm"><CloudOff size={15} aria-hidden="true" />Not uploaded: kept on this {device}</span>}
-        {!busy ? <p className="text-sm text-fg2">{item.error ? `${item.error.replace(/\.$/, '')}. ` : ''}{item.missing ? '' : item.phase === 'uploaded' ? 'The photo is in the inbox. Open it to check the reading.' : "The photo isn't lost: it goes up by itself when the internet is back."}</p> : null}
+        {!busy ? <p className="text-sm text-fg2">{item.error ? `${item.error.replace(/\.$/, '')}. ` : ''}{item.missing ? '' : item.phase === 'uploaded' ? 'The photo is in the inbox. Open it to check the reading.' : item.error && !item.autoRetry ? `It won't go up by itself: press Try now when it's fixed, or remove it from this ${device}.` : "The photo isn't lost: it goes up by itself when the internet is back."}</p> : null}
       </div>
-      {!busy ? <div className="flex gap-2 flex-wrap">{!item.missing && <Button size="sm" icon={RefreshCw} onClick={() => run(uploads.retry(item.clientId))}>Try now</Button>}{item.phase === 'queued' || item.missing ? <Button size="sm" variant="ghost" icon={X} onClick={() => run(uploads.remove(item.clientId))}>Remove from this {device}</Button> : <ButtonLink size="sm" to={`/purchases/inbox/${item.captureId}`}>Open the inbox</ButtonLink>}</div> : null}
+      {!busy ? <div className="flex gap-2 flex-wrap">{!item.missing && <Button size="sm" icon={RefreshCw} onClick={() => run(uploads.retry(item.clientId))}>Try now</Button>}{item.phase === 'queued' || item.missing ? <Button size="sm" variant="ghost" icon={X} onClick={() => run(uploads.remove(item.clientId))}>Remove from this {device}</Button> : <ButtonLink size="sm" to={`/purchases/inbox/${item.captureId}`}>Open the photo</ButtonLink>}</div> : null}
     </div>;
   })}</>;
 }
 export function AddPhotosCard({ uploads, phone = false }: { uploads: ReturnType<typeof useUploads>; phone?: boolean }) {
   const { me } = useAuth();
+  const { isPhone } = useView();
   const toast = useToast();
   const { firms, loading, error: firmError } = useFirms();
   const { prefs, ready } = usePrefs();
   const key = `gst3.capture.firm.${me?.id ?? 'signed-out'}`;
-  const [firm, setFirm] = useState<string | null>(() => readStored(key));
+  // Keyed by person: a different person signing in while the card stays open gets their own remembered firm.
+  const [picked, setPicked] = useState<{ key: string; firm: string } | null>(null);
+  const firm = picked?.key === key ? picked.firm : readStored(key);
   const [hint, setHint] = useState('');
   const [note, setNote] = useState('');
   const [pending, setPending] = useState<File[]>([]);
@@ -80,13 +83,14 @@ export function AddPhotosCard({ uploads, phone = false }: { uploads: ReturnType<
     const good = files.filter((file) => !fileProblem(file));
     setProblem('');
     if (problems.length) toast.show({ title: problems.length === 1 ? "1 file wasn't added" : `${problems.length} files weren't added`, body: problems.join(' '), tone: 'neg' });
+    if (saving && good.length) { setProblem(`Wait until the last files are kept on this ${isPhone ? 'phone' : 'computer'}, then choose this one again.`); return; }
     if (good.length) setPending(good);
     if (good.length === 1) void add(good, false);
   };
   const inputChange = (element: HTMLInputElement) => { choose(Array.from(element.files || [])); element.value = ''; };
   const controls = <>
     <Field label="Buying firm" htmlFor="cap-firm" aside={<span className="text-xs text-muted">Remembered from last time</span>} hint={value ? undefined : 'Decide later: whoever fills it in picks the firm.'}>
-      <Select id="cap-firm" value={value} disabled={loading || firmError || saving} onChange={(e) => { const next = e.target.value || 'later'; setFirm(next); writeStored(key, next); }} options={[{ value: '', label: 'Decide later' }, ...firms.map((f) => ({ value: String(f.id), label: f.name }))]} />
+      <Select id="cap-firm" value={value} disabled={loading || firmError || saving} onChange={(e) => { const next = e.target.value || 'later'; setPicked({ key, firm: next }); writeStored(key, next); }} options={[{ value: '', label: 'Decide later' }, ...firms.map((f) => ({ value: String(f.id), label: f.name }))]} />
     </Field>
     {firmError ? <Banner tone="neg">The firms couldn't be loaded. Try again before adding a photo.</Banner> : null}
     <Field label="Supplier (optional)" htmlFor="cap-hint"><Input id="cap-hint" maxLength={120} value={hint} onChange={(e) => setHint(e.target.value)} placeholder="Like: Solanki Jewellers" disabled={saving} /></Field>
