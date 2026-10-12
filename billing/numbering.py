@@ -302,7 +302,6 @@ def paper_book(business, year, month):
     month_bills = [b for b in listed if _numbered(b)]
     month_bin = [b for b in every_bin if first <= b.invoice_date <= last and _numbered(b)]
     used, prev_max, lo, hi, missing_count = _missing_span([*every, *every_bin], first, last)
-    missing_count, _first_four = missing_numbers(business.pk, year, month, [*every, *every_bin])
     missing = list(islice((n for n in count(lo) if n not in used), min(missing_count, MISSING_NUMBER_LIMIT)))
     runs = []
     for n in sorted({c for c in (counter_of(x.invoice_number) for x in (*month_bills, *month_bin)) if lo <= c <= hi}):

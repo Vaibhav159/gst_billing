@@ -44,7 +44,7 @@ from billing.tax_rules import (
     supply_interstate,
     to_paise,
 )
-from billing.text import in_words, inr, money, percent, person, stamp
+from billing.text import in_words, inr, money, percent, person, possessive, stamp
 
 ZERO = Decimal("0")
 ITAX_LIMIT = Decimal("200000")  # Sec 269ST (cash, at or over) and Rule 114B (PAN, over)
@@ -136,10 +136,8 @@ def itax_flags(invoice, lines):
                     "(CGST Rule 46(f)). Put the bill in the buyer's name, with their address, not Walk-in.")
         else:
             name = customer.name.rstrip()
-            # Mirror web/src/core/format.ts possessive; keep the apostrophe rules in sync.
-            possessive = name if re.search(r"['’]s$", name, re.I) else name + ("'" if name.lower().endswith("s") else "'s")
             text = ("A bill of ₹50,000 or more to a buyer without a GSTIN needs the buyer's address "
-                    f"(CGST Rule 46(f)). Add {possessive} address.")
+                    f"(CGST Rule 46(f)). Add {possessive(name)} address.")
         flags.append({"kind": "b2c_address", "short": "Name and address needed", "text": text})
     return flags
 
@@ -608,7 +606,7 @@ def itax_matches(bills):
                           (Q(customer__address__isnull=True) | Q(customer__address__regex=r"^\s*$")))
                          | (missing_address & Q(taxable_upper__gte=B2C_ADDRESS_LIMIT))).only(*ITAX_FIELDS))
     lines = lines_of(maybe, ("quantity", "rate"))
-    return {inv.pk: itax_flags(inv, lines[inv.pk]) for inv in maybe if itax_flags(inv, lines[inv.pk])}
+    return {inv.pk: flags for inv in maybe if (flags := itax_flags(inv, lines[inv.pk]))}
 
 
 def itax_summary(bills):

@@ -8,6 +8,11 @@ import re
 from django.utils import timezone
 
 
+def possessive(name):
+    """'s, or just ' after an s; a name already ending in 's stays (format.ts possessive)."""
+    return name if re.search(r"['’]s$", name, re.I) else name + ("'" if name.lower().endswith("s") else "'s")
+
+
 def stamp(moment):
     """An aware datetime as ISO 8601 in IST ("2026-10-08T10:42:05.123456+05:30"), or None."""
     return timezone.localtime(moment).isoformat() if moment else None

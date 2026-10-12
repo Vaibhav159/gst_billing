@@ -3,7 +3,6 @@ import json
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
-from importlib.util import find_spec
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +13,9 @@ from rest_framework_simplejwt.tokens import AccessToken
 from billing.models import Invoice, LineItem, RateBoard
 from billing.tests.test_v3_rates import QUOTED
 from billing.tests.v3_helpers import ROLE_GROUPS, buyer, firm, person
+
+# These tests mint real JWTs; the test-only signing key is short on purpose, so PyJWT's key-length warning is noise.
+pytestmark = pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")
 
 
 @contextmanager
@@ -114,8 +116,6 @@ def test_viewer_dashboard_and_operational_due_budgets(shop):
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(find_spec("billing.services.filing") is None,
-                    reason="X-40: a hard gate from the moment 3A lands (P5-3); changes are [] until 4A (P5-7)")
 def test_full_predecessor_budgets(shop):
     # The last row is P5-3's worst case: no filing recorded, early April, so all 12 months of last FY are scanned.
     for role, path, queries, size, today in [("owner", "/api/dashboard/", 14, 40000, date(2026, 10, 8)),
