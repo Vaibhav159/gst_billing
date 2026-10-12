@@ -21,7 +21,8 @@ test("desktop: add a diamond by keyboard, then delete and undo @record", async (
   await page.locator("#pr-hsn").fill("7102");
   await page.locator("#pr-hsn").press("Enter");
   await expect(page.locator("#pr-gst")).toHaveValue("0.25");
-  await expect(page.locator("#pr-kind")).toHaveValue("diamond");
+  await expect(page.locator("#pr-kind")).toHaveValue("");
+  await expect(page.locator("#pr-kind option:checked")).toHaveText("Automatic: Diamond");
   await page.waitForTimeout(600); // a beat for the owner when this flow is recorded
   await expect(page).toHaveURL(/\/products\/new/);
   await page.getByRole("button", { name: "VVS", exact: true }).focus();
@@ -34,7 +35,7 @@ test("desktop: add a diamond by keyboard, then delete and undo @record", async (
   await expect(page).toHaveURL(/\/products$/);
   await expect(page.locator("tr.anim-flash")).toContainText(name);
   const product = (await api.get("catalog/", { q: name })).results.find((p) => p.name === name);
-  expect(product).toMatchObject({ kind: "diamond", purity: "VVS", gst_percent: "0.25", unit: "ct", usual_rate: "12500.125" });
+  expect(product).toMatchObject({ kind: null, kind_effective: "diamond", purity: "VVS", gst_percent: "0.25", unit: "ct", usual_rate: "12500.125" });
   await opened(page);
   await main(page).getByRole("link", { name, exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name, exact: true })).toBeVisible();
