@@ -4,7 +4,7 @@ const fs = require("fs");
 const { test, expect } = require("@playwright/test");
 const { measure } = require("./axe");
 const { opened } = require("./session");
-const { client, newBill, makesBills, afterDialog, esc, today } = require("./sales-data");
+const { client, newBill, removeBill, makesBills, afterDialog, esc, today } = require("./sales-data");
 
 // Successful runs retain the four requested owner demonstrations as well as failure evidence.
 test.use({ video: "on" });
@@ -263,6 +263,91 @@ test("merge a duplicate only after choosing the customer and acknowledging remov
   await expect(page.getByRole("heading", { level: 1, name: target.name, exact: true })).toBeVisible();
   expect((await api.get("customers/", { search: source.name })).results.map((row) => row.id)).not.toContain(source.id);
   expect((await auditFor(api, target, "merged")).can).toBeNull();
+});
+
+test("a merge refused after its preview (the kept customer removed elsewhere) sends one request and merges nothing", async ({ page, request }) => {
+  const api = client(request);
+  const source = await newCustomer(api, "Race source");
+  const target = await newCustomer(api, "Race kept", source.mobile_number);
+  await page.goto(`/customers/${source.id}?merge=${target.id}`);
+  const dialog = page.getByRole("dialog", { name: `Merge ${source.name} into another customer` });
+  await expect(dialog).toBeVisible();
+  await afterDialog(page);
+  await dialog.getByRole("searchbox", { name: "Find the customer to keep" }).fill(target.name);
+  await dialog.getByRole("radio", { name: new RegExp(esc(target.name)) }).click();
+  await expect(dialog).toContainText(`${target.name} keeps its name, phone, GSTIN and address.`);
+  const tick = dialog.getByRole("checkbox", { name: `I understand ${source.name} will be removed, and this can't be undone from the Audit log.` });
+  await tick.check();
+  // Another device removes the kept customer between the preview and the click.
+  await api.del(`customers/${target.id}/`);
+  const posts = [];
+  page.on("request", (req) => { if (req.method() === "POST" && new URL(req.url()).pathname.endsWith("/merge-into/")) posts.push(req.url()); });
+  const answer = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/customers/${source.id}/merge-into/`);
+  await dialog.getByRole("button", { name: `Merge into ${target.name}`, exact: true }).click();
+  expect((await answer).ok()).toBe(false);
+  await expect(dialog.getByRole("alert")).toContainText("Not merged");
+  await expect(tick).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: `Merge into ${target.name}`, exact: true })).toBeDisabled();
+  await page.waitForTimeout(1_000);
+  expect(posts).toHaveLength(1);
+  expect((await api.get("customers/", { search: source.name })).results.map((row) => row.id)).toContain(source.id);
+});
+
+test("a backup of more than 3,000 bills is restored one financial year at a time, each with its own confirmation", async ({ page, request }) => {
+  test.setTimeout(600_000);
+  const api = client(request);
+  const stamp = `${Date.now()}`;
+  const firmName = `E2E YEARS FIRM ${stamp}`;
+  const buyer = unique("Years buyer");
+  names.add(buyer);
+  const line = { product_name: "Silver", hsn_code: "711311", gst_tax_rate: "0.03", quantity: "1", rate: "100", unit: "gms" };
+  const invoices = Array.from({ length: 3002 }, (_, n) => ({
+    business: 901, customer: 902, invoice_number: `Y${stamp}/${n + 1}`, invoice_date: n < 1501 ? "2024-10-15" : "2025-10-15",
+    type_of_invoice: "outward", total_amount: "103", line_items: [line],
+  }));
+  const data = { version: "4.0", exportedAt: `${today()}T12:00:00+05:30`, businesses: [{ id: 901, name: firmName, gst_number: "", state_name: "RAJASTHAN" }],
+    customers: [{ id: 902, name: buyer, state_name: "RAJASTHAN" }], products: [], invoices };
+  const file = { name: `gst-backup-${today()}.json`, mimeType: "application/json", buffer: Buffer.from(JSON.stringify(data)) };
+  const previews = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname === "/api/backup/restore/preview/" && response.request().method() === "POST") previews.push(response);
+  });
+  try {
+    await openBackup(page);
+    const overview = await previewFile(page, file);
+    test.skip(!overview.years, "X-40: 4B's per-year restore (P4-8) has not landed");
+    expect(overview.years.map((year) => [year.fy, year.bills])).toEqual([["2024-25", 1501], ["2025-26", 1501]]);
+    for (const [index, fy] of ["2024-25", "2025-26"].entries()) {
+      await expect(main(page).getByText(`Financial year ${fy}`, { exact: true })).toBeVisible();
+      await expect.poll(() => previews.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(index + 2);
+      const checked = await previews[index + 1].json();
+      expect(checked.fy).toBe(fy);
+      const dialog = await openRestoreConfirmation(page, checked.plan.words);
+      await expect(dialog).toContainText(fy);
+      const apply = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === "/api/backup/restore/" && response.request().method() === "POST", { timeout: 300_000 });
+      await dialog.getByRole("button", { name: `Add ${checked.plan.words}`, exact: true }).click();
+      const applied = await apply;
+      expect(applied.ok()).toBe(true);
+      expect(applied.request().postData()).toContain(checked.fingerprint);
+    }
+    await expect(main(page).getByText("Finished checking 2 financial years")).toBeVisible({ timeout: 120_000 });
+    await expect(main(page)).toContainText("Added 3,002 bills across these years.");
+  } finally {
+    // The restored bills go to the bin so the firm and buyer leave nothing live behind.
+    const firms = await api.get("businesses/");
+    const firm = (firms.results ?? firms).find((row) => row.name === firmName);
+    if (firm) {
+      const tried = new Set();
+      for (const fy of ["2024-25", "2025-26"]) {
+        for (;;) {
+          const bills = (await api.get("sales/", { business_id: firm.id, fy, page_size: 100 })).results.filter((bill) => !tried.has(bill.id));
+          if (!bills.length) break;
+          for (const bill of bills) { tried.add(bill.id); await removeBill(api, bill.id); }
+        }
+      }
+    }
+  }
 });
 
 test("the customer form uses the real GSTIN registry endpoint and keeps the name already typed", async ({ page }) => {
