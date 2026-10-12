@@ -18,7 +18,6 @@ from django.db.models import Case, Count, Exists, F, IntegerField, OuterRef, Q, 
 from django.db.models.functions import ExtractYear, Length, Round, TruncMonth
 from django.utils import timezone
 
-from billing.api.search import number_part
 from billing.cache import uncached
 from billing.constants import B2CL_THRESHOLD, BILL_ACTIVE, BILL_CANCELLED, GST_CODE
 from billing.fy import fy_label, fy_of, fy_range
@@ -375,6 +374,8 @@ def search(bills, q):
         name &= Q(customer__name__istartswith=word) | Q(customer__name__icontains=f" {word}")
     match = Q(invoice_number__icontains=q) | name
     if q.isascii() and q.isdigit():
+        from billing.api.search import number_part  # here, not at the top: billing.api.search imports this module
+
         match |= number_part(q)
     digits = re.sub(r"[^0-9]", "", q)
     if len(digits) >= 3 and re.fullmatch(r"[0-9\s+]+", q):
@@ -511,6 +512,8 @@ def ordered(bills, params):
     if q:
         first = [When(invoice_number__iexact=q, then=Value(0))]
         if q.isascii() and q.isdigit():
+            from billing.api.search import number_part  # see search()
+
             first.append(When(number_part(q), then=Value(1)))
         bills = bills.alias(exact=Case(*first, default=Value(2), output_field=IntegerField()))
         keys = ("exact", *keys)
