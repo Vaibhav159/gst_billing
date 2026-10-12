@@ -81,7 +81,6 @@ def test_other_firms_filing_does_not_claim_this_firms_credit():
 @pytest.mark.parametrize("changes,reason", [
     ({"eligible": False}, "not_allowed"),
     ({"tax": Decimal("0")}, "no_gst"),
-    ({"supplier": {"id": 1, "name": "Unregistered", "gst_number": "URP"}}, "no_gstin"),
     ({"eligible": False, "tax": Decimal("0")}, "not_allowed"),
 ])
 def test_bills_giving_no_credit_are_explained_and_never_at_risk(changes, reason):
@@ -98,6 +97,13 @@ def test_sum_is_decimal_exact_and_uses_only_unfiled_rows():
                {(3, 2026, 9)})
     assert out["at_risk"]["tax"] == "0.30"
     assert out["at_risk"]["count"] == 2
+
+
+@pytest.mark.parametrize("gst_number", ["", "URP"])
+def test_supplier_registration_does_not_override_saved_credit_eligibility(gst_number):
+    purchase = row(supplier={"id": 1, "name": "Supplier", "gst_number": gst_number})
+    assert data([purchase])["at_risk"]["tax"] == "902.40"
+    assert data([purchase], fy=2025)["buckets"]["open"] == {"bills": 1, "tax": "902.40"}
 
 
 @pytest.mark.parametrize("filed", [set(), {(3, 2026, 12)}])

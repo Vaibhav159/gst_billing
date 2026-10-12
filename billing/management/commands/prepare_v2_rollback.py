@@ -19,16 +19,17 @@ from contextlib import suppress
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Exists, OuterRef
+from django.utils import timezone
 
 from billing.cache import invalidate, uncached
-from billing.constants import BILL_CANCELLED
+from billing.constants import BILL_CANCELLED, ROLLBACK_GSTR1_LOCK
 from billing.models import BinnedInvoice, Business, FiledPeriod, FilingMonth, FilingRecord, Invoice
 from billing.numbering import lock_firms
 from billing.refusals import Refusal
 from billing.services.bin import bin_bill, restore_from_bin
 from billing.tax_rules import chosen_place, default_place_of_supply
 
-PROTECTED = "GSTR-1 only: protected for v2 rollback"
+PROTECTED = ROLLBACK_GSTR1_LOCK
 
 
 def _firm_names(rows):
@@ -111,20 +112,58 @@ class Command(BaseCommand):
                     FiledPeriod.objects.get_or_create(business_id=row.business_id, year=row.year, month=row.month,
                         defaults={"note": PROTECTED})
 
-    def _reverse(self, apply):
-        # Each month is listed so the owner can check none had its GSTR-3B filed while back on v2 (R3A-8).
-        locks = list(uncached(FiledPeriod).filter(note=PROTECTED).only("business_id", "year", "month")
-                     .order_by("business_id", "year", "month"))
-        names = _firm_names(locks)
-        for lock in locks:
-            self.stdout.write(f"  {names[lock.business_id]} {lock.year}-{lock.month:02}: v2 rollback lock "
-                              f"{'removed' if apply else 'to remove'}")
-            if apply:
-                with transaction.atomic():
-                    lock_firms(lock.business_id)
-                    FiledPeriod.objects.filter(pk=lock.pk, note=PROTECTED).delete()
-        self.stdout.write(f"{len(locks)} v2 rollback lock(s) {'removed' if apply else 'to remove'}. A month whose "
+    def _reverse_locks(self, apply):
+        fields = ("business_id", "year", "month")
+        months = list(uncached(FilingRecord).values_list(*fields).union(
+            uncached(FiledPeriod).values_list(*fields), uncached(FilingMonth).values_list(*fields)).order_by(*fields))
+        names = dict(uncached(Business).filter(pk__in={row[0] for row in months}).values_list("pk", "name"))
+        removed = 0
+        for business_id, year, month in months:
+            with transaction.atomic():
+                if apply:
+                    lock_firms(business_id)
+                scope = {"business_id": business_id, "year": year, "month": month}
+                kinds = set(uncached(FilingRecord).filter(**scope).values_list("kind", flat=True))
+                lock = uncached(FiledPeriod).filter(**scope).first()
+                state = uncached(FilingMonth).filter(**scope).only(
+                    "unlocked_at", "unlocked_by_id", "unlock_reason", "relocked_at", "relocked_by_id").first()
+                where = f"  {names.get(business_id, f'Firm {business_id}')} {year}-{month:02}"
+                protected = lock is not None and lock.note == PROTECTED
+                unlocked = state is not None and state.unlocked_at is not None
+                if protected and ("gstr3b" not in kinds or unlocked):
+                    self.stdout.write(f"{where}: v2 rollback lock {'removed' if apply else 'to remove'}")
+                    if apply:
+                        lock.delete()
+                    lock = None
+                    removed += 1
+                if lock is not None and not protected and unlocked:
+                    self.stdout.write(f"{where}: month locked again in v2; "
+                                      f"{'recorded as relocked' if apply else 'to record as relocked'}")
+                    if apply:
+                        state.unlocked_at, state.unlocked_by, state.unlock_reason = None, None, ""
+                        state.relocked_at, state.relocked_by = timezone.now(), None
+                        state.save(update_fields=["unlocked_at", "unlocked_by", "unlock_reason", "relocked_at", "relocked_by"])
+                    unlocked = False
+                # R3A-6: forward skipped a deliberate v3 unlock; without a new v2 lock it stays open.
+                if "gstr3b" in kinds and not unlocked and (lock is None or protected):
+                    if business_id not in names:
+                        self.stdout.write(f"{where}: firm no longer exists; GSTR-3B lock could not be restored")
+                        continue
+                    self.stdout.write(f"{where}: GSTR-3B whole-month lock {'restored' if apply else 'to restore'}")
+                    if apply:
+                        note = "GSTR-3B recorded in v3; lock restored after v2 rollback"
+                        if lock is None:
+                            FiledPeriod.objects.create(**scope, note=note)
+                        else:
+                            lock.note = note
+                            lock.save(update_fields=["note"])
+                elif lock is not None and "gstr1" in kinds and "gstr3b" not in kinds:
+                    self.stdout.write(f"{where}: GSTR-3B filed before the app; lock kept; add its filing details in v3")
+        self.stdout.write(f"{removed} v2 rollback lock(s) {'removed' if apply else 'to remove'}. A month whose "
                           "GSTR-3B was filed on v2 needs its GSTR-3B recorded in v3.")
+
+    def _reverse(self, apply):
+        self._reverse_locks(apply)
         # No join on the firm: a row whose firm v2 deleted is reported, not skipped (Ruling 1A-6).
         rows = BinnedInvoice.objects.filter(kind=BinnedInvoice.KIND_CANCELLED, restored_at__isnull=True)
         live = set(rows.live().values_list("pk", flat=True))

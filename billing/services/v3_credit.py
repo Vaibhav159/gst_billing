@@ -20,7 +20,7 @@ from billing.credit import (
 from billing.fy import due_dates, fy_label, fy_of, fy_range
 from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, LineItem
 from billing.services.gst_amounts import paise_expression
-from billing.tax_rules import HEADS, clean_gstin, has_gstin, registered
+from billing.tax_rules import HEADS, clean_gstin
 from billing.text import money
 
 
@@ -40,9 +40,8 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
         month = row["credit_month"]
         claimed = month is not None and (business_id, month.year, month.month) in filed
         lapsed = row["lapsed"] or month is None or (not claimed and today > row["deadline"])
-        reason = ("not_allowed" if not row["eligible"] else
-                  "no_gstin" if not has_gstin(row["supplier"]["gst_number"]) else
-                  "no_gst" if row["tax"] <= 0 else None)
+        # X-88: saved eligibility and the ledger's lapse rule own credit, not live supplier details.
+        reason = "not_allowed" if not row["eligible"] else "no_gst" if row["tax"] <= 0 else None
         if bill_fy == fy:
             if reason:
                 buckets["none"].append({"id": row["id"], "bill_no": row["bill_no"],
@@ -116,7 +115,7 @@ def credit_data(business, fy, *, opening, today=None):
         })
     candidates = [row for row in rows if row["credit_month"] is not None and not row["lapsed"]
                   and fy_of(row["bill_date"]) == fy - 1 and row["eligible"]
-                  and row["tax"] > 0 and has_gstin(row["supplier"]["gst_number"]) and today <= row["deadline"]
+                  and row["tax"] > 0 and today <= row["deadline"]
                   and (business.pk, row["credit_month"].year, row["credit_month"].month) not in filed]
     if candidates:
         # Read the open-month calendar once, then slice it for each bill. A recorded but unlocked
@@ -151,7 +150,7 @@ def _other_risk(business_id, fy, today):
              .filter(tax__gt=0))
     rows = (uncached(Invoice).filter(type_of_invoice="inward", itc_eligible=True, invoice_date__range=(start, end),
                                      invoice_date__gte=LEDGER_START)
-            .exclude(business_id=business_id).filter(registered("customer__gst_number"), Exists(taxed))
+            .exclude(business_id=business_id).filter(Exists(taxed))
             .alias(credit_date=Coalesce("itc_month", TruncMonth("invoice_date"), output_field=DateField()))
             .filter(credit_date__lte=last_credit_month(start))
             .alias(credit_year=ExtractYear("credit_date"), credit_number=ExtractMonth("credit_date"))

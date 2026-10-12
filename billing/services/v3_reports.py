@@ -18,7 +18,7 @@ from billing.services.bill_reads import line_taxable
 from billing.services.gst_amounts import heads as decimal_heads
 from billing.services.gstr1_file import hsn_description
 from billing.services.ledger import T5_NOTE
-from billing.tax_rules import HEADS, classify_b2c, clean_gstin, has_gstin, normalize_rate, to_paise
+from billing.tax_rules import HEADS, classify_b2c, clean_gstin, normalize_rate, to_paise
 from billing.text import day_text, inr, money, percent
 
 ZERO = Decimal("0")
@@ -186,7 +186,8 @@ def credit_state(bill, closed_credit):
     if bill["credit_month"] is None:
         return "outside"
     tax = amounts([bill])["tax"]
-    if not bill["itc_eligible"] or not tax or not has_gstin(bill["customer"]["gst_number"]):
+    # X-88: supplier edits cannot override saved eligibility or the ledger's lapse decision.
+    if not bill["itc_eligible"] or not tax:
         return "not_allowed"
     if bill["credit_lapsed"]:
         return "lapsed"
@@ -272,7 +273,7 @@ def _tax_rows(firms, start, end, positions, sales, purchases):
             if month < LEDGER_START.strftime("%Y-%m"):
                 output = [bill for bill in sales if bill["business"]["id"] == firm["id"] and bill["date"].strftime("%Y-%m") == month]
                 credit = [bill for bill in purchases if bill["business"]["id"] == firm["id"] and bill["date"].strftime("%Y-%m") == month
-                          and bill["itc_eligible"] and has_gstin(bill["customer"]["gst_number"])]
+                          and bill["itc_eligible"]]
                 rows.append({"month": month, "output": heads(amounts(output)), "credit": heads(amounts(credit)),
                              "cash": None, "carry_on": None, "state": "before_ledger",
                              "note": "Before the app's credit ledger (it starts April 2025).",

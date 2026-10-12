@@ -45,7 +45,8 @@ class SignedMediaTest(BaseAPITestCase):
         from rest_framework.test import APIClient
 
         response = APIClient().get(url)
-        self.addCleanup(response.close)
+        if getattr(response, "file_to_stream", None) is not None:
+            self.addCleanup(response.file_to_stream.close)
         return response
 
     def test_signed_url_serves_the_file_without_login(self):
@@ -181,7 +182,8 @@ class SignedMediaThrottleTest(TestCase):
             media = []
             for _ in range(budget + 5):
                 response = APIClient().get(url)
-                self.addCleanup(response.close)
+                if getattr(response, "file_to_stream", None) is not None:
+                    self.addCleanup(response.file_to_stream.close)
                 media.append(response.status_code)
             plain = _PlainAnonymousView.as_view()
             other = [plain(RequestFactory().get("/other")).status_code for _ in range(budget + 1)]
@@ -207,7 +209,8 @@ class SignedDocumentLinksTest(BaseAPITestCase):
         self.assertTrue(url and url.startswith("/api/media/") and "?s=" in url, url)
         # Fetched the way an <img> fetches it: no JWT, no session.
         response = APIClient().get(url)
-        self.addCleanup(response.close)
+        if getattr(response, "file_to_stream", None) is not None:
+            self.addCleanup(response.file_to_stream.close)
         self.assertEqual(response.status_code, 200, url)
 
     def _assert_no_public_media_links(self, data):

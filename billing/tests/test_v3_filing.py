@@ -303,6 +303,60 @@ def test_removing_the_last_record_keeps_the_legacy_freeze_and_lock(shop):
     assert FiledPeriod.objects.filter(business=firm, year=2026, month=9).exists()
 
 
+@pytest.mark.parametrize("unlocked", [False, True])
+def test_partial_legacy_3b_can_add_only_missing_filing_details_using_its_frozen_books(shop, unlocked):
+    firm, user = shop
+    first = mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})[0]
+    original = FilingRecord.objects.values().get(pk=first.pk)
+    lock = FiledPeriod.objects.create(business=firm, year=2026, month=9, note="Filed in v2")
+    edit_filing(first, user, {"arn": "AA0810260345671"})
+    assert FiledPeriod.objects.get().pk == lock.pk  # Editing GSTR-1 must retain the legacy 3B lock.
+    first.refresh_from_db()
+    assert first.figures == original["figures"] and first.bills == original["bills"] and first.file == original["file"]
+    if unlocked:
+        unlock_month(firm, DAY, user, "Correct the old bill")
+        frozen = FilingMonth.objects.get().legacy_snapshot
+        with patch("billing.services.filing._snapshot", side_effect=AssertionError("Legacy books must stay frozen")):
+            made = mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-09"})[0]
+        assert made.bills == frozen["gstr3b"]["bills"]
+    else:
+        made = mark_filed(firm, DAY, user, {"kind": "gstr3b", "filed_on": "2026-10-09"})[0]
+    assert made.figures["legacy"] is True
+    assert made.filed_on == date(2026, 10, 9)
+    assert FilingRecord.objects.filter(kind="gstr1").count() == 1
+    assert FiledPeriod.objects.filter(business=firm, year=2026, month=9).exists()
+
+
+def test_partial_legacy_unlock_relock_keeps_3b_baseline_and_routes_corrections_later(shop):
+    from billing.period_lock import month_status
+    from billing.services.filing import _has_3b, changes_since_filing, month_record
+
+    firm, user = shop
+    first = mark_filed(firm, DAY, user, {"kind": "gstr1", "filed_on": "2026-10-08"})[0]
+    FiledPeriod.objects.create(business=firm, year=2026, month=9, note="Filed in v2")
+    assert _has_3b(firm.pk, DAY)
+    unlock_month(firm, DAY, user, "Correct a bill after the rollback")
+    state = FilingMonth.objects.get()
+    assert state.legacy_frozen_at is not None
+    assert state.legacy_snapshot["gstr1"]["bills"] == first.bills
+    frozen = state.legacy_snapshot
+    for data in ({"kind": "gstr1a", "filed_on": "2026-10-09"},
+                 {"kind": "gstr3b", "filed_on": "2026-10-09", "gstr1a_filed_on": "2026-10-09"}):
+        with pytest.raises(Refusal) as refused:
+            mark_filed(firm, DAY, user, data)
+        assert refused.value.detail["code"] == "gstr3b_filed"
+    before = {"id": 1, "invoice_number": "1", "table": "b2b", "pos": "08", "taxable": "1000", "cgst": "15", "sgst": "15", "igst": "0", "total": "1030"}
+    after = {**before, "taxable": "2000", "cgst": "30", "sgst": "30", "total": "2060"}
+    changes = changes_since_filing(firm, 2026, 9, changes=[{"month": "2026-09", "before": before, "after": after}])
+    assert "October's GSTR-1" in changes["rows"][0]["goes_in"]
+    relock_month(firm, DAY, user)
+    assert FilingMonth.objects.get().legacy_snapshot == frozen
+    status = month_status(firm.pk, 2026, 9, include_checks=False)
+    assert status.legacy and status.credit_closed and status.sales_closed
+    assert month_record(firm.pk, 2026, 9)["legacy"]
+    assert not FilingRecord.objects.filter(kind="gstr3b").exists()
+
+
 def test_gstr1_snapshot_checks_the_amendment_deadline_on_its_filing_day(shop):
     from billing.services import filing
 

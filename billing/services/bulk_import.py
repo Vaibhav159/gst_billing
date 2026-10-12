@@ -11,6 +11,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -19,7 +20,7 @@ from billing.cache import uncached
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.numbering import lock_firms
-from billing.period_lock import locked_period_or_none
+from billing.period_lock import locked_period_or_none, sales_month_closed
 from billing.services.sales import frozen_firms
 from billing.tax_rules import (
     LINE_MONEY_TOLERANCE,
@@ -570,7 +571,8 @@ def run_bulk_import(request):
 
                     # Filed-and-locked month: never silently mutate a filed
                     # period from a bulk sheet — surface it as a row error.
-                    if locked_period_or_none(business.pk, str(invoice_date)):
+                    if (locked_period_or_none(business.pk, str(invoice_date)) or
+                        (type_of_invoice == INVOICE_TYPE_OUTWARD and sales_month_closed(business.pk, parse_date(str(invoice_date))))):
                         skipped_count += 1
                         errors.append(
                             f"Invoice {invoice_number}: its month is filed & locked "
@@ -777,4 +779,3 @@ def run_bulk_import(request):
         },
         status=status.HTTP_201_CREATED,
     )
-

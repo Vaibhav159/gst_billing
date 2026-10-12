@@ -64,6 +64,9 @@ BILL_ACTIVE = "active"
 BILL_CANCELLED = "cancelled"
 BILL_STATUS_CHOICES = [(BILL_ACTIVE, "Active"), (BILL_CANCELLED, "Cancelled")]
 
+# A temporary rollback guard closes v2's whole month without claiming GSTR-3B was filed.
+ROLLBACK_GSTR1_LOCK = "GSTR-1 only: protected for v2 rollback"
+
 # How a bill was sent: WhatsApp from a desktop (wa.me), or the phone's share sheet.
 SENT_VIA_CHOICES = [("whatsapp", "WhatsApp"), ("share", "Share sheet")]
 

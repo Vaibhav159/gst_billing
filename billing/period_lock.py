@@ -42,9 +42,20 @@ def locked_period_or_none(business_id, invoice_date):
     ).first()
 
 
-def assert_period_unlocked(business_id, invoice_date, action="change"):
-    """Raise a DRF ValidationError when the period is filed-and-locked."""
+def assert_period_unlocked(business_id, invoice_date, action="change", *, invoice_type="outward"):
+    """Keep v2's refusal shape; GSTR-1 closes sales, while purchases keep the 3B guard."""
     period = locked_period_or_none(business_id, invoice_date)
+    if period is None and invoice_type == "outward" and business_id and invoice_date:
+        from types import SimpleNamespace
+
+        from billing.cache import uncached
+        from billing.models import Business
+
+        day = parse_date(invoice_date.strip()) if isinstance(invoice_date, str) else invoice_date
+        business_id = int(business_id)
+        if sales_month_closed(business_id, day):
+            period = SimpleNamespace(id=None, business_id=business_id, year=day.year, month=day.month,
+                                     business=uncached(Business).get(pk=business_id))
     if period is None:
         return
     raise ValidationError(
@@ -195,14 +206,17 @@ def month_status(business_id, year, month, *, include_checks=True):
     fields = ("id", "unlocked_at", "unlocked_by_id", "unlock_reason", "relocked_at", "relocked_by_id", "legacy_frozen_at")
     annotations = {f"state_{field}": Subquery(months.values(field)[:1]) for field in fields}
     info = uncached(Business).filter(pk=business_id).annotate(
-        lock_id=Subquery(periods.values("pk")[:1]), **annotations).values("lock_id", *annotations).first() or {}
+        lock_id=Subquery(periods.values("pk")[:1]), lock_note=Subquery(periods.values("note")[:1]),
+        **annotations).values("lock_id", "lock_note", *annotations).first() or {}
     lock_id = info.get("lock_id")
     unlock = FilingMonth(business_id=business_id, year=year, month=month,
                          **{field: info[f"state_{field}"] for field in fields}) if info.get("state_id") else None
     unlocked = unlock if unlock and unlock.unlocked_at else None
     today = timezone.localdate().replace(day=1)
     key = date(year, month, 1)
-    legacy = bool(not rows and (lock_id or (unlock and unlock.legacy_frozen_at)))
+    from billing.constants import ROLLBACK_GSTR1_LOCK
+    legacy = bool("gstr3b" not in rows and ((lock_id and info["lock_note"] != ROLLBACK_GSTR1_LOCK)
+                                          or (unlock and unlock.legacy_frozen_at)))
     if unlocked:
         stage = "unlocked"
     elif lock_id:
@@ -249,15 +263,15 @@ def assert_purchase_open(business, month, action="edit"):
 
 
 def assert_inward_unlocked(invoice, new_date=None):
-    assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit")
+    assert_period_unlocked(invoice.business_id, invoice.invoice_date, "edit", invoice_type="inward")
     if getattr(invoice, "itc_month", None):
-        assert_period_unlocked(invoice.business_id, invoice.itc_month, "edit")
+        assert_period_unlocked(invoice.business_id, invoice.itc_month, "edit", invoice_type="inward")
     if new_date:
-        assert_period_unlocked(invoice.business_id, new_date, "edit")
+        assert_period_unlocked(invoice.business_id, new_date, "edit", invoice_type="inward")
 
 
-def lock_legacy_invoice(invoice, *target_business_ids, inward=False):
-    """Inside the caller's transaction, lock the stored bill before its purchase firms.
+def lock_legacy_invoice(invoice, *target_business_ids):
+    """Inside the caller's transaction, lock the stored bill before its firms.
 
     Return the fresh row so a v3 move completed before this lock cannot leave a legacy
     write checking the old firm/month. New invoices have no row to lock yet.
@@ -267,6 +281,5 @@ def lock_legacy_invoice(invoice, *target_business_ids, inward=False):
     from billing.numbering import lock_firms
 
     stored = uncached(Invoice).select_for_update().get(pk=invoice.pk) if invoice.pk else invoice
-    if stored.type_of_invoice == "inward" or inward:
-        lock_firms(stored.business_id, *target_business_ids)
+    lock_firms(stored.business_id, *target_business_ids)
     return stored

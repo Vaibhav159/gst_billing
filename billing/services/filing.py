@@ -15,6 +15,7 @@ from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
+from billing.constants import ROLLBACK_GSTR1_LOCK
 from billing.fy import fy_of, fy_range, parse_fy
 from billing.models import AuditLog, FiledPeriod, FilingMonth, FilingRecord, OpeningCredit
 from billing.numbering import lock_firms
@@ -95,11 +96,14 @@ def filing_data(record):
 
 def month_record(business_id, year, month):
     day = date(year, month, 1)
-    rows = {row.kind: filing_data(row) for row in _person_rows(_records(business_id, day))}
+    locks = uncached(FiledPeriod).filter(business_id=business_id, year=year, month=month).exclude(note=ROLLBACK_GSTR1_LOCK)
+    records = list(_person_rows(_records(business_id, day).annotate(_legacy_lock=Exists(locks))))
+    rows = {row.kind: filing_data(row) for row in records}
     state = uncached(FilingMonth).filter(business_id=business_id, year=year, month=month).select_related(
         "unlocked_by", "relocked_by").only("unlocked_at", "unlock_reason", "relocked_at", "unlocked_by_id", "relocked_by_id", "legacy_frozen_at",
         *[f"{relation}__{field}" for relation in ("unlocked_by", "relocked_by") for field in PERSON_FIELDS]).first()
-    legacy = not rows and (bool(state and state.legacy_frozen_at) or uncached(FiledPeriod).filter(business_id=business_id, year=year, month=month).exists())
+    legacy = "gstr3b" not in rows and (bool(state and state.legacy_frozen_at)
+                                      or (records[0]._legacy_lock if records else locks.exists()))
     locked = rows.get("gstr3b") or rows.get("gstr1")
     unlocked = {"at": stamp(state.unlocked_at), "by": person(state.unlocked_by), "reason": state.unlock_reason} if state and state.unlocked_at else None
     return {**{kind: rows.get(kind) for kind in NAMES}, "legacy": legacy, "unlocked": unlocked,
@@ -237,9 +241,16 @@ def _snapshot(business, month, kind, *, filing_date=None):
 def _sync_lock(business, month):
     state = uncached(FilingMonth).filter(business=business, year=month.year, month=month.month).only("unlocked_at", "legacy_frozen_at").first()
     rows = list(_records(business.pk, month).only("kind", "filed_on", "arn"))
-    if (any(row.kind == "gstr3b" for row in rows) or (not rows and state and state.legacy_frozen_at)) and not (state and state.unlocked_at):
+    locked = uncached(FiledPeriod).filter(business=business, year=month.year, month=month.month)
+    has_3b = any(row.kind == "gstr3b" for row in rows)
+    legacy = bool(state and state.legacy_frozen_at) or locked.exclude(note=ROLLBACK_GSTR1_LOCK).exists()
+    if (has_3b or legacy) and not (state and state.unlocked_at):
         note = "; ".join(f"{NAMES[row.kind]} filed {day_text(row.filed_on)}" + (f", ARN {row.arn}" if row.arn else "") for row in rows)
-        FiledPeriod.objects.update_or_create(business=business, year=month.year, month=month.month, defaults={"note": note[:255] or "Filed before the app kept filing records"})
+        if has_3b:
+            FiledPeriod.objects.update_or_create(business=business, year=month.year, month=month.month, defaults={"note": note[:255]})
+        else:
+            FiledPeriod.objects.get_or_create(business=business, year=month.year, month=month.month,
+                                              defaults={"note": "Filed before the app kept filing records"})
     elif rows:
         FiledPeriod.objects.filter(business=business, year=month.year, month=month.month).delete()
 
@@ -285,10 +296,10 @@ def mark_filed(business, month, user, data):
                           "already_filed", filing=filing_data(record))
     state = uncached(FilingMonth).filter(business=business, year=month.year, month=month.month).only(
         "legacy_frozen_at", "legacy_snapshot").first()
-    frozen = state.legacy_snapshot if state and state.legacy_frozen_at and not records else None
-    legacy = not records and (frozen is not None or uncached(FiledPeriod).filter(
-        business=business, year=month.year, month=month.month).exists())
-    if legacy and kind != "both":
+    frozen = state.legacy_snapshot if state and state.legacy_frozen_at else None
+    legacy = "gstr3b" not in records and (frozen is not None or uncached(FiledPeriod).filter(
+        business=business, year=month.year, month=month.month).exclude(note=ROLLBACK_GSTR1_LOCK).exists())
+    if legacy and not records and kind != "both":
         raise Refusal(f"{month:%B %Y} was filed before the app kept filing records, so record both returns together: "
                       "GSTR-1 and GSTR-3B.", "legacy_both")
     if kind == "gstr3b" and data.get("gstr1a_filed_on") and "gstr1a" in records:
@@ -298,7 +309,7 @@ def mark_filed(business, month, user, data):
     if kind in ("gstr1a", "gstr3b") and "gstr1" not in records:
         raise Refusal(f"Mark {month:%B %Y}'s GSTR-1 filed first. GSTR-3B comes after it.", "needs_gstr1")
     if kind == "gstr1a" or data.get("gstr1a_filed_on"):
-        if "gstr3b" in records:
+        if "gstr3b" in records or legacy:
             raise Refusal(f"{month:%B %Y}'s GSTR-3B is marked filed, so corrections go in the next GSTR-1, not GSTR-1A.", "gstr3b_filed")
         if not changes_for_month(business, month.year, month.month):
             raise Refusal(f"Nothing has changed since {month:%B %Y}'s GSTR-1, so there's no GSTR-1A to record.", "no_corrections")
@@ -438,7 +449,9 @@ def unlock_month(business, month, user, reason):
     if state.legacy and row.legacy_frozen_at is None and row.legacy_snapshot is None:
         row.legacy_snapshot = {}
         for kind in ("gstr1", "gstr3b"):
-            figures, bills, file = _snapshot(business, month, kind)
+            recorded = (state.gstr1a or state.gstr1) if kind == "gstr1" else None
+            figures, bills, file = ((getattr(recorded, part) for part in SNAPSHOTS) if recorded
+                                    else _snapshot(business, month, kind))
             row.legacy_snapshot[kind] = {"figures": figures, "bills": bills, "file": file}
         row.legacy_frozen_at = now
     row.unlocked_at, row.unlocked_by, row.unlock_reason = now, user, reason
@@ -562,8 +575,10 @@ def filed_figures(business, fy):
 
 
 def _has_3b(business_id, day):
-    return _records(business_id, day).filter(kind="gstr3b").exists() or uncached(FilingMonth).filter(
-        business_id=business_id, year=day.year, month=day.month, legacy_frozen_at__isnull=False).exists()
+    scope = {"business_id": business_id, "year": day.year, "month": day.month}
+    return _records(business_id, day).filter(kind="gstr3b").values("pk").union(
+        uncached(FilingMonth).filter(**scope, legacy_frozen_at__isnull=False).values("pk"),
+        uncached(FiledPeriod).filter(**scope).exclude(note=ROLLBACK_GSTR1_LOCK).values("pk")).exists()
 
 
 def _carrying_month(business_id, source):
@@ -581,7 +596,10 @@ def pending_amendments(business, year, month, *, month_builds=None, today=None):
     target = date(year, month, 1)
     unlocked = uncached(FilingMonth).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
                                            month=OuterRef("month"), unlocked_at__isnull=False)
-    sources = uncached(FilingRecord).filter(business=business, kind="gstr3b").filter(
+    legacy_lock = uncached(FiledPeriod).filter(business_id=OuterRef("business_id"), year=OuterRef("year"),
+                                              month=OuterRef("month")).exclude(note=ROLLBACK_GSTR1_LOCK)
+    sources = uncached(FilingRecord).filter(business=business).filter(
+        Q(kind="gstr3b") | (Q(kind="gstr1") & Exists(legacy_lock))).filter(
         Q(year__lt=year) | Q(year=year, month__lt=month)).exclude(Exists(unlocked)).values_list("year", "month")
     legacy = uncached(FilingMonth).filter(business=business, legacy_frozen_at__isnull=False, unlocked_at__isnull=True).filter(
         Q(year__lt=year) | Q(year=year, month__lt=month)).values_list("year", "month")

@@ -26,12 +26,14 @@ class PeriodLockAdminMixin:
         if inv is None:
             return
         try:
-            stored = lock_legacy_invoice(inv, inv.business_id, inward=inv.type_of_invoice == "inward")
+            stored = lock_legacy_invoice(inv, inv.business_id)
+            if stored.pk:
+                assert_period_unlocked(stored.business_id, stored.invoice_date, action, invoice_type=stored.type_of_invoice)
             if stored.pk and stored.type_of_invoice == "inward":
                 assert_inward_unlocked(stored)
             if obj is not inv:
                 obj.invoice = inv = stored
-            assert_period_unlocked(inv.business_id, inv.invoice_date, action)
+            assert_period_unlocked(inv.business_id, inv.invoice_date, action, invoice_type=inv.type_of_invoice)
             if inv.type_of_invoice == "inward":
                 assert_inward_unlocked(inv)
         except APIException as e:
@@ -74,7 +76,7 @@ class PeriodLockAdminMixin:
         objects = list(queryset.nocache())
         ids = {self._invoice_of(obj).pk for obj in objects if self._invoice_of(obj) is not None}
         invoices = list(Invoice.objects.nocache().select_for_update().filter(pk__in=ids).order_by("pk"))
-        lock_firms(*(invoice.business_id for invoice in invoices if invoice.type_of_invoice == "inward"))
+        lock_firms(*(invoice.business_id for invoice in invoices))
         for obj in objects:
             self.delete_model(request, obj)
 

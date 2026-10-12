@@ -73,7 +73,7 @@ def restore_purchase(binned, user, via="bin"):
         fields.update(business_id=binned.business_id, customer_id=binned.customer_id)
         if via == "audit_log":
             # The legacy door keeps its 400 and bill-date guard, under the same firm lock.
-            assert_period_unlocked(firm.pk, binned.invoice_date, "create")
+            assert_period_unlocked(firm.pk, binned.invoice_date, "create", invoice_type="inward")
             assert_inward_unlocked(Invoice(**fields))
         else:
             assert_purchase_open(firm, month, "restore")

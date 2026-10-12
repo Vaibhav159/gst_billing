@@ -32,7 +32,6 @@ from django.db.models.functions import (
     Length,
     Mod,
     Replace,
-    Round,
     StrIndex,
     Substr,
     Trim,
@@ -46,6 +45,7 @@ from billing.fy import fy_label, fy_of, fy_range
 from billing.models import Invoice, LineItem
 from billing.numbering import bill_ref
 from billing.services.bill_reads import _tax_off
+from billing.services.gst_amounts import paise_expression, taxable_expression
 from billing.services.gstr1_file import build_gstr1
 from billing.tax_rules import normalize_state_name, registered
 from billing.text import day_text, inr, money
@@ -105,7 +105,7 @@ def checked_bills(business_ids, year, month, *, stop=None):
     turnover = (uncached(LineItem).filter(invoice__business_id=OuterRef("business_id"),
                                           invoice__type_of_invoice="outward", invoice__status=BILL_ACTIVE,
                                           invoice__invoice_date__range=prior)
-                .values("invoice__business_id").annotate(total=Sum(Round(F("quantity") * F("rate"), 2)))
+                .values("invoice__business_id").annotate(total=Sum(taxable_expression()))
                 .values("total"))
     bills = (Invoice.objects.sales().filter(business_id__in=business_ids, invoice_date__gte=first, invoice_date__lt=stop)
              .annotate(_gstin=_trim_gstin(Coalesce("customer__gst_number", Value(""))),
@@ -297,7 +297,7 @@ def month_checks(business, year, month, *, built=None):
         purchases = uncached(Invoice).filter(business=business, type_of_invoice="inward", needs_review=True).filter(
             Q(itc_month=first) | Q(itc_month__isnull=True, invoice_date__gte=first, invoice_date__lt=stop))
         for purchase in purchases.values("id", "invoice_number", "customer__name").annotate(
-                tax=Coalesce(Sum(F("lineitem__cgst") + F("lineitem__sgst") + F("lineitem__igst")), Decimal("0"))):
+                tax=Coalesce(Sum(paise_expression("lineitem__cgst") + paise_expression("lineitem__sgst") + paise_expression("lineitem__igst")), Decimal("0"))):
             notes.append({"kind": "to_confirm", "blocks": False,
                           "text": f"GSTR-3B · credit to confirm: {purchase['invoice_number']} · {inr(purchase['tax'])}",
                           "detail": f"{purchase['customer__name']} · read from a photo, not checked yet. It's inside 4(A)(5) until someone checks it.",

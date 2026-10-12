@@ -431,6 +431,7 @@ In a browser:
 3. Read the `--reverse` output:
    - **"already back, skipped":** a cancelled bill v2's Undo made active. Cancel it again in v3.
    - **A month whose GSTR-3B was filed while on v2:** record that GSTR-3B in v3 (GST → the month → Record filing).
+   - **Month locks:** a recorded v3 GSTR-3B gets its whole-month lock back if v2 removed it; a month v2 locked again is recorded as relocked. A GSTR-1-only month locked by v2 keeps its lock and shows GSTR-3B as filed before the app: add its missing filing details. An existing v3 unlock stays open if v2 did not lock it again.
    - **"bill(s) moved to another firm while v2 ran":** their frozen firm details are cleared, and the freeze above sets each to its own firm.
 4. Everyone signs in again. Old passes stay refused.
 
@@ -442,8 +443,10 @@ In a browser:
 - **A walk-in's full-year statement PDF** takes about 30 seconds.
 - **A customer's GSTIN corrected after GSTR-1 but before GSTR-3B** can put one invoice under two GSTINs in the GSTR-1A file. The CA checks the 1A file before uploading it.
 - **Editing a customer's GSTIN in the same second a month is being filed** can race. Filed months are frozen copies, so only that one month is exposed.
+- **Editing a customer's state or GSTIN after filing** stays allowed. Filed figures remain frozen; a change to the current books may need a correction through GST returns.
 - **Long downloads:** a backup or export stream can run longer than gunicorn's 90-second worker timeout, which only catches a stuck worker. nginx's 95-second read timeout still ends a stalled one.
 
 **Notes that apply only if v3's server keeps running behind v2's screens** (not this runbook's rollback):
 - v3's server refuses a v2 backup restore at a customer whose stored PAN isn't PAN-shaped. Under the full rollback (F5), v2.0.9 has no such check.
 - v3's server refuses deleting a filled capture, and refuses a second convert with `capture_used`. Under the full rollback, v2.0.9's old behaviour returns (F8).
+- v3's server refuses creating a purchase with a missing or stale `capture_id` with 400, "That photo isn't in the inbox any more." Under the full rollback, v2.0.9 saved the bill instead.

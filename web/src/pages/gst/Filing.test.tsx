@@ -134,6 +134,16 @@ test('legacy filing details and viewer read-only state remain accessible', () =>
   expect(screen.queryByRole('button', { name: 'Add the filing details' })).not.toBeInTheDocument();
 });
 
+test.each([false, true])('legacy filing details add only missing returns when GSTR-1 exists=%s', (hasGstr1) => {
+  const m = month(); m.stage = 'filed'; m.record.legacy = true;
+  if (hasGstr1) m.record.gstr1 = filing('gstr1');
+  const action = vi.fn();
+  renderApp(<FilingCard month={m} onAction={action} />);
+  ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Add the filing details' }));
+  expect(action).toHaveBeenCalledWith({ type: 'mark', kind: hasGstr1 ? 'gstr3b' : 'both' });
+});
+
 test('amendments use server routing and show GSTR-1A filing plus relock for accountants', () => {
   const action = vi.fn(); renderApp(<AmendCard month={corrected()} onAction={action} />, { me: { role: 'accountant', permissions: ['view', 'gst.file', 'gst.download', 'gst.lock'] } });
   expect(screen.getByText('Goes in GSTR-1A · B2B')).toBeInTheDocument();

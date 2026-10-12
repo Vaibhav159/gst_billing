@@ -3,8 +3,8 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import BooleanField, Case, Count, Exists, F, OuterRef, Q, Sum, Value, When
-from django.db.models.functions import Coalesce, Left, Round, TruncMonth
+from django.db.models import BooleanField, Case, Count, Exists, OuterRef, Q, Sum, Value, When
+from django.db.models.functions import Coalesce, Left, TruncMonth
 
 from billing.cache import uncached
 from billing.fy import fy_label, fy_of, fy_range
@@ -13,6 +13,7 @@ from billing.roles import can
 from billing.services.audit import entry_row, read_entries
 from billing.services.bill_reads import CHECK_FIELDS, ITAX_FIELDS, bill_rows
 from billing.services.filing import year_filings
+from billing.services.gst_amounts import paise_expression, taxable_expression
 from billing.text import money
 
 ROW_FIELDS = tuple(set((*CHECK_FIELDS, *ITAX_FIELDS, "invoice_number", "created_at", "cancel_reason",
@@ -83,13 +84,13 @@ def dashboard(user, firms, year, today):
     queries = {}
     line_queries = {}
     # X-55: each head is rounded to the paisa per line before adding, as bill_reads.sums() does.
-    tax = sum((Coalesce(Round(F(h), 2), ZERO) for h in ("cgst", "sgst", "igst")), ZERO)
+    tax = sum((Coalesce(paise_expression(h), ZERO) for h in ("cgst", "sgst", "igst")), ZERO)
     for key, period in windows.items():
         where = Q(invoice_date__range=period)
         queries[key + "_count"] = Count("pk", filter=where)
         queries[key + "_total"] = Sum("total_amount", filter=where)
         line_where = Q(invoice__invoice_date__range=period)
-        line_queries[key + "_taxable"] = Sum(Round(F("quantity") * F("rate"), 2), filter=line_where)
+        line_queries[key + "_taxable"] = Sum(taxable_expression(), filter=line_where)
         line_queries[key + "_tax"] = Sum(tax, filter=line_where)
     lo = min(p[0] for p in windows.values())
     hi = max(p[1] for p in windows.values())

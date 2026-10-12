@@ -254,7 +254,7 @@ def create_from_ai(request):
             mirror_existing = find_duplicate(buyer_business, inv_number, supplier_cust, inv_date)
             if mirror_existing is not None:
                 return mirror_existing.id, True
-            assert_period_unlocked(buyer_business.id, inv_date, "create")
+            assert_period_unlocked(buyer_business.id, inv_date, "create", invoice_type=INVOICE_TYPE_INWARD)
             mirror = Invoice.objects.create(
                 customer=supplier_cust,
                 business=buyer_business,
@@ -343,7 +343,7 @@ def create_from_ai(request):
                 }
             )
 
-        assert_period_unlocked(business.id, inv_date, "create")
+        assert_period_unlocked(business.id, inv_date, "create", invoice_type=type_of_invoice)
         invoice = Invoice.objects.create(
             customer=customer,
             business=business,
@@ -464,4 +464,3 @@ def create_from_ai(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-

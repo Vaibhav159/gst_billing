@@ -51,7 +51,9 @@ def test_redis_password_is_not_printed_when_loading_settings(monkeypatch):
 
     monkeypatch.setattr("dotenv.load_dotenv", load_dotenv)
     result = subprocess.run([sys.executable, "-c", "import gst_billing.settings"],
-                            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=30)
+                            cwd=Path(__file__).resolve().parents[2],
+                            env={**os.environ, "DJANGO_SECRET_KEY": os.environ.get("DJANGO_SECRET_KEY", "test-only-not-secret")},
+                            capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert "synthetic-redis-password-for-test" not in result.stdout + result.stderr
     assert os.environ[marker] == "parent"

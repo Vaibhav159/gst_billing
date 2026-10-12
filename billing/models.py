@@ -483,7 +483,7 @@ class Invoice(AbstractBaseModel):
                 from billing.period_lock import assert_inward_unlocked, assert_period_unlocked
                 lock_firms(before.business_id, int(self.business_id))
                 assert_inward_unlocked(before)
-                assert_period_unlocked(self.business_id, self.invoice_date, "edit")
+                assert_period_unlocked(self.business_id, self.invoice_date, "edit", invoice_type=self.type_of_invoice)
                 changed_date = self._meta.get_field("invoice_date").to_python(self.invoice_date) != before.invoice_date
                 if moved or changed_date:
                     self.itc_month = None

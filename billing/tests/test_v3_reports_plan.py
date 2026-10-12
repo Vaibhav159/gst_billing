@@ -213,8 +213,8 @@ def test_report_billref_and_placeholder_gstin_are_canonical():
     assert {key: result["bills"][0][key] for key in ("invoice_number", "invoice_date", "customer_name")} == {"invoice_number": "KGH/2026-27/1", "invoice_date": "2026-09-12", "customer_name": "Anil Gupta"}
     purchase = diamond(customer=customer)
     result = build_report("purchases", [], [purchase], **SEPT)
-    assert result["credit_by_return"]["tax"] == "0.00"
-    assert result["bills"][0]["credit_state"] == "not_allowed"
+    assert result["credit_by_return"]["tax"] == "902.40"
+    assert result["bills"][0]["credit_state"] == "to_claim"
     workbook = ca_workbook([sale], [], **SEPT, scope="All firms")
     assert workbook["scope"] == "All firms"
     assert workbook["file"] == "GST_Report_All_firms_Sep_2026.xlsx"

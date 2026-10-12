@@ -66,7 +66,7 @@ export function FilingCard({ month: m, onAction }: FilingCardProps) {
     {m.record.legacy ? <p className="text-fg2">Filed and locked · before the app kept filing records</p> : <FilingSteps month={m} onAction={onAction} />}
     <FilingRecords month={m} onAction={onAction} />
     {readOnly ? <p className="text-sm text-muted">You can look at every return. Downloads and marking returns filed are for the owner and the accountant.</p> : <>
-      {m.record.legacy && visible('gst.file') ? <Button disabled={!can('gst.file')} title={whyNot('gst.file')} onClick={() => onAction({ type: 'mark', kind: 'both' })}>Add the filing details</Button> : null}
+      {m.record.legacy && visible('gst.file') ? <Button disabled={!can('gst.file')} title={whyNot('gst.file')} onClick={() => onAction({ type: 'mark', kind: one ? 'gstr3b' : 'both' })}>Add the filing details</Button> : null}
       {m.stage === 'open' ? <p className="text-sm text-muted">{file?.why_not || `${name} is still running. The file can be made from ${date(m.due.file_from)}.`}</p> : <>
         {filed && one && visible('gst.download') ? <Button disabled={!can('gst.download')} title={whyNot('gst.download')} full size={isPhone ? 'lg' : 'md'} icon={Download} onClick={() => download('gstr1', true)}>Download GSTR-1 as filed</Button> : null}
         {!filed && !one && fileFirst && visible('gst.download') ? fileButton : null}
