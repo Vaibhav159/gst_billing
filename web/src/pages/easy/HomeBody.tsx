@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Link } from "react-router";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { CheckCircle2, ChevronRight, Clock, Moon, Send, Sparkles, WifiOff } from "lucide-react";
@@ -115,26 +115,38 @@ function EndOfDay({ fetchUnsent, firmId, today, sales, countReady, unsent, draft
     <div className="flex flex-wrap gap-2">{unsent > 0 && can("bill.send") ? <Button variant="primary" icon={Send} onClick={() => setOpen(true)}>Send the bills</Button> : null}
       {drafts.bills.length ? <p className="text-md text-fg2 self-center">{drafts.bills.length === 1 ? "The unfinished bill is just below: Finish or Remove." : "The unfinished bills are just below: Finish or Remove each."}</p> : null}
     </div>
-    {open && firmId !== null ? <SendToday fetchUnsent={fetchUnsent} key={`${firmId}:${today}`} firmId={firmId} today={today} onClose={() => setOpen(false)} /> : null}
+    {firmId !== null ? <SendToday open={open} fetchUnsent={fetchUnsent} key={`${firmId}:${today}`} firmId={firmId} today={today} onClose={() => setOpen(false)} /> : null}
   </section>;
 }
 
-export function SendToday({ fetchUnsent, firmId, today, onClose }: { fetchUnsent: FetchUnsent; firmId: number; today: string; onClose: () => void }) {
+type SendTodayProps = { fetchUnsent: FetchUnsent; firmId: number; today: string; onClose: () => void; open?: boolean };
+type SendProgress = Record<number, "opened" | "sent">;
+export function SendToday(props: SendTodayProps) {
+  // Keep accepted deliveries across closing the list; reopening still gets a fresh unsent snapshot.
+  const [finished, setFinished] = useState<SendProgress>({});
+  return props.open === false ? null : <SendTodayList {...props} finished={finished} setFinished={setFinished} />;
+}
+
+function SendTodayList({ fetchUnsent, firmId, today, onClose, finished, setFinished }: SendTodayProps & { finished: SendProgress; setFinished: Dispatch<SetStateAction<SendProgress>> }) {
   const qc = useQueryClient(); const send = useSendBill(); const ready = useSendReady();
   const { isPhone } = useView();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [prepared, setPrepared] = useState<{ bill: BillDetail; at: number } | null>(null);
   const query = useQuery({ queryKey: ["easy-send-session", firmId, today], queryFn: ({ signal }) => fetchUnsent(firmId, today, signal), staleTime: 0, gcTime: 0, retry: false });
-  const [finished, setFinished] = useState<Record<number, "sent" | "changed">>({});
+  const [changed, setChanged] = useState<Record<number, boolean>>({});
   const [busy, setBusy] = useState<number | null>(null); const running = useRef(false); const [error, setError] = useState<string | null>(null);
   const deliverChecked = async (current: BillDetail) => {
     // This call runs inside the fallback's second click, before an await.
-    const delivery = send(current, { onRecorded: () => { if (mounted.current) setFinished((x) => ({ ...x, [current.id]: "sent" })); } });
-    if (await delivery && mounted.current) setFinished((x) => ({ ...x, [current.id]: "sent" }));
+    const delivery = send(current, {
+      onOpened: () => setFinished((x) => ({ ...x, [current.id]: "opened" })),
+      // The shared toast's record-only retry can finish after this list closes.
+      onRecorded: () => setFinished((x) => ({ ...x, [current.id]: "sent" })),
+    });
+    if (await delivery) setFinished((x) => ({ ...x, [current.id]: "sent" }));
   };
   const sendOne = async (row: BillRow) => {
-    if (running.current) return;
+    if (running.current || finished[row.id] || changed[row.id]) return;
     running.current = true; setBusy(row.id); setError(null);
     try {
       if (prepared?.bill.id === row.id && Date.now() - prepared.at < 5000) {
@@ -143,7 +155,7 @@ export function SendToday({ fetchUnsent, firmId, today, onClose }: { fetchUnsent
       setPrepared(null);
       const current = await freshUnsent(qc, row.id, firmId, today);
       if (!mounted.current) return;
-      if (!current) { setFinished((x) => ({ ...x, [row.id]: "changed" })); return; }
+      if (!current) { setChanged((x) => ({ ...x, [row.id]: true })); return; }
       if (current.checks.includes("no_lines") || (current.segment === "b2b" && current.checks.includes("no_hsn"))) {
         setError(`Bill ${current.counter ?? current.invoice_number} needs a check. Open it from Bills before sending it.`); return;
       }
@@ -152,12 +164,13 @@ export function SendToday({ fetchUnsent, firmId, today, onClose }: { fetchUnsent
     } catch (e) { if (mounted.current) setError(problemOf(e).message); }
     finally { running.current = false; if (mounted.current) setBusy(null); }
   };
-  const allDone = query.data?.every((b) => finished[b.id]) ?? false;
+  const allDone = query.data?.every((b) => finished[b.id] === "sent" || changed[b.id]) ?? false;
   return <Dialog open onClose={onClose} title="Send today's bills" description="Each opens the share sheet with its PDF; pick WhatsApp and the customer."
     footer={<Button size="lg" onClick={onClose}>{allDone ? "Done" : "Close"}</Button>}>
     <QueryView query={query} what="today's unsent bills">{(rows) => <ul className="flex flex-col">{rows.map((b) => <li key={b.id} className="flex items-center gap-3 py-3 border-t border-rule first:border-t-0">
       <span className="flex-1 min-w-0"><span className="block font-medium">{b.customer.name}</span><span className="block text-md text-muted tnum">No. {b.counter ?? b.invoice_number} · {inr(b.total_amount)}</span></span>
-      {finished[b.id] ? <span className="inline-flex items-center gap-1 text-sale font-semibold"><CheckCircle2 size={16} aria-hidden="true" />{finished[b.id] === "sent" ? "Sent" : "No longer waiting to be sent"}</span>
+      {finished[b.id] === "opened" ? <span role="status" className="max-w-48 text-md text-fg2">Shared. Close this list to check the result or retry with Mark as sent.</span>
+        : finished[b.id] || changed[b.id] ? <span className="inline-flex items-center gap-1 text-sale font-semibold"><CheckCircle2 size={16} aria-hidden="true" />{finished[b.id] === "sent" ? "Sent" : "No longer waiting to be sent"}</span>
         : <Button icon={Send} loading={busy === b.id} disabled={!ready || busy !== null} onClick={() => void sendOne(b)} aria-label={`Send bill ${b.counter ?? b.invoice_number} to ${b.customer.name}`}>Send</Button>}
     </li>)}</ul>}</QueryView>
     {prepared ? <p role="status" className="text-md text-fg2 mt-2">Bill {prepared.bill.counter ?? prepared.bill.invoice_number} checked. Tap Send again to open WhatsApp.</p> : null}
