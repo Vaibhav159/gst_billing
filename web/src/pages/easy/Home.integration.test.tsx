@@ -21,7 +21,8 @@ afterEach(() => { cleanup(); vi.useRealTimers(); });
 function setup(age?: number, rich = false) {
   const qc = testQueryClient();
   if (age !== undefined) qc.setQueryData(dueNextKeys.one(3, rich), answer, { updatedAt: Date.now() - age });
-  const s = salesServer([["GET", "sales/", () => wirePage([])], ["GET", "drafts/", () => ({ count: 0, results: [] })], ["GET", "due-next/", () => answer]]);
+  const s = salesServer([["GET", "sales/", () => wirePage([])], ["GET", "drafts/", () => ({ count: 0, results: [] })], ["GET", "due-next/", () => answer],
+    ["GET", "gst/month/", () => ({ business: choice.firmId, month: "2026-09", stage: "ready", due: { gstr1: "2026-10-11", gstr3b: "2026-10-20" }, record: {}, checks: { blockers: [] } })]]);
   const ui = () => <QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><MemoryRouter initialEntries={["/e"]}><ToastProvider><Home /></ToastProvider></MemoryRouter></AuthContext.Provider></QueryClientProvider>;
   const view = render(ui());
   return { ...view, qc, calls: s.calls, again: () => view.rerender(ui()) };
@@ -32,6 +33,14 @@ test("an Easy-only cold opening fills the shared scoped badge cache exactly once
   expect(h.qc.getQueryData(dueNextKeys.one(3, false))).toMatchObject(answer);
   expect(h.calls.filter((c) => c.url === "drafts/")).toEqual([expect.objectContaining({ params: { business_id: 3 } })]);
   expect(screen.getByRole("region", { name: "Rates easy" })).toBeInTheDocument();
+});
+test("Home places the real GST card after rates and uses a scoped monthly summary", async () => {
+  const h = setup();
+  const card = await screen.findByRole("link", { name: /GST on October's sales so far/ });
+  expect(card).toHaveAttribute("href", "/e/gst");
+  expect(screen.getByRole("region", { name: "Rates easy" }).compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(h.calls.filter(c => c.url === "gst/month/")).toEqual([expect.objectContaining({ params: { business_id: 3, month: "2026-09" } })]);
+  expect(h.calls.find(c => c.url === "sales/" && c.params.month)?.params).toMatchObject({ business_id: 3, month: "2026-10", page_size: 1 });
 });
 test.each([false, true])("a fresh scoped cached answer is reused, including rich=%s", async (rich) => {
   const h = setup(59_999, rich); await screen.findByText("121 not sent");

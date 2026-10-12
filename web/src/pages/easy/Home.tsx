@@ -12,6 +12,7 @@ import { EasyPage, BillRows, NewBillButton } from "./parts";
 import { useEasyFirm, useWelcome } from "./state";
 import { fetchEasyUnsent, useEasyToday, useEasyUnfinishedBills } from "./queries";
 import { HomeBody } from "./HomeBody";
+import { GstCard } from "./Gst";
 
 export default function Home() {
   const selection = useEasyFirm();
@@ -38,6 +39,6 @@ export default function Home() {
         : <p className="text-md text-muted">Choose the firm this phone bills for in More.</p>}
       <ButtonLink to="/e/more" variant="primary" size="lg">Go to More</ButtonLink>
     </> : <HomeBody sales={sales} key={firmId ?? "waiting"} firmId={firmId} today={today} welcome={welcome} drafts={drafts} due={due} fetchUnsent={fetchEasyUnsent}
-      rates={<RatesCard variant="easy" />} renderRows={(bills) => <BillRows bills={bills} />} />}
+      rates={<RatesCard variant="easy" />} gst={<GstCard />} renderRows={(bills) => <BillRows bills={bills} />} />}
   </EasyPage>;
 }
