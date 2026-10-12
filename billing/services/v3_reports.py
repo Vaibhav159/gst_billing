@@ -383,16 +383,36 @@ def period_label(start, end, today):
     return f"{day_text(start)} to {day_text(end)}"
 
 
+def _workbook_amounts(bills):
+    totals = amounts(bills)
+    # X-84: v2 exports no round-off. Invoice has no stored tax outside its lines;
+    # its total_tax annotation is their sum, so a no-item bill has zero stored tax.
+    totals["taxable"] += sum((to_paise(bill["total"]) for bill in bills if not bill["lines"]), ZERO)
+    totals["round_off"] = ZERO
+    return totals
+
+
+def _workbook_split(bills):
+    # Supply the no-item fallback only to this export's split; keep books/credit unchanged.
+    projected = [{**bill, "lines": bill["lines"] or [{"taxable": bill["total"], "gst_rate": ZERO, **dict.fromkeys(HEADS, ZERO)}]}
+                 for bill in bills]
+    return payment_split(projected, share_places=4)
+
+
+def _workbook_order(bill):
+    return bill["date"], [int(part) if part.isdecimal() else part.casefold() for part in re.split(r"(\d+)", bill["number"])]
+
+
 def _workbook_rows(bills, *, purchases, closed_credit):
     rows = []
     for number, bill in enumerate(bills, 1):
         party = bill["customer"]
         tax_id = clean_gstin(party["gst_number"]) or (f"{party['pan']} (PAN)" if party["pan"] else "-")
-        totals = amounts([bill])
+        totals = _workbook_amounts([bill])
         for index, line in enumerate(bill["lines"] or [None]):
             first = index == 0
             cells = [number, bill["number"], bill["date"].isoformat(), party["name"], tax_id] if first else [""] * 5
-            cells.extend([line["name"], line["hsn"], percent(line["gst_rate"]), f"{line['quantity']:.3f}", line["unit"], f"{line['rate']:.3f}", money(line["taxable"]), money(line["cgst"]), money(line["sgst"]), money(line["igst"])] if line else ["(no items)", "", "", "", "", "", "0.00", "0.00", "0.00", "0.00"])
+            cells.extend([line["name"], line["hsn"], percent(line["gst_rate"]), f"{line['quantity']:.3f}", line["unit"], f"{line['rate']:.3f}", money(line["taxable"]), money(line["cgst"]), money(line["sgst"]), money(line["igst"])] if line else ["(no items)", "", "", "", "", "", money(totals["taxable"]), "0.00", "0.00", "0.00"])
             cells.extend([money(totals["round_off"]) if first else "", money(bill["total"]) if first else "", bill["payment"]])
             cells.extend([bill["credit_month"] or "", credit_state(bill, closed_credit)] if purchases else ["NIL" if line and not line["gst_rate"] else bill["section"].upper(), bill["pos"]])
             rows.append(cells)
@@ -411,18 +431,22 @@ def ca_workbook(sales, purchases, *, firms, start, end, split=False, return_data
     return_data, closed_credit = return_data or {}, closed_credit or set()
     today = today or timezone.localdate()
     sales, purchases = _active(_dated(sales, start, end)), _dated(purchases, start, end)
+    # v2 forms payment buckets after date/natural-number sorting; stable gross ties
+    # and the percentage remainder must therefore follow that same bill order.
+    sales.sort(key=_workbook_order)
+    purchases.sort(key=_workbook_order)
     summary, sheets = [], []
     for firm in firms:
         firm_sales = [bill for bill in sales if bill["business"]["id"] == firm["id"]]
         firm_purchases = [bill for bill in purchases if bill["business"]["id"] == firm["id"]]
-        summary.append({"firm": firm["name"], "sales": wire(amounts(firm_sales)), "purchases": wire(amounts(firm_purchases))})
+        summary.append({"firm": firm["name"], "sales": wire(_workbook_amounts(firm_sales)), "purchases": wire(_workbook_amounts(firm_purchases))})
         sheet = {"firm": firm, "months": [], "gstr1": [], "gstr3b": [], "amendments": []}
         for month in months_between(start, end):
             monthly = {"month": month}
             for side, bills in (("sales", firm_sales), ("purchases", firm_purchases)):
                 selection = [bill for bill in bills if bill["date"].strftime("%Y-%m") == month]
                 monthly[side] = {"rows": _workbook_rows(selection, purchases=side == "purchases", closed_credit=closed_credit),
-                                 "totals": wire(amounts(selection)), "split": payment_split(selection, share_places=4) if split else []}
+                                 "totals": wire(_workbook_amounts(selection)), "split": _workbook_split(selection) if split else []}
             sheet["months"].append(monthly)
             returns = return_data.get((firm["id"], month))
             if returns is not None:

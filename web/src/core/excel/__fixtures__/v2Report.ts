@@ -21,6 +21,7 @@ export interface Invoice {
   businessId: string; businessName: string; type: "OUTWARD" | "INWARD"; isIGST: boolean; items: InvoiceItem[];
   subtotal: number; totalCGST: number; totalSGST: number; totalIGST: number; totalTax: number; total: number;
   roundedOff?: number; paymentMode?: string; financialYear: string; createdAt: string; updatedAt: string;
+  lineItemCount?: number; sourceFile?: string | null; sourcePreview?: string | null;
 }
 
 interface ReportOptions {

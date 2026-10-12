@@ -1,0 +1,1858 @@
+{
+  "ordinary": {
+    "invoices": [
+      {
+        "id": 6,
+        "customer_name": "Diamond Supplier",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "P/empty",
+        "total_amount": "75.000",
+        "invoice_date": "2026-10-06",
+        "type_of_invoice": "inward",
+        "payment_mode": "bank",
+        "status": "active",
+        "customer": 4,
+        "business": 3,
+        "line_items": []
+      },
+      {
+        "id": 4,
+        "customer_name": "Diamond Supplier",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "D/7",
+        "total_amount": "361863.000",
+        "invoice_date": "2026-10-05",
+        "type_of_invoice": "inward",
+        "payment_mode": "bank",
+        "status": "active",
+        "customer": 4,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Diamond",
+            "hsn_code": "710239",
+            "gst_tax_rate": "0.0025",
+            "quantity": "6.400",
+            "rate": "56400.123",
+            "cgst": "451.200",
+            "sgst": "451.200",
+            "igst": "0.000",
+            "amount": "361863.187",
+            "unit": "ct"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "customer_name": "Walk-in Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "10",
+        "total_amount": "100.000",
+        "invoice_date": "2026-09-13",
+        "type_of_invoice": "outward",
+        "payment_mode": "",
+        "status": "active",
+        "customer": 3,
+        "business": 3,
+        "line_items": []
+      },
+      {
+        "id": 5,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "DRIFT",
+        "total_amount": "103.010",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "customer_name": "Interstate Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": true,
+        "invoice_number": "9",
+        "total_amount": "10.350",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "bank",
+        "status": "active",
+        "customer": 5,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "10.000",
+            "rate": "1.005",
+            "cgst": "0.000",
+            "sgst": "0.000",
+            "igst": "0.300",
+            "amount": "10.350",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "customer_name": "PAN Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "12",
+        "total_amount": "2646.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "active",
+        "customer": 2,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Gold Ring",
+            "hsn_code": "711319",
+            "gst_tax_rate": "0.0300",
+            "quantity": "2.000",
+            "rate": "1234.567",
+            "cgst": "37.040",
+            "sgst": "37.040",
+            "igst": "0.000",
+            "amount": "2543.214",
+            "unit": "gms"
+          },
+          {
+            "product_name": "Chain",
+            "hsn_code": "711319",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "pcs"
+          }
+        ]
+      }
+    ],
+    "workbook": {
+      "scope": "CA Fixture Jewellers",
+      "period": "01 Aug 2026 to 30 Nov 2026",
+      "file": "GST_Report_CA_Fixture_Jewellers_01_Aug_2026_to_30_Nov_2026_with_split.xlsx",
+      "summary": [
+        {
+          "firm": "CA Fixture Jewellers",
+          "sales": {
+            "taxable": "2779.18",
+            "cgst": "40.04",
+            "sgst": "40.04",
+            "igst": "0.30",
+            "tax": "80.38",
+            "value": "2859.36",
+            "round_off": "0.00",
+            "bills": 4
+          },
+          "purchases": {
+            "taxable": "361035.79",
+            "cgst": "451.20",
+            "sgst": "451.20",
+            "igst": "0.00",
+            "tax": "902.40",
+            "value": "361938.00",
+            "round_off": "0.00",
+            "bills": 2
+          }
+        }
+      ],
+      "firms": [
+        {
+          "firm": {
+            "id": 3,
+            "name": "CA Fixture Jewellers",
+            "gst_number": "08VRHFA2322D1ZI"
+          },
+          "months": [
+            {
+              "month": "2026-08",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-09",
+              "sales": {
+                "rows": [
+                  [
+                    1,
+                    "9",
+                    "2026-09-12",
+                    "Interstate Buyer",
+                    "24ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "10.000",
+                    "gms",
+                    "1.005",
+                    "10.05",
+                    "0.00",
+                    "0.00",
+                    "0.30",
+                    "0.00",
+                    "10.35",
+                    "bank",
+                    "B2B",
+                    "24"
+                  ],
+                  [
+                    2,
+                    "12",
+                    "2026-09-12",
+                    "PAN Buyer",
+                    "ABCDE1234F (PAN)",
+                    "Gold Ring",
+                    "711319",
+                    "3",
+                    "2.000",
+                    "gms",
+                    "1234.567",
+                    "2469.13",
+                    "37.04",
+                    "37.04",
+                    "0.00",
+                    "0.00",
+                    "2646.00",
+                    "cash",
+                    "B2CS",
+                    "08"
+                  ],
+                  [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "Chain",
+                    "711319",
+                    "3",
+                    "1.000",
+                    "pcs",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "",
+                    "",
+                    "cash",
+                    "B2CS",
+                    "08"
+                  ],
+                  [
+                    3,
+                    "DRIFT",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.01",
+                    "cash",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    4,
+                    "10",
+                    "2026-09-13",
+                    "Walk-in Buyer",
+                    "-",
+                    "(no items)",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "100.00",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "100.00",
+                    "",
+                    "B2CS",
+                    "08"
+                  ]
+                ],
+                "totals": {
+                  "taxable": "2779.18",
+                  "cgst": "40.04",
+                  "sgst": "40.04",
+                  "igst": "0.30",
+                  "tax": "80.38",
+                  "value": "2859.36",
+                  "round_off": "0.00",
+                  "bills": 4
+                },
+                "split": [
+                  {
+                    "mode": "cash",
+                    "bills": 2,
+                    "value": "2749.01",
+                    "taxable": "2669.13",
+                    "cgst": "40.04",
+                    "sgst": "40.04",
+                    "igst": "0.00",
+                    "share": "96.1407"
+                  },
+                  {
+                    "mode": "",
+                    "bills": 1,
+                    "value": "100.00",
+                    "taxable": "100.00",
+                    "cgst": "0.00",
+                    "sgst": "0.00",
+                    "igst": "0.00",
+                    "share": "3.4973"
+                  },
+                  {
+                    "mode": "bank",
+                    "bills": 1,
+                    "value": "10.35",
+                    "taxable": "10.05",
+                    "cgst": "0.00",
+                    "sgst": "0.00",
+                    "igst": "0.30",
+                    "share": "0.3620"
+                  }
+                ]
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-10",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [
+                  [
+                    1,
+                    "D/7",
+                    "2026-10-05",
+                    "Diamond Supplier",
+                    "08ABCDE1234F1Z5",
+                    "Diamond",
+                    "710239",
+                    "0.25",
+                    "6.400",
+                    "ct",
+                    "56400.123",
+                    "360960.79",
+                    "451.20",
+                    "451.20",
+                    "0.00",
+                    "0.00",
+                    "361863.00",
+                    "bank",
+                    "2026-10",
+                    "to_claim"
+                  ],
+                  [
+                    2,
+                    "P/empty",
+                    "2026-10-06",
+                    "Diamond Supplier",
+                    "08ABCDE1234F1Z5",
+                    "(no items)",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "75.00",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "75.00",
+                    "bank",
+                    "2026-10",
+                    "not_allowed"
+                  ]
+                ],
+                "totals": {
+                  "taxable": "361035.79",
+                  "cgst": "451.20",
+                  "sgst": "451.20",
+                  "igst": "0.00",
+                  "tax": "902.40",
+                  "value": "361938.00",
+                  "round_off": "0.00",
+                  "bills": 2
+                },
+                "split": [
+                  {
+                    "mode": "bank",
+                    "bills": 2,
+                    "value": "361938.00",
+                    "taxable": "361035.79",
+                    "cgst": "451.20",
+                    "sgst": "451.20",
+                    "igst": "0.00",
+                    "share": "100.0000"
+                  }
+                ]
+              }
+            },
+            {
+              "month": "2026-11",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            }
+          ],
+          "gstr1": [],
+          "gstr3b": [],
+          "amendments": []
+        }
+      ]
+    }
+  },
+  "ties": {
+    "invoices": [
+      {
+        "id": 3,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "7",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "credit",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "9",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "bank",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "12",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      }
+    ],
+    "workbook": {
+      "scope": "CA Fixture Jewellers",
+      "period": "01 Aug 2026 to 30 Nov 2026",
+      "file": "GST_Report_CA_Fixture_Jewellers_01_Aug_2026_to_30_Nov_2026_with_split.xlsx",
+      "summary": [
+        {
+          "firm": "CA Fixture Jewellers",
+          "sales": {
+            "taxable": "300.00",
+            "cgst": "4.50",
+            "sgst": "4.50",
+            "igst": "0.00",
+            "tax": "9.00",
+            "value": "309.00",
+            "round_off": "0.00",
+            "bills": 3
+          },
+          "purchases": {
+            "taxable": "0.00",
+            "cgst": "0.00",
+            "sgst": "0.00",
+            "igst": "0.00",
+            "tax": "0.00",
+            "value": "0.00",
+            "round_off": "0.00",
+            "bills": 0
+          }
+        }
+      ],
+      "firms": [
+        {
+          "firm": {
+            "id": 3,
+            "name": "CA Fixture Jewellers",
+            "gst_number": "08VRHFA2322D1ZI"
+          },
+          "months": [
+            {
+              "month": "2026-08",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-09",
+              "sales": {
+                "rows": [
+                  [
+                    1,
+                    "7",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "credit",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    2,
+                    "9",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "bank",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    3,
+                    "12",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "cash",
+                    "B2B",
+                    "08"
+                  ]
+                ],
+                "totals": {
+                  "taxable": "300.00",
+                  "cgst": "4.50",
+                  "sgst": "4.50",
+                  "igst": "0.00",
+                  "tax": "9.00",
+                  "value": "309.00",
+                  "round_off": "0.00",
+                  "bills": 3
+                },
+                "split": [
+                  {
+                    "mode": "credit",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "33.3333"
+                  },
+                  {
+                    "mode": "bank",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "33.3333"
+                  },
+                  {
+                    "mode": "cash",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "33.3334"
+                  }
+                ]
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-10",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-11",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            }
+          ],
+          "gstr1": [],
+          "gstr3b": [],
+          "amendments": []
+        }
+      ]
+    }
+  },
+  "cancelled": {
+    "invoices": [
+      {
+        "id": 2,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "VOID",
+        "total_amount": "206.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "cancelled",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "200.000",
+            "cgst": "3.000",
+            "sgst": "3.000",
+            "igst": "0.000",
+            "amount": "206.000",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "LIVE",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      }
+    ],
+    "workbook": {
+      "scope": "CA Fixture Jewellers",
+      "period": "01 Aug 2026 to 30 Nov 2026",
+      "file": "GST_Report_CA_Fixture_Jewellers_01_Aug_2026_to_30_Nov_2026_with_split.xlsx",
+      "summary": [
+        {
+          "firm": "CA Fixture Jewellers",
+          "sales": {
+            "taxable": "100.00",
+            "cgst": "1.50",
+            "sgst": "1.50",
+            "igst": "0.00",
+            "tax": "3.00",
+            "value": "103.00",
+            "round_off": "0.00",
+            "bills": 1
+          },
+          "purchases": {
+            "taxable": "0.00",
+            "cgst": "0.00",
+            "sgst": "0.00",
+            "igst": "0.00",
+            "tax": "0.00",
+            "value": "0.00",
+            "round_off": "0.00",
+            "bills": 0
+          }
+        }
+      ],
+      "firms": [
+        {
+          "firm": {
+            "id": 3,
+            "name": "CA Fixture Jewellers",
+            "gst_number": "08VRHFA2322D1ZI"
+          },
+          "months": [
+            {
+              "month": "2026-08",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-09",
+              "sales": {
+                "rows": [
+                  [
+                    1,
+                    "LIVE",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "cash",
+                    "B2B",
+                    "08"
+                  ]
+                ],
+                "totals": {
+                  "taxable": "100.00",
+                  "cgst": "1.50",
+                  "sgst": "1.50",
+                  "igst": "0.00",
+                  "tax": "3.00",
+                  "value": "103.00",
+                  "round_off": "0.00",
+                  "bills": 1
+                },
+                "split": [
+                  {
+                    "mode": "cash",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "100.0000"
+                  }
+                ]
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-10",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-11",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            }
+          ],
+          "gstr1": [],
+          "gstr3b": [],
+          "amendments": []
+        }
+      ]
+    }
+  },
+  "paise": {
+    "invoices": [
+      {
+        "id": 2,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "OLD-HEADS",
+        "total_amount": "2.100",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "bank",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0500",
+            "quantity": "1.000",
+            "rate": "1.000",
+            "cgst": "0.025",
+            "sgst": "0.025",
+            "igst": "0.000",
+            "amount": "1.050",
+            "unit": "gms"
+          },
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0500",
+            "quantity": "1.000",
+            "rate": "1.000",
+            "cgst": "0.025",
+            "sgst": "0.025",
+            "igst": "0.000",
+            "amount": "1.050",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "OLD-NET",
+        "total_amount": "0.050",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0000",
+            "quantity": "0.005",
+            "rate": "5.000",
+            "cgst": "0.000",
+            "sgst": "0.000",
+            "igst": "0.000",
+            "amount": "0.025",
+            "unit": "gms"
+          },
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0000",
+            "quantity": "0.005",
+            "rate": "5.000",
+            "cgst": "0.000",
+            "sgst": "0.000",
+            "igst": "0.000",
+            "amount": "0.025",
+            "unit": "gms"
+          }
+        ]
+      }
+    ],
+    "workbook": {
+      "scope": "CA Fixture Jewellers",
+      "period": "01 Aug 2026 to 30 Nov 2026",
+      "file": "GST_Report_CA_Fixture_Jewellers_01_Aug_2026_to_30_Nov_2026_with_split.xlsx",
+      "summary": [
+        {
+          "firm": "CA Fixture Jewellers",
+          "sales": {
+            "taxable": "2.06",
+            "cgst": "0.06",
+            "sgst": "0.06",
+            "igst": "0.00",
+            "tax": "0.12",
+            "value": "2.15",
+            "round_off": "0.00",
+            "bills": 2
+          },
+          "purchases": {
+            "taxable": "0.00",
+            "cgst": "0.00",
+            "sgst": "0.00",
+            "igst": "0.00",
+            "tax": "0.00",
+            "value": "0.00",
+            "round_off": "0.00",
+            "bills": 0
+          }
+        }
+      ],
+      "firms": [
+        {
+          "firm": {
+            "id": 3,
+            "name": "CA Fixture Jewellers",
+            "gst_number": "08VRHFA2322D1ZI"
+          },
+          "months": [
+            {
+              "month": "2026-08",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-09",
+              "sales": {
+                "rows": [
+                  [
+                    1,
+                    "OLD-HEADS",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "5",
+                    "1.000",
+                    "gms",
+                    "1.000",
+                    "1.00",
+                    "0.03",
+                    "0.03",
+                    "0.00",
+                    "0.00",
+                    "2.10",
+                    "bank",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "Silver",
+                    "711311",
+                    "5",
+                    "1.000",
+                    "gms",
+                    "1.000",
+                    "1.00",
+                    "0.03",
+                    "0.03",
+                    "0.00",
+                    "",
+                    "",
+                    "bank",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    2,
+                    "OLD-NET",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "0",
+                    "0.005",
+                    "gms",
+                    "5.000",
+                    "0.03",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "0.05",
+                    "cash",
+                    "NIL",
+                    "08"
+                  ],
+                  [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "Silver",
+                    "711311",
+                    "0",
+                    "0.005",
+                    "gms",
+                    "5.000",
+                    "0.03",
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "",
+                    "",
+                    "cash",
+                    "NIL",
+                    "08"
+                  ]
+                ],
+                "totals": {
+                  "taxable": "2.06",
+                  "cgst": "0.06",
+                  "sgst": "0.06",
+                  "igst": "0.00",
+                  "tax": "0.12",
+                  "value": "2.15",
+                  "round_off": "0.00",
+                  "bills": 2
+                },
+                "split": [
+                  {
+                    "mode": "bank",
+                    "bills": 1,
+                    "value": "2.10",
+                    "taxable": "2.00",
+                    "cgst": "0.06",
+                    "sgst": "0.06",
+                    "igst": "0.00",
+                    "share": "97.6744"
+                  },
+                  {
+                    "mode": "cash",
+                    "bills": 1,
+                    "value": "0.05",
+                    "taxable": "0.06",
+                    "cgst": "0.00",
+                    "sgst": "0.00",
+                    "igst": "0.00",
+                    "share": "2.3256"
+                  }
+                ]
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-10",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-11",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            }
+          ],
+          "gstr1": [],
+          "gstr3b": [],
+          "amendments": []
+        }
+      ]
+    }
+  },
+  "collation": {
+    "invoices": [
+      {
+        "id": 3,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "a9",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "credit",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "A-1",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "bank",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "customer_name": "Registered Buyer",
+        "business_name": "CA Fixture Jewellers",
+        "is_igst_applicable": false,
+        "invoice_number": "A9",
+        "total_amount": "103.000",
+        "invoice_date": "2026-09-12",
+        "type_of_invoice": "outward",
+        "payment_mode": "cash",
+        "status": "active",
+        "customer": 1,
+        "business": 3,
+        "line_items": [
+          {
+            "product_name": "Silver",
+            "hsn_code": "711311",
+            "gst_tax_rate": "0.0300",
+            "quantity": "1.000",
+            "rate": "100.000",
+            "cgst": "1.500",
+            "sgst": "1.500",
+            "igst": "0.000",
+            "amount": "103.000",
+            "unit": "gms"
+          }
+        ]
+      }
+    ],
+    "workbook": {
+      "scope": "CA Fixture Jewellers",
+      "period": "01 Aug 2026 to 30 Nov 2026",
+      "file": "GST_Report_CA_Fixture_Jewellers_01_Aug_2026_to_30_Nov_2026_with_split.xlsx",
+      "summary": [
+        {
+          "firm": "CA Fixture Jewellers",
+          "sales": {
+            "taxable": "300.00",
+            "cgst": "4.50",
+            "sgst": "4.50",
+            "igst": "0.00",
+            "tax": "9.00",
+            "value": "309.00",
+            "round_off": "0.00",
+            "bills": 3
+          },
+          "purchases": {
+            "taxable": "0.00",
+            "cgst": "0.00",
+            "sgst": "0.00",
+            "igst": "0.00",
+            "tax": "0.00",
+            "value": "0.00",
+            "round_off": "0.00",
+            "bills": 0
+          }
+        }
+      ],
+      "firms": [
+        {
+          "firm": {
+            "id": 3,
+            "name": "CA Fixture Jewellers",
+            "gst_number": "08VRHFA2322D1ZI"
+          },
+          "months": [
+            {
+              "month": "2026-08",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-09",
+              "sales": {
+                "rows": [
+                  [
+                    1,
+                    "A9",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "cash",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    2,
+                    "a9",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "credit",
+                    "B2B",
+                    "08"
+                  ],
+                  [
+                    3,
+                    "A-1",
+                    "2026-09-12",
+                    "Registered Buyer",
+                    "08ABCDE1234F1Z5",
+                    "Silver",
+                    "711311",
+                    "3",
+                    "1.000",
+                    "gms",
+                    "100.000",
+                    "100.00",
+                    "1.50",
+                    "1.50",
+                    "0.00",
+                    "0.00",
+                    "103.00",
+                    "bank",
+                    "B2B",
+                    "08"
+                  ]
+                ],
+                "totals": {
+                  "taxable": "300.00",
+                  "cgst": "4.50",
+                  "sgst": "4.50",
+                  "igst": "0.00",
+                  "tax": "9.00",
+                  "value": "309.00",
+                  "round_off": "0.00",
+                  "bills": 3
+                },
+                "split": [
+                  {
+                    "mode": "cash",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "33.3333"
+                  },
+                  {
+                    "mode": "credit",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "33.3333"
+                  },
+                  {
+                    "mode": "bank",
+                    "bills": 1,
+                    "value": "103.00",
+                    "taxable": "100.00",
+                    "cgst": "1.50",
+                    "sgst": "1.50",
+                    "igst": "0.00",
+                    "share": "33.3334"
+                  }
+                ]
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-10",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            },
+            {
+              "month": "2026-11",
+              "sales": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              },
+              "purchases": {
+                "rows": [],
+                "totals": {
+                  "taxable": "0.00",
+                  "cgst": "0.00",
+                  "sgst": "0.00",
+                  "igst": "0.00",
+                  "tax": "0.00",
+                  "value": "0.00",
+                  "round_off": "0.00",
+                  "bills": 0
+                },
+                "split": []
+              }
+            }
+          ],
+          "gstr1": [],
+          "gstr3b": [],
+          "amendments": []
+        }
+      ]
+    }
+  }
+}

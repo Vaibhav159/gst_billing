@@ -51,6 +51,56 @@ def test_ca_workbook_payment_shares_keep_v2_four_decimal_remainder():
     assert sum(D(entry["share"]) for entry in splits) == D("100.0000")
     assert [entry["share"] for entry in payment_split(bills)] == ["33.33", "33.33", "33.34"]
 
+@pytest.mark.parametrize("numbers", [("12", "9"), ("INV/12", "INV/9")])
+def test_x84_ca_equal_payment_buckets_follow_date_then_natural_bill_number(numbers):
+    bills = [row(1, number=numbers[0], total="1", payment="cash"),
+             row(2, number=numbers[1], total="1", payment="bank"),
+             row(3, number="99", day=date(2026, 9, 11), total="1", payment="")]
+    before = deepcopy(bills)
+    result = ca_workbook(bills + [row(4, number="1", total="1", status="cancelled")], [], **SEPT, split=True)
+    section = result["firms"][0]["months"][0]["sales"]
+    assert [line[1] for line in section["rows"]] == ["99", numbers[1], numbers[0]]
+    assert [line[0] for line in section["rows"]] == [1, 2, 3]
+    assert [(part["mode"], part["share"]) for part in section["split"]] == [
+        ("", "33.3333"), ("bank", "33.3333"), ("cash", "33.3334")]
+    assert section["totals"]["bills"] == 3
+    assert [(part["mode"], part["share"]) for part in payment_split(bills)] == [
+        ("cash", "33.33"), ("bank", "33.33"), ("", "33.34")]
+    assert bills == before
+
+@pytest.mark.parametrize("side", ["sales", "purchases"])
+def test_x84_ca_round_off_is_zero_and_no_item_total_reaches_rows_totals_and_split(side):
+    bills = [row(1, number="1", taxable="100", cgst="1.50", sgst="1.50", total="103.01"),
+             row(2, number="2", lines=[], total="100", payment="bank")]
+    before = deepcopy(bills)
+    sales, purchases = (bills, []) if side == "sales" else ([], bills)
+    result = ca_workbook(sales, purchases, **SEPT, split=True)
+    section = result["firms"][0]["months"][0][side]
+    assert section["rows"][0][11:17] == ["100.00", "1.50", "1.50", "0.00", "0.00", "103.01"]
+    assert section["rows"][1][11:17] == ["100.00", "0.00", "0.00", "0.00", "0.00", "100.00"]
+    for total in (section["totals"], result["summary"][0][side]):
+        assert total == {"bills": 2, "taxable": "200.00", "igst": "0.00", "cgst": "1.50", "sgst": "1.50",
+                         "tax": "3.00", "value": "203.01", "round_off": "0.00"}
+    empty_split = next(part for part in section["split"] if part["mode"] == "bank")
+    assert {key: empty_split[key] for key in ("bills", "taxable", "igst", "cgst", "sgst", "value")} == {
+        "bills": 1, "taxable": "100.00", "igst": "0.00", "cgst": "0.00", "sgst": "0.00", "value": "100.00"}
+    # X-84 is an export presentation rule; shared books/credit projections keep their existing figures.
+    report = build_report(side, sales, purchases, **SEPT)
+    assert report["totals"]["taxable"] == "100.00"
+    assert report["totals"]["round_off"] == "100.01"
+    assert bills == before
+
+def test_x84_ca_keeps_x36_paise_per_line_instead_of_matching_v2_historical_aggregate():
+    bill = row(price="0.025", qty="1", taxable="0.025", cgst="0", sgst="0", total="0.05")
+    bill["lines"].append(deepcopy(bill["lines"][0]))
+    result = ca_workbook([bill], [], **SEPT, split=True)
+    section = result["firms"][0]["months"][0]["sales"]
+    assert [line[11] for line in section["rows"]] == ["0.03", "0.03"]
+    assert section["rows"][0][15:17] == ["0.00", "0.05"]
+    assert section["totals"]["taxable"] == result["summary"][0]["sales"]["taxable"] == "0.06"
+    assert section["totals"]["round_off"] == "0.00"
+    assert section["split"][0]["taxable"] == "0.06"
+
 def test_purchase_credit_follows_return_month_and_explains_gap():
     early = diamond(day=date(2026, 2, 18), credit_month="2026-10")
     context = {**SEPT, "start": date(2026, 10, 1), "end": date(2026, 10, 31)}
@@ -138,7 +188,7 @@ def test_workbook_first_row_fields_pan_fallback_empty_lines_and_round_off():
     result = ca_workbook([bill, empty, row(3, status="cancelled")], [], **SEPT, split=True)
     lines = result["firms"][0]["months"][0]["sales"]["rows"]
     assert lines[0][4] == "ABCDE1234F (PAN)"
-    assert lines[0][15:17] == ["0.02", "165617.44"]
+    assert lines[0][15:17] == ["0.00", "165617.44"]
     assert [lines[1][i] for i in (0, 1, 2, 3, 4, 15, 16)] == [""] * 7
     assert lines[2][5] == "(no items)"
     assert result["summary"][0]["sales"]["bills"] == 2
@@ -262,7 +312,8 @@ def test_reconciliation_line_paise_agrees_across_reports_split_workbook():
     section = workbook["firms"][0]["months"][0]["sales"]
     assert [line[12] for line in section["rows"]] == ["0.03", "0.03"]
     assert section["totals"]["cgst"] == "0.06"
-    assert section["rows"][0][15] == "-0.02"
+    assert section["rows"][0][15] == "0.00"
+    assert section["totals"]["round_off"] == "0.00"
     recon = reconcile(3, "2026-27", [bill], today=SEPT["today"])
     assert recon["sections"][-1]["all"]["cgst"] == "0.06"
 

@@ -41,13 +41,22 @@ function sumTotals(values: WorkbookTotals[]): WorkbookTotals {
 const payment = (value: string | number) => String(value).replace(/^./, first => first.toUpperCase());
 const monthLabel = (month: string) => `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month.slice(5)) - 1]} ${month.slice(0, 4)}`;
 
+function invoiceOrder(a: WorkbookSection["rows"][number], b: WorkbookSection["rows"][number]): number {
+  const left = String(a[1]), right = String(b[1]);
+  const na = parseInt(left, 10), nb = parseInt(right, 10);
+  // Match v2's canonical-integer shortcut and the browser's own numeric collation.
+  return String(a[2]).localeCompare(String(b[2])) ||
+    (!Number.isNaN(na) && !Number.isNaN(nb) && String(na) === left && String(nb) === right
+      ? na - nb : left.localeCompare(right, undefined, { numeric: true }));
+}
+
 function invoiceRows(lines: WorkbookSection["rows"]): Row[] {
   const bills: WorkbookSection["rows"][] = [];
   for (const line of lines) {
     if (line[0] !== "") bills.push([]);
     bills[bills.length - 1].push(line);
   }
-  bills.sort((a, b) => String(a[0][2]).localeCompare(String(b[0][2])) || String(a[0][1]).localeCompare(String(b[0][1]), undefined, { numeric: true }));
+  bills.sort((a, b) => invoiceOrder(a[0], b[0]));
   return bills.flatMap((bill, index) => bill.map((line, item) => {
     const empty = line[8] === "" && line[10] === "";
     const values = [item === 0 ? index + 1 : "", line[1], String(line[2]).split("-").reverse().join("-"), line[3], line[4],
@@ -73,11 +82,28 @@ function table(rows: Row[], title: string, values: WorkbookRecord[], columns: Co
   for (const value of values) rows.push({ kind: "data", cells: columns.map(([, path, num]) => ({ v: scalar(get(value, path)), num })) });
 }
 
-function splitRows(rows: Row[], split: WorkbookRecord[]) {
+function splitRows(rows: Row[], split: WorkbookRecord[], lines: WorkbookSection["rows"]) {
   if (!split.length) return;
+  const modes = new Map<string, number>();
+  for (const line of lines.filter(line => line[0] !== "").sort(invoiceOrder)) {
+    const mode = String(line[17]).trim();
+    if (!modes.has(mode)) modes.set(mode, modes.size);
+  }
+  const ordered: WorkbookRecord[] = [];
+  const gross = split.map(value => toPaise(scalar(value.value)));
+  for (let start = 0; start < split.length;) {
+    let end = start + 1;
+    while (end < split.length && gross[end] === gross[start]) end += 1;
+    const group = split.slice(start, end).sort((a, b) =>
+      (modes.get(String(scalar(a.mode)).trim()) ?? Infinity) - (modes.get(String(scalar(b.mode)).trim()) ?? Infinity));
+    // Equal-gross modes keep the server's shares by position, including its last
+    // residual. Only their locale-dependent presentation order changes.
+    group.forEach((value, index) => ordered.push({ ...value, share: split[start + index].share }));
+    start = end;
+  }
   rows.push({ kind: "blank", cells: [] }, band("PAYMENT SPLIT (cash / bank)", 9),
     head(["MODE", "INVOICES", "GROSS (₹)", "TAXABLE (₹)", "GST (₹)", "SHARE %", "IGST (₹)", "CGST (₹)", "SGST (₹)"]));
-  for (const value of split) {
+  for (const value of ordered) {
     const heads = ["igst", "cgst", "sgst"].map(key => String(scalar(value[key])));
     rows.push({ kind: "data", cells: [{ v: payment(scalar(value.mode) || "(not set)") }, countCell(Number(value.bills)),
       ...[scalar(value.value), scalar(value.taxable), addMoney(heads)].map(v => ({ v, num: true, format: MONEY_FORMAT })),
@@ -163,7 +189,7 @@ export function workbookSheets(data: CaWorkbook): Sheet[] {
       const totals = totalCells(section.totals);
       if (!section.rows.some(line => (toPaise(line[14]) ?? 0) > 0)) totals[3] = { ...totals[3], v: "-" };
       rows.push({ kind: "total", cells: [{ v: "TOTAL", span: 10 }, ...totals] });
-      splitRows(rows, section.split);
+      splitRows(rows, section.split, section.rows);
     }
     if (populated.length) {
       const sales = sumTotals(populated.map(month => month.sales.totals));
