@@ -433,7 +433,8 @@ const FORM_STATES = [
     },
   },
   {
-    name: "the review once paid", on: ["desktop", "phone"], desktopSize: { width: 1280, height: 720 }, prepare: (api) => newBill(api),
+    // A small walk-in bill has no address/PAN action, so this checks the control-free scrolling body.
+    name: "the review once paid", on: ["desktop", "phone"], desktopSize: { width: 1280, height: 720 }, prepare: async (api) => newBill(api, { customer: await walkIn(api) }),
     path: (b) => `/sales/new?from=${b.id}`, landing: "/sales/new",
     async show(page, b, project) {
       await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
