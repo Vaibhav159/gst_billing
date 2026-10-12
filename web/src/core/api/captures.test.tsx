@@ -94,7 +94,7 @@ test('X-30 refuses a complete multipart request over 24 MB before any HTTP reque
   const files = [new File([new Uint8Array(20 * 1024 * 1024)], 'front.pdf', { type: 'application/pdf' }),
     new File([new Uint8Array(4 * 1024 * 1024)], 'back.pdf', { type: 'application/pdf' })];
   await expect(uploadCapture({ files, client_id: '7439a752-34d4-4c98-ae27-2f4506d91df4', note: 'All pages' }))
-    .rejects.toThrow('These pages come to 24.0 MB. One bill can send at most 24 MB; take fewer or smaller pages.');
+    .rejects.toThrow('These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.');
   expect(calls).toHaveLength(0);
 });
 

@@ -75,7 +75,7 @@ describe("capture files", () => {
   it("leaves multipart headroom under nginx's 25 MB limit, rejecting all pages together", async () => {
     const files = [file("one.pdf", MAX_REQUEST_BYTES / 2), file("two.pdf", MAX_REQUEST_BYTES / 2)];
     expect(await prepareFiles(files, true)).toEqual([files]);
-    await expect(prepareFiles([...files, file("extra.pdf", 1)], true)).rejects.toThrow("These pages come to 24.0 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
+    await expect(prepareFiles([...files, file("extra.pdf", 1)], true)).rejects.toThrow("These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
     await expect(prepareFiles([...files, file("extra.pdf", 1024 * 1024)], true)).rejects.toThrow("These pages come to 25.0 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
     expect(await prepareFiles([...files, file("extra.pdf", 1)], false)).toHaveLength(3);
   });

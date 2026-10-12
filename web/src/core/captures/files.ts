@@ -1,4 +1,4 @@
-import { MAX_REQUEST_BYTES } from "./multipart";
+import { MAX_REQUEST_BYTES, tooLarge } from "./multipart";
 export { MAX_REQUEST_BYTES } from "./multipart";
 
 export const MAX_FILES = 8;
@@ -83,7 +83,7 @@ export async function prepareFiles(files: File[], asPages: boolean, resize = dow
   for (const group of groups) {
     const total = group.reduce((sum, file) => sum + file.size, 0);
     if (total > MAX_REQUEST_BYTES) {
-      throw new Error(`These pages come to ${(total / 1048576).toFixed(1)} MB. One bill can send at most 24 MB; take fewer or smaller pages.`);
+      throw new Error(tooLarge(total));
     }
   }
   return groups;

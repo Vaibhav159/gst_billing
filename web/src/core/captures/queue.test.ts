@@ -63,7 +63,7 @@ describe("durable capture queue", () => {
     const save = vi.spyOn(f.store, "putMany");
     const files = [new File([new Uint8Array(12 * 1024 * 1024)], "front.pdf", { type: "application/pdf" }),
       new File([new Uint8Array(12 * 1024 * 1024)], "back.pdf", { type: "application/pdf" })];
-    await expect(f.queue.add(files, { ...options, asPages: true })).rejects.toThrow("These pages come to 24.0 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
+    await expect(f.queue.add(files, { ...options, asPages: true })).rejects.toThrow("These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
     expect(save).not.toHaveBeenCalled(); expect(f.store.rows).toEqual([]);
     expect(f.queue.getSnapshot().items).toEqual([]); expect(f.upload).not.toHaveBeenCalled();
     // The unchanged selection remains usable: the person can explicitly choose separate bills.

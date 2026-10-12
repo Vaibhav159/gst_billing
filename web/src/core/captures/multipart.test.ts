@@ -6,7 +6,7 @@ const file = (size: number, name = "bill.pdf", type = "application/pdf") => new 
 const filesNearLimit = (headroom: number, name = "bill.pdf") => [
   file(12 * 1024 * 1024, name), file(12 * 1024 * 1024 - headroom, name),
 ];
-const message = "These pages come to 24.0 MB. One bill can send at most 24 MB; take fewer or smaller pages.";
+const message = "These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.";
 
 describe("complete capture multipart size", () => {
   it("builds the same ordered files and optional fields as the capture API", () => {
@@ -59,5 +59,10 @@ describe("complete capture multipart size", () => {
     for (let index = 0; index < 1000; index++) data.append(`field-${index}`, "");
     data.append("file", file(MAX_REQUEST_BYTES - 500 * 1024));
     expect(() => assertMultipartSize(data)).toThrow(/One bill can send at most 24 MB/);
+  });
+
+  it("rounds the refused size up, so a refusal never reads as 24.0 MB against a 24 MB limit", () => {
+    const data = new FormData(); data.append("files", file(MAX_REQUEST_BYTES - 1024 - 1024 - 3 * 5 - 3 * 8 - 3 * 15 + 1, "bill.pdf"));
+    expect(() => assertMultipartSize(data)).toThrow("These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.");
   });
 });

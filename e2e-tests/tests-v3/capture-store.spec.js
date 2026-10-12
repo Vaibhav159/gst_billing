@@ -56,5 +56,5 @@ test('X-30 bounds real browser multipart framing and UTF-8 metadata under 24 MB'
   });
   expect(result.actualBytes).toBeLessThanOrEqual(result.limit);
   expect(result.actualBytes).toBeGreaterThan(result.limit - 65536);
-  expect(result.refused).toBe('These pages come to 24.0 MB. One bill can send at most 24 MB; take fewer or smaller pages.');
+  expect(result.refused).toBe('These pages come to 24.1 MB. One bill can send at most 24 MB; take fewer or smaller pages.');
 });

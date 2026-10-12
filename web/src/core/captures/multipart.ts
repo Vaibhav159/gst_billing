@@ -21,9 +21,12 @@ export function assertMultipartSize(data: FormData): void {
     if (typeof value === "string") bytes += textBytes(value);
     else bytes += value.size + 3 * textBytes(value.name) + 3 * textBytes(value.type);
   }
-  if (bytes > MAX_REQUEST_BYTES) {
-    throw new Error(`These pages come to ${(bytes / 1048576).toFixed(1)} MB. One bill can send at most 24 MB; take fewer or smaller pages.`);
-  }
+  if (bytes > MAX_REQUEST_BYTES) throw new Error(tooLarge(bytes));
+}
+
+/** Round up to one decimal, so a refused size never shows as 24.0 MB against the 24 MB limit. */
+export function tooLarge(bytes: number): string {
+  return `These pages come to ${(Math.ceil((bytes * 10) / 1048576) / 10).toFixed(1)} MB. One bill can send at most 24 MB; take fewer or smaller pages.`;
 }
 
 export function captureFormData(input: UploadCapture): FormData {
