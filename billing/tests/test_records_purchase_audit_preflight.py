@@ -44,7 +44,7 @@ def test_purchase_spies_do_not_leak_guard_into_a_later_service_import():
         assert purchase_bin.assert_purchase_open is original
         assert period_lock.assert_purchase_open is original
     """)], env={**os.environ, "DJANGO_SETTINGS_MODULE": "gst_billing.test_settings",
-               "DJANGO_SECRET_KEY": os.environ.get("DJANGO_SECRET_KEY", "test-only-not-secret")},
+                "DJANGO_SECRET_KEY": os.environ.get("DJANGO_SECRET_KEY", "test-only-not-secret")},
         capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
 

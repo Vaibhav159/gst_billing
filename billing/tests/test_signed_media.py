@@ -45,6 +45,7 @@ class SignedMediaTest(BaseAPITestCase):
         from rest_framework.test import APIClient
 
         response = APIClient().get(url)
+        # response.close() signals request_finished and closes TestCase's Postgres connection.
         if getattr(response, "file_to_stream", None) is not None:
             self.addCleanup(response.file_to_stream.close)
         return response
