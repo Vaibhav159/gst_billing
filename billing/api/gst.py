@@ -152,7 +152,7 @@ class GstBundle(APIView):
     v3_actions = {"POST": "gst.download"}
 
     def post(self, request):
-        from billing.services.gst_downloads import record_download, via_input
+        from billing.services.gst_downloads import record_bundle, via_input
         data = body_of(request)
         business, month = firm_input(data, "business"), month_input(data)
         over(month)
@@ -160,7 +160,7 @@ class GstBundle(APIView):
         parts = data.get("parts")
         if not isinstance(parts, list) or not parts or any(item not in ("gstr1", "gstr3b", "excel") for item in parts):
             raise ValidationError({"parts": ["Choose the files in the CA bundle."]})
-        record_download(business, month, "bundle", request.user, via, {"parts": sorted(set(parts))})
+        record_bundle(business, month, request.user, via, parts)
         return Response(status=204)
 
 

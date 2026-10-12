@@ -37,10 +37,33 @@ def via_input(data):
 def record_download(business, month, kind, user, via, body):
     row = ReturnDownload.objects.create(business=business, year=month.year, month=month.month,
                                         kind=kind, by=user, via=via, fingerprint=fingerprint(body))
+    parts = ""
+    if kind == "bundle":
+        parts = " · " + ", ".join(label for key, label in (("gstr1", "GSTR-1"), ("gstr3b", "GSTR-3B"), ("excel", "Excel"))
+                                 if key in body["parts"])
     AuditLog.objects.create(entity="gst_file", entity_id=row.pk, entity_name=file_name(business, month, kind),
                             user=user, action="sent" if via == "share" else "downloaded",
-                            details=f"{business.name} · {month:%B %Y} · {kind.upper()}")
+                            details=f"{business.name} · {month:%B %Y} · {kind.upper()}{parts}")
     return row
+
+
+@transaction.atomic
+def record_bundle(business, month, user, via, parts):
+    from billing.services.gstr1_file import build_gstr1
+    from billing.services.ledger import build_gstr3b_json
+
+    # The completed bundle acknowledges the returns as built at POST time.
+    contents = {}
+    if "gstr1" in parts:
+        contents["gstr1"] = build_gstr1(business, month.year, month.month, strict_amendments=True)["file"]
+    if "gstr3b" in parts:
+        contents["gstr3b"] = build_gstr3b_json(business, month.year, month.month)
+    ReturnDownload.objects.bulk_create([
+        ReturnDownload(business=business, year=month.year, month=month.month, kind=kind,
+                       by=user, via=via, fingerprint=fingerprint(body))
+        for kind, body in contents.items()
+    ])
+    return record_download(business, month, "bundle", user, via, {"parts": sorted(set(parts))})
 
 
 def download_state(business, month, body):

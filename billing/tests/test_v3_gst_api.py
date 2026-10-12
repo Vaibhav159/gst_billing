@@ -79,8 +79,11 @@ class GstApiTest(TestCase):
         data = {"business": self.business.pk, "month": "2026-09", "via": "share", "parts": ["gstr1", "gstr3b", "excel"]}
         response = self.client.post("/api/gst/files/bundle/", data, format="json")
         self.assertEqual(response.status_code, 204, response.content)
-        self.assertEqual(ReturnDownload.objects.get().via, "share")
+        self.assertCountEqual(ReturnDownload.objects.values_list("kind", "via"),
+                              [("bundle", "share"), ("gstr1", "share"), ("gstr3b", "share")])
         self.assertEqual(AuditLog.objects.get(entity="gst_file").entity_name, "GST_Kiran_092026_for_CA.zip")
+        self.assertEqual(AuditLog.objects.get(entity="gst_file").details,
+                         "KIRAN GOLD HOUSE · September 2026 · BUNDLE · GSTR-1, GSTR-3B, Excel")
 
     def test_legacy_frozen_file_is_downloaded_without_rebuilding(self):
         from django.utils import timezone
@@ -140,23 +143,72 @@ class GstApiTest(TestCase):
                 self.assertEqual(response.json()["detail"],
                                  "Nothing has changed since September 2026's GSTR-1, so " + ending)
 
-    def test_bundle_preparation_does_not_record_parts_but_bundle_post_records_once(self):
+    def test_bundle_post_records_parts_built_at_post_time_and_cockpit_detects_later_changes(self):
         from billing.models import AuditLog, ReturnDownload
-        from billing.services.gst_downloads import fingerprint
+        from billing.services.gst_downloads import download_state, fingerprint
+        from billing.services.ledger import build_gstr3b_json
+        prepared = {}
         for kind in ("gstr1", "gstr3b"):
             response = self.client.get(f"/api/gst/files/{kind}/", {**self.query, "record": "0"})
             self.assertEqual(response.status_code, 200, response.content)
+            prepared[kind] = build_gstr3b_json(self.business, 2026, 9) if kind == "gstr3b" else response.json()
         self.assertFalse(ReturnDownload.objects.exists())
         self.assertFalse(AuditLog.objects.filter(entity="gst_file").exists())
+        customer = buyer()
+        sale(self.business, customer, "1", date(2026, 9, 2))
         parts = ["gstr1", "gstr3b", "excel"]
         response = self.client.post("/api/gst/files/bundle/", {
             "business": self.business.pk, "month": "2026-09", "parts": parts,
         }, format="json")
         self.assertEqual(response.status_code, 204, response.content)
-        row = ReturnDownload.objects.get()
-        self.assertEqual(row.kind, "bundle")
+        self.assertCountEqual(ReturnDownload.objects.values_list("kind", flat=True), ["bundle", "gstr1", "gstr3b"])
+        row = ReturnDownload.objects.get(kind="bundle")
         self.assertEqual(row.fingerprint, fingerprint({"parts": sorted(parts)}))
         self.assertEqual(AuditLog.objects.filter(entity="gst_file", action="downloaded").count(), 1)
+        for kind in ("gstr1", "gstr3b"):
+            response = self.client.get(f"/api/gst/files/{kind}/", {**self.query, "record": "0"})
+            self.assertEqual(response.status_code, 200, response.content)
+            current = build_gstr3b_json(self.business, 2026, 9) if kind == "gstr3b" else response.json()
+            row = ReturnDownload.objects.get(kind=kind)
+            self.assertEqual(row.fingerprint, fingerprint(current))
+            self.assertNotEqual(row.fingerprint, fingerprint(prepared[kind]))
+            if kind == "gstr1":
+                state = download_state(self.business, date(2026, 9, 1), current)
+                self.assertIsNotNone(state)
+                self.assertFalse(state["stale"])
+        cockpit = self.client.get("/api/gst/month-end/", {"month": "2026-09"}).json()["firms"][0]
+        self.assertFalse(cockpit["download"]["stale"])
+        self.assertEqual(cockpit["next"], "mark1")
+        with freeze_time("2026-10-08 06:01:00+00:00"):
+            inv = sale(self.business, customer, "2", date(2026, 9, 3))
+            AuditLog.objects.create(entity="invoice", entity_id=inv.pk, entity_name=inv.invoice_number,
+                                    user=self.owner, action="created", details="New bill")
+            cockpit = self.client.get("/api/gst/month-end/", {"month": "2026-09"}).json()["firms"][0]
+        self.assertTrue(cockpit["download"]["stale"])
+        self.assertEqual(cockpit["download"]["changed"][0]["invoice_number"], "2")
+        self.assertEqual(cockpit["next"], "download")
+
+    def test_bundle_records_only_included_returns_once(self):
+        from billing.models import AuditLog, ReturnDownload
+        from billing.services.gst_downloads import download_state
+        response = self.client.post("/api/gst/files/bundle/", {
+            "business": self.business.pk, "month": "2026-09", "parts": ["gstr3b", "excel", "gstr3b"],
+        }, format="json")
+        self.assertEqual(response.status_code, 204, response.content)
+        self.assertCountEqual(ReturnDownload.objects.values_list("kind", flat=True), ["bundle", "gstr3b"])
+        self.assertIsNone(download_state(self.business, date(2026, 9, 1), {}))
+        self.assertEqual(AuditLog.objects.get(entity="gst_file").details,
+                         "KIRAN GOLD HOUSE · September 2026 · BUNDLE · GSTR-3B, Excel")
+
+    def test_failed_bundle_record_rolls_back_every_part(self):
+        from billing.models import AuditLog, ReturnDownload
+        with patch("billing.models.AuditLog.objects.create", side_effect=RuntimeError("audit failed")), \
+                self.assertRaisesMessage(RuntimeError, "audit failed"):
+            self.client.post("/api/gst/files/bundle/", {
+                "business": self.business.pk, "month": "2026-09", "parts": ["gstr1", "gstr3b", "excel"],
+            }, format="json")
+        self.assertFalse(ReturnDownload.objects.exists())
+        self.assertFalse(AuditLog.objects.filter(entity="gst_file").exists())
 
     def test_record_zero_keeps_download_permissions_and_running_month_checks(self):
         response = self.client.get("/api/gst/files/gstr3b/", {
