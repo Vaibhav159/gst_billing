@@ -11,14 +11,14 @@ cancelled bill in a filed month moves too.
 
     python manage.py prepare_v2_rollback            # what would move
     python manage.py prepare_v2_rollback --apply
-    python manage.py prepare_v2_rollback --reverse --apply
+    python manage.py prepare_v2_rollback --reverse --apply   # then: freeze_firm_snapshots --apply
 """
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Exists, OuterRef
 
-from billing.cache import uncached
+from billing.cache import invalidate, uncached
 from billing.constants import BILL_CANCELLED
 from billing.models import BinnedInvoice, Business, FiledPeriod, FilingMonth, FilingRecord, Invoice
 from billing.numbering import lock_firms
@@ -141,3 +141,25 @@ class Command(BaseCommand):
                 except Refusal as refusal:
                     self.stdout.write(f"{where}: left in the bin. {refusal.detail['detail']}")
         self.stdout.write(f"{back if apply else len(live)} cancelled bill(s) {'put back' if apply else 'to put back'}.")
+
+        self._moved_firms(apply)
+
+    def _moved_firms(self, apply):
+        """Bills v2 moved to another firm while it ran: v2 doesn't know firm_snapshot, so they still carry the old
+        firm's details and would print its name and GSTIN (Ruling 1A-45, part 7 Ruling 7-D14). --apply clears those
+        snapshots; freeze_firm_snapshots --apply then freezes each bill's own firm. A snapshot without a firm id
+        predates 1A-45 and is left alone."""
+        rows = uncached(Invoice).filter(firm_snapshot__has_key="business_id").values_list(
+            "pk", "business_id", "firm_snapshot__business_id", "invoice_number", "invoice_date")
+        moved = [row for row in rows if str(row[2]) != str(row[1])]
+        names = dict(uncached(Business).values_list("pk", "name")) if moved else {}
+        for _pk, firm_id, frozen_id, number, day in moved:
+            self.stdout.write(f"  {names.get(firm_id, f'Firm {firm_id}')} {number} of {day}: frozen with "
+                              f"{names.get(frozen_id, f'firm {frozen_id}')}'s details")
+        if apply and moved:
+            with transaction.atomic():
+                lock_firms(*sorted({firm_id for _pk, firm_id, *_rest in moved}))
+                uncached(Invoice).filter(pk__in=[row[0] for row in moved]).update(firm_snapshot=None)
+            invalidate(Invoice)
+        self.stdout.write(f"{len(moved)} bill(s) moved to another firm while v2 ran: frozen details "
+                          f"{'cleared' if apply else 'to clear'}. Run freeze_firm_snapshots --apply next.")
