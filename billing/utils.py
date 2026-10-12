@@ -574,9 +574,11 @@ def process_invoice_csv(
 
         # Process each invoice with its line items in a transaction
         with transaction.atomic():
+            from billing.cache import uncached
             from billing.services.sales import frozen_firms
             # X-64: every bill in the file freezes the firm as it stands under its lock.
             snapshot = frozen_firms(business.id)[business.id]
+            business = uncached(Business).get(pk=business.pk)
             # One catalog read for the whole file (Product.name is unique) —
             # the old per-line helper SELECTed the product and the invoice
             # again for every row.

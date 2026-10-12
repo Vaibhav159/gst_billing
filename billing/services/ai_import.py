@@ -15,6 +15,7 @@ from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 
 from billing.api.inward_bills_service import find_duplicate, gstin_conflict
+from billing.cache import uncached
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.models import Business, Customer, Invoice, LineItem
 from billing.numbering import lock_firms
@@ -101,8 +102,12 @@ def create_from_ai(request):
 
         buyer_business = (Business.objects.filter(id=inter_firm_buyer_id).first()
                           if inter_firm and inter_firm_buyer_id else None)
-        if type_of_invoice == INVOICE_TYPE_INWARD or buyer_business is not None:
-            lock_firms(business.pk, *([buyer_business.pk] if buyer_business else []))
+        business_ids = [business.pk, *([buyer_business.pk] if buyer_business else [])]
+        lock_firms(*business_ids)
+        current_businesses = {row.pk: row for row in uncached(Business).filter(pk__in=business_ids)}
+        business = current_businesses[business.pk]
+        if buyer_business is not None:
+            buyer_business = current_businesses[buyer_business.pk]
 
         extracted_name = (invoice_data.get("customer_name") or "").strip()
         if not extracted_name:
@@ -459,5 +464,4 @@ def create_from_ai(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
 

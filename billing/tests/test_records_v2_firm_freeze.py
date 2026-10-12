@@ -1,19 +1,24 @@
 """Ruling X-64: v2's sale-create doors freeze the firm at create, as v3's do, under the firm's lock."""
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait as wait_for
+from datetime import date
+from decimal import Decimal
+from io import StringIO
 from threading import Event
 from unittest.mock import patch
 
 import pytest
+from django.contrib import admin
+from django.core.management import call_command
 from django.db import close_old_connections, connection, connections, transaction
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
-from billing.models import Business, Invoice
+from billing.models import AuditLog, Business, Invoice
 from billing.numbering import lock_firms
 from billing.services.bill_reads import firm_block
 from billing.services.sales import firm_snapshot
-from billing.tests.v3_helpers import buyer, client_for, firm, person
+from billing.tests.v3_helpers import buyer, client_for, firm, line, person, sale
 from billing.utils import process_invoice_csv
 
 LINE = {"productName": "Gold ring", "hsn": "711319", "qty": 1, "rate": 10000, "gstRate": 3}
@@ -74,6 +79,15 @@ class V2CreateFreezesFirmTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         bill = Invoice.objects.select_related("business").get(invoice_number="1")
         self.assertEqual((bill.business.name, firm_block(bill)["name"]), ("KIRAN NEW NAME", "KIRAN GOLD HOUSE"))
+
+    def test_admin_create_freezes_an_outward_bill(self):
+        request = RequestFactory().post("/admin/billing/invoice/add/")
+        request.user = person("admin-creator", "admin", superuser=True)
+        bill = Invoice(business=self.business, customer=self.customer, invoice_number="ADMIN-1",
+                       invoice_date=date(2026, 9, 1))
+        admin.site._registry[Invoice].save_model(request, bill, None, change=False)
+        bill.refresh_from_db()
+        self.assertEqual(bill.firm_snapshot, firm_snapshot(self.business))
 
 
 @pytest.mark.django_db(transaction=True)
@@ -166,3 +180,93 @@ def test_v2_move_waits_for_new_firm_identity_and_freezes_it():
     assert waited, "The v2 move did not wait for the firm's identity edit"
     bill.refresh_from_db()
     assert bill.firm_snapshot["name"] == "NEW TARGET NAME"
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("door", ["move", "form", "csv", "bulk", "ai", "admin"])
+def test_v2_bill_heads_and_snapshot_use_the_firm_after_its_identity_lock(door):
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL row-lock test")
+    from billing.services.line_items import build_line_items
+    from billing.tests.test_v3_restore_lock_order import wait_for_lock_waiter
+
+    owner = person("firm-tax-race-owner", "admin", superuser=True)
+    original, target, customer = firm(), firm("TARGET FIRM"), buyer()
+    customer.businesses.add(target)
+    number = "TAX-RACE"
+    if door == "move":
+        existing = sale(original, customer, number, date(2026, 9, 1), firm_snapshot=firm_snapshot(original))
+
+    def write():
+        close_old_connections()
+        try:
+            client = client_for(owner)
+            if door == "move":
+                row = Invoice.objects.get(pk=existing.pk)
+                row.business = target
+                row.save_from_v2()
+            elif door == "form":
+                response = client.post("/api/invoices/", {"invoice_number": number, "invoice_date": "2026-09-01",
+                    "customer": customer.pk, "business": target.pk, "type_of_invoice": "outward",
+                    "line_items": [{**line(), "cgst": "150", "sgst": "150", "igst": "0", "amount": "10300"}]}, format="json")
+                assert response.status_code == 201, response.data
+            elif door == "csv":
+                header = "invoice_number,invoice_date,customer_name,product_name,quantity,rate,hsn_code,gst_tax_rate\n"
+                result = process_invoice_csv((header + f"{number},2026-09-01,Anil Gupta,Silver,1,10000,711311,0.03\n").encode(), target.pk)
+                assert result["invoices_created"] == 1, result
+            elif door == "bulk":
+                response = client.post(reverse("bulk-invoice-import"), {"business_id": target.pk, "invoices": [{
+                    "invoiceNumber": number, "invoice_date": "2026-09-01", "customerName": customer.name,
+                    "type": "OUTWARD", "total": 10300, "items": [LINE]}]}, format="json")
+                assert (response.status_code, response.data["created"]) == (201, 1), response.data
+            elif door == "ai":
+                response = client.post(reverse("ai-invoice-create"), {"business_id": target.pk, "type_of_invoice": "outward",
+                    "invoice_data": {"customer_name": customer.name, "invoice_number": number, "invoice_date": "2026-09-01", "line_items": [line()]}}, format="json")
+                assert response.status_code in (200, 201), response.data
+            else:
+                request = RequestFactory().post("/admin/billing/invoice/add/")
+                request.user = owner
+                row = Invoice(business=target, customer=customer, invoice_number=number, invoice_date=date(2026, 9, 1))
+                with transaction.atomic():
+                    admin.site._registry[Invoice].save_model(request, row, None, change=False)
+                    lines, total = build_line_items(row, [line()], source="api")
+                    row.lineitem_set.bulk_create(lines)
+                    Invoice.objects.filter(pk=row.pk).update(total_amount=total)
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with transaction.atomic():
+            lock_firms(target.pk)
+            Business.objects.filter(pk=target.pk).update(gst_number="27AAPFU0939F1ZV", state_name="MAHARASHTRA")
+            written = pool.submit(write)
+            waited = wait_for_lock_waiter()
+        written.result(timeout=20)
+    assert waited, f"{door} did not wait for the firm's identity edit"
+    bill = Invoice.objects.get(invoice_number=number)
+    assert bill.firm_snapshot["gst_number"] == "27AAPFU0939F1ZV"
+    item = bill.lineitem_set.get()
+    assert (item.cgst, item.sgst, item.igst) == (Decimal("0"), Decimal("0"), Decimal("300"))
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("stored", ["omitted", None, {"name": "Earlier firm"}])
+def test_legacy_deleted_undo_after_freezing_never_reintroduces_a_null_sale_snapshot(stored):
+    from billing.services.bin import v2_snapshot
+
+    owner, business, customer = person("legacy-undo-owner", "admin"), firm(), buyer()
+    bill = sale(business, customer, "LEGACY-1", date(2026, 9, 1))
+    snapshot = v2_snapshot(bill)
+    if stored == "omitted":
+        snapshot.pop("firm_snapshot")
+    else:
+        snapshot["firm_snapshot"] = stored
+    entry = AuditLog.objects.create(action="deleted", entity="invoice", entity_id=bill.pk,
+                                    entity_name=bill.invoice_number, snapshot=snapshot, user=owner)
+    bill.delete()
+    call_command("freeze_firm_snapshots", apply=True, stdout=StringIO())
+    response = client_for(owner).post(f"/api/audit-logs/{entry.pk}/undo/")
+    assert response.status_code == 200, response.data
+    restored = Invoice.objects.get(pk=response.data["new_id"])
+    assert restored.firm_snapshot == (stored if isinstance(stored, dict) else firm_snapshot(business))
+    assert restored.lineitem_set.count() == 1

@@ -1100,6 +1100,7 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     # X-64: a v2 sale freezes its firm at create, as v3's do (firm_snapshot is read-only to v2's
                     # serializer, so it goes in beside the validated fields).
                     data["firm_snapshot"] = frozen_firms(data["business"].pk)[data["business"].pk]
+                data["business"] = uncached(Business).get(pk=data["business"].pk)
                 assert_period_unlocked(data["business"].pk, data["invoice_date"], "create")
                 self.perform_create(serializer)  # saves invoice + writes audit log
                 invoice = serializer.instance
@@ -3029,6 +3030,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
                     if model is Invoice:
                         if kwargs.get("type_of_invoice") == INVOICE_TYPE_INWARD:
                             lock_firms(kwargs["business_id"])
+                        elif kwargs.get("type_of_invoice", INVOICE_TYPE_OUTWARD) == INVOICE_TYPE_OUTWARD and kwargs.get("firm_snapshot") is None:
+                            kwargs["firm_snapshot"] = frozen_firms(kwargs["business_id"])[kwargs["business_id"]]
                         assert_period_unlocked(kwargs.get("business_id"), kwargs.get("invoice_date"), "create")
                         if kwargs.get("type_of_invoice") == INVOICE_TYPE_INWARD and kwargs.get("itc_month"):
                             assert_period_unlocked(kwargs.get("business_id"), kwargs["itc_month"], "create")

@@ -15,6 +15,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from billing.api.inward_bills_service import fy_start, gstin_conflict, inward_number_key, supplier_key
+from billing.cache import uncached
 from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normalize_payment_mode
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.numbering import lock_firms
@@ -425,7 +426,9 @@ def run_bulk_import(request):
     with transaction.atomic():
         # Every firm in the file is locked in one call, in id order. Sales freeze their firm at create (X-64),
         # read under that lock; re-locking a held row below adds no wait.
-        lock_firms(*(business.pk for row in invoices_data if (business := business_for(row)) is not None))
+        business_ids = {business.pk for row in invoices_data if (business := business_for(row)) is not None}
+        lock_firms(*business_ids)
+        current_businesses = {business.pk: business for business in uncached(Business).filter(pk__in=business_ids)}
         frozen = frozen_firms(*(business.pk for row in invoices_data if row.get("type") != "INWARD"
                                 if (business := business_for(row)) is not None))
         for inv_data in invoices_data:
@@ -437,6 +440,8 @@ def run_bulk_import(request):
                     firm_name = (inv_data.get("firmName") or "").strip()
                     firm_gstin = (inv_data.get("firmGSTIN") or "").strip()
                     business = business_for(inv_data)
+                    if business is not None:
+                        business = current_businesses.get(business.pk)
 
                     if not business:
                         errors.append(
@@ -772,5 +777,4 @@ def run_bulk_import(request):
         },
         status=status.HTTP_201_CREATED,
     )
-
 

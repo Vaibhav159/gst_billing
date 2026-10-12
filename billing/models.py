@@ -472,8 +472,11 @@ class Invoice(AbstractBaseModel):
                       .only("business_id", "invoice_date", "type_of_invoice", "itc_month").first())
             moved = before is not None and str(before.business_id) != str(self.business_id)
             if moved:
+                from billing.cache import uncached
                 from billing.services.sales import frozen_firms
                 self.firm_snapshot = frozen_firms(before.business_id, int(self.business_id))[int(self.business_id)]
+                # The form's cached target may predate the identity edit we waited for.
+                self.business = uncached(Business).get(pk=self.business_id)
                 fields.append("firm_snapshot")
             if before is not None and "inward" in (before.type_of_invoice, self.type_of_invoice):
                 from billing.numbering import lock_firms

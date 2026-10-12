@@ -39,11 +39,17 @@ class PeriodLockAdminMixin:
 
     @transaction.atomic
     def save_model(self, request, obj, form, change):
+        if not change and isinstance(obj, Invoice) and obj.type_of_invoice == INVOICE_TYPE_OUTWARD:
+            from billing.cache import uncached
+            from billing.services.sales import frozen_firms
+
+            obj.firm_snapshot = frozen_firms(obj.business_id)[obj.business_id]
+            obj.business = uncached(Business).get(pk=obj.business_id)
         self._assert(obj, "edit" if change else "create")
         if change and isinstance(obj, Invoice):
             # v2's columns only (Ruling 1A-16): a full save would undo a cancel that landed after the
-            # read, and a history revert would bring back an old status. A changed firm clears the
-            # frozen one (Ruling 1A-23).
+            # read, and a history revert would bring back an old status. A changed firm freezes
+            # its new identity under the firm locks (Ruling X-74).
             obj._history_user = request.user  # as SimpleHistoryAdmin.save_model sets it
             obj.save_from_v2()
             return
