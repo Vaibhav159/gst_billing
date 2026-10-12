@@ -286,6 +286,18 @@ async function bookToMeasure(api) {
   const why = full ? `${f.name}, ${month}: ${holds}` : `fallback: no firm's ${month} has numbers not entered yet and a cancelled bill; measured ${possessive(f.name)} (${holds})`;
   return (book = { firm: f.id, month, why });
 }
+/** Entering a paper bill needs an open month; the fullest seeded book can already be filed. */
+async function openBookToMeasure(api) {
+  const { results: firms } = await api.get("businesses/", { page_size: 100 });
+  let month = today().slice(0, 7);
+  for (let back = 0; back < 6; back++, month = monthBefore(`${month}-01`)) {
+    for (const firm of firms) {
+      const pb = await api.get("sales/paper-book/", { business_id: firm.id, month });
+      if (!pb.locked) return { firm: firm.id, month, why: `${firm.name}, ${month}: open for paper entry` };
+    }
+  }
+  throw new Error("The paper-mode form needs an open month in the paper book's six-month range");
+}
 /** "2026-27": the financial year (April to March) of the ISO date `iso`, or the one `back` years before it. */
 function fyOf(iso, back = 0) {
   const [y, m] = iso.split("-").map(Number);
@@ -364,8 +376,8 @@ const FORM_STATES = [
   },
   {
     // the paper-mode form (1D Task 7) as the paper book's Enter bill opens it, with the paper bill's own number and date,
-    // from the book the paper book's state measures; measured once its number is checked
-    name: "the paper-mode form, from the paper book's Enter bill", on: ["desktop", "phone"], prepare: bookToMeasure, note: (c) => c.why,
+    // from an open book; the fullest seeded book measured above may already be filed
+    name: "the paper-mode form, from the paper book's Enter bill", on: ["desktop", "phone"], prepare: openBookToMeasure, note: (c) => c.why,
     path: (c) => `/sales/paper?firm=${c.firm}&month=${c.month}`, landing: "/sales/paper",
     async show(page, c, project) {
       const enter = page.getByRole("button", { name: /^Enter bill \d+$/ });
