@@ -1,15 +1,14 @@
 """Join 3B projections to the purchase and GST services, without another money engine."""
 
 from datetime import date
-from decimal import Decimal
 
-from django.db.models import F, Q
+from django.db.models import Q
 from django.utils import timezone
 
 from billing.cache import uncached
 from billing.fy import fy_label, fy_range
-from billing.models import Business, FiledPeriod, FilingMonth, FilingRecord
-from billing.services.filing import _person_rows, changes_since_filing, filing_data, month_stages
+from billing.models import Business, FiledPeriod, FilingRecord
+from billing.services.filing import changes_since_filing, filed_figures, filing_data, month_stages, records_with_people
 from billing.services.gst_reads import wire
 from billing.services.gstr1_file import build_gstr1
 from billing.services.ledger import gstr3b_tables, ledger
@@ -40,58 +39,15 @@ def _fy_filter(fy):
 
 
 def _filed_totals(business, fy, sales):
-    """Project only figures needed for reconciliation, then apply carried bill deltas.
-
-    This follows filing.changes_for_month: own GSTR-1A replaces GSTR-1, and later
-    GSTR-1 amendments update the original month's baseline in calendar order.
-    It reads no full bill or portal-file snapshots.
-    """
-    selected = _fy_filter(fy)
-    totals, amended_in = {}, {}
-    fields = {"value_" + key: F("figures__" + key) for key in (*COLUMNS, "bills")}
-    rows = (uncached(FilingRecord).filter(selected, business_id=business.pk)
-            .annotate(**fields, output=F("figures__output"))
-            .values("year", "month", "kind", *fields, "output").order_by("year", "month", "kind"))
-    for row in rows:
-        month = f"{row['year']:04d}-{row['month']:02d}"
-        target = totals.setdefault(month, {})
-        if row["kind"] == "gstr3b":
-            target["gstr3b"] = row["output"]
-        else:
-            target["gstr1"] = {key: Decimal(str(row["value_" + key] or 0)) for key in COLUMNS}
-            target["gstr1"]["bills"] = int(row["value_bills"] or 0)
-    legacy_fields = {"value_" + key: F("legacy_snapshot__gstr1__figures__" + key) for key in (*COLUMNS, "bills")}
-    for row in (uncached(FilingMonth).filter(selected, business_id=business.pk, legacy_frozen_at__isnull=False)
-                .annotate(**legacy_fields, output=F("legacy_snapshot__gstr3b__figures__output"))
-                .values("year", "month", *legacy_fields, "output")):
-        month = f"{row['year']:04d}-{row['month']:02d}"
-        target = totals.setdefault(month, {})
-        target.setdefault("gstr1", {**{key: Decimal(str(row["value_" + key] or 0)) for key in COLUMNS},
-                                    "bills": int(row["value_bills"] or 0)})
-        target.setdefault("gstr3b", row["output"])
-    # Legacy locks without a saved snapshot still hold their unchanged books.
-    for year, number in uncached(FiledPeriod).filter(selected, business_id=business.pk).values_list("year", "month"):
+    """3A's as-filed figures; legacy locks without a saved snapshot still hold their unchanged books."""
+    totals, amended_in = filed_figures(business, fy)
+    for year, number in uncached(FiledPeriod).filter(_fy_filter(fy), business_id=business.pk).values_list("year", "month"):
         month = f"{year:04d}-{number:02d}"
         if "gstr1" not in totals.get(month, {}) or "gstr3b" not in totals.get(month, {}):
             books = amounts([bill for bill in sales if bill["date"].strftime("%Y-%m") == month and bill["status"] == "active"])
             target = totals.setdefault(month, {})
             target.setdefault("gstr1", {key: books[key] for key in (*COLUMNS, "bills")})
             target.setdefault("gstr3b", {key: books[key] for key in HEADS})
-    later = (uncached(FilingRecord).filter(business_id=business.pk, kind="gstr1")
-             .filter(Q(year__gt=fy) | Q(year=fy, month__gte=4))
-             .values("year", "month", "figures__amendments").order_by("year", "month"))
-    for record in later:
-        carrying = f"{record['year']:04d}-{record['month']:02d}"
-        for change in record["figures__amendments"] or []:
-            source = change["month"]
-            baseline = totals.get(source, {}).get("gstr1")
-            if baseline is None or source >= carrying:
-                continue
-            before, after = change.get("before") or {}, change.get("after") or {}
-            for key in COLUMNS:
-                baseline[key] += Decimal(str(after.get(key, 0))) - Decimal(str(before.get(key, 0)))
-            baseline["bills"] += int(bool(after)) - int(bool(before))
-            amended_in[source] = carrying
     return totals, amended_in
 
 
@@ -119,7 +75,7 @@ def _return_data(firms, months, positions, stages, today):
         selected = Q(pk__in=[])
         for day in dates:
             selected |= Q(year=day.year, month=day.month)
-        for record in _person_rows(uncached(FilingRecord).filter(selected, business_id__in=[firm.pk for firm in firms], kind="gstr3b")):
+        for record in records_with_people(uncached(FilingRecord).filter(selected, business_id__in=[firm.pk for firm in firms], kind="gstr3b")):
             records[record.business_id, f"{record.year:04d}-{record.month:02d}"] = filing_data(record)
     result = {}
     for business in firms:

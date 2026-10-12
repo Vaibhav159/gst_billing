@@ -69,6 +69,11 @@ def _person_rows(query):
         *[f"{relation}__{field}" for relation in ("marked_by", "updated_by") for field in PERSON_FIELDS])
 
 
+def records_with_people(query):
+    """Filing records with who marked and edited them, never their large snapshots."""
+    return _person_rows(query)
+
+
 def filing_data(record):
     figures = {"cash": record._cash, "legacy": record._legacy} if hasattr(record, "_cash") else record.figures
     cash = None
@@ -506,6 +511,54 @@ def changes_for_month(business, year, month, *, built=None, month_builds=None):
     current = built["bills"]
     return [{"month": label, "before": baseline.get(key), "after": current.get(key)}
             for key in sorted(set(baseline) | set(current)) if not snapshots_equal(baseline.get(key), current.get(key))]
+
+
+def filed_figures(business, fy):
+    """Each month's as-filed GSTR-1 totals and GSTR-3B output in FY ``fy``, figures only.
+
+    Returns ({"YYYY-MM": {"gstr1": {taxable, heads, bills}, "gstr3b": output}}, {source: carrying month}).
+    The same order as changes_for_month: a month's own GSTR-1A replaces its GSTR-1 (else a legacy
+    freeze), then later GSTR-1 corrections move its baseline in calendar order. Reads no bill bodies.
+    """
+    columns = ("taxable", *HEADS)
+    selected = Q(year=fy, month__gte=4) | Q(year=fy + 1, month__lte=3)
+    totals, amended_in = {}, {}
+
+    def figures(row):
+        return {**{key: Decimal(str(row["value_" + key] or 0)) for key in columns}, "bills": int(row["value_bills"] or 0)}
+
+    fields = {"value_" + key: F("figures__" + key) for key in (*columns, "bills")}
+    for row in (uncached(FilingRecord).filter(selected, business_id=business.pk)
+                .annotate(**fields, output=F("figures__output"))
+                .values("year", "month", "kind", *fields, "output").order_by("year", "month", "kind")):
+        target = totals.setdefault(f"{row['year']:04d}-{row['month']:02d}", {})
+        if row["kind"] == "gstr3b":
+            target["gstr3b"] = row["output"]
+        else:  # gstr1 sorts before gstr1a, so the GSTR-1A wins
+            target["gstr1"] = figures(row)
+    legacy = {"value_" + key: F("legacy_snapshot__gstr1__figures__" + key) for key in (*columns, "bills")}
+    for row in (uncached(FilingMonth).filter(selected, business_id=business.pk, legacy_frozen_at__isnull=False)
+                .annotate(**legacy, output=F("legacy_snapshot__gstr3b__figures__output"))
+                .values("year", "month", *legacy, "output")):
+        target = totals.setdefault(f"{row['year']:04d}-{row['month']:02d}", {})
+        target.setdefault("gstr1", figures(row))
+        target.setdefault("gstr3b", row["output"])
+    later = (uncached(FilingRecord).filter(business_id=business.pk, kind="gstr1")
+             .filter(Q(year__gt=fy) | Q(year=fy, month__gte=4))
+             .values("year", "month", "figures__amendments").order_by("year", "month"))
+    for record in later:
+        carrying = f"{record['year']:04d}-{record['month']:02d}"
+        for change in record["figures__amendments"] or []:
+            source = change["month"]
+            baseline = totals.get(source, {}).get("gstr1")
+            if baseline is None or source >= carrying:
+                continue
+            before, after = change.get("before") or {}, change.get("after") or {}
+            for key in columns:
+                baseline[key] += Decimal(str(after.get(key, 0))) - Decimal(str(before.get(key, 0)))
+            baseline["bills"] += int(bool(after)) - int(bool(before))
+            amended_in[source] = carrying
+    return totals, amended_in
 
 
 def _has_3b(business_id, day):
