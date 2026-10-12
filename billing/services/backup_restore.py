@@ -29,7 +29,7 @@ from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
 from billing.services.bin import restore_many_from_bin, v2_snapshot
 from billing.services.line_items import build_line_items
-from billing.services.sales import FIRM_FIELDS, LINE_MOST, MOST, _date_problem, _too_big
+from billing.services.sales import FIRM_FIELDS, LINE_MOST, MOST, _date_problem, _too_big, firm_snapshot
 from billing.tax_rules import (
     GST_SLABS,
     clean_gstin,
@@ -753,13 +753,15 @@ def apply_restore(file, fingerprint, user, fy=None):
                 audits.append(_imported(instance, kind, user, info["name"]))
         for kind, model, ref in (("firms", Business, "business"), ("customers", Customer, "buyer")):
             ids = {row[ref] for row in ops["bills"] + ops["purchases"] if isinstance(row[ref], int)}
-            fields = ["id", "name", "gst_number", "state_name"] + (["is_supplier"] if model is Customer else [])
+            fields = (["id", *FIRM_FIELDS, "signature_image"] if model is Business
+                      else ["id", "name", "gst_number", "state_name", "is_supplier"])
             mapped[kind].update(uncached(model).only(*fields).in_bulk(ids))
         for row in ops["bills"]:
             _open_month(months, mapped["firms"][row["business"]].pk, row["day"], "backup_restore")
         bin_ids = [row["bin"] for row in ops["bills"] if row["bin"]]
         from_bin = dict(zip(bin_ids, restore_many_from_bin(bin_ids, user, check_month=False), strict=True)) if bin_ids else {}
         pending, restored = [], []
+        snapshots = {}
         for row in ops["bills"]:
             business, customer = mapped["firms"][row["business"]], mapped["customers"][row["buyer"]]
             if row["bin"]:
@@ -768,6 +770,10 @@ def apply_restore(file, fingerprint, user, fy=None):
             else:
                 invoice = Invoice(business=business, customer=customer, invoice_number=row["number"], invoice_date=row["day"],
                                   type_of_invoice="outward", **row["fields"])
+                if invoice.firm_snapshot is None:
+                    if business.pk not in snapshots:
+                        snapshots[business.pk] = firm_snapshot(business)
+                    invoice.firm_snapshot = snapshots[business.pk]
                 lines, invoice.total_amount = build_line_items(invoice, row["lines"], source="api")
                 pending.append((invoice, lines))
                 restored.append((invoice, lines))

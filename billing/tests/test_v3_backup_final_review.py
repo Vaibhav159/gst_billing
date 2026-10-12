@@ -249,3 +249,36 @@ def test_backup_validates_saved_bin_items_instead_of_obsolete_file_items():
     restored = Invoice.objects.get(pk=binned.original_id)
     assert restored.lineitem_set.count() == 1
     assert restored.total_amount == 10300
+
+
+@pytest.mark.parametrize("existing_firm", [False, True])
+@pytest.mark.parametrize("source", ["missing", "null", "historical"])
+def test_backup_sales_keep_firm_snapshots_after_switch(existing_firm, source):
+    from unittest.mock import patch
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from billing.services.sales import firm_snapshot
+
+    owner = person("snapshot-restore-owner", "admin")
+    business = firm("NEW GOLD", gstin="", bank_name="Current bank") if existing_firm else None
+    call_command("freeze_firm_snapshots", "--apply", stdout=StringIO())
+    data = current_payload()
+    if source != "missing":
+        data["invoices"][0]["firm_snapshot"] = None if source == "null" else {"name": "Earlier firm", "bank_name": "Earlier bank"}
+    data["invoices"].append({**data["invoices"][0], "invoice_number": "2"})
+    with (patch.object(backup_restore, "firm_snapshot", wraps=firm_snapshot, create=True) as frozen,
+          CaptureQueriesContext(connection) as queries):
+        apply(data, owner)
+    snapshots = list(Invoice.objects.order_by("pk").values_list("firm_snapshot", flat=True))
+    if source == "historical":
+        assert snapshots == [{"name": "Earlier firm", "bank_name": "Earlier bank", "signature_image": ""}] * 2
+        assert frozen.call_count == 0
+    else:
+        business = business or Invoice.objects.first().business
+        assert snapshots == [firm_snapshot(business)] * 2
+        assert frozen.call_count == 1
+    # All print fields arrive together; no per-attribute deferred Business fetch.
+    assert not any('FROM "billing_business"' in query["sql"] and '"billing_business"."address"' in query["sql"]
+                   and '"billing_business"."name"' not in query["sql"] for query in queries)
