@@ -25,6 +25,17 @@ class GstApiTest(TestCase):
         response = self.client.get("/api/gst/month/", {"business_id": self.business.pk, "month": "2025-03"})
         self.assertEqual(response.json(), {"month": ["The app's GST records start in April 2025."]})
 
+    def test_month_and_month_end_keep_the_firms_chosen_short_name(self):
+        self.business.short_name = "Kiran Shop"
+        self.business.save(update_fields=["short_name"])
+        month = self.client.get("/api/gst/month/", self.query)
+        self.assertEqual(month.status_code, 200)
+        self.assertEqual(month.json()["firm"]["short"], "Kiran Shop")
+        end = self.client.get("/api/gst/month-end/", {"month": "2026-09"})
+        self.assertEqual(end.status_code, 200)
+        row = next(row for row in end.json()["firms"] if row["firm"]["id"] == self.business.pk)
+        self.assertEqual(row["firm"]["short"], "Kiran Shop")
+
     def test_old_year_and_future_month_need_no_ledger(self):
         response = self.client.get("/api/gst/year/", {"business_id": self.business.pk, "fy": "2024-25"})
         self.assertEqual(response.status_code, 200)
@@ -84,6 +95,17 @@ class GstApiTest(TestCase):
         self.assertEqual(AuditLog.objects.get(entity="gst_file").entity_name, "GST_Kiran_092026_for_CA.zip")
         self.assertEqual(AuditLog.objects.get(entity="gst_file").details,
                          "KIRAN GOLD HOUSE · September 2026 · BUNDLE · GSTR-1, GSTR-3B, Excel")
+
+    def test_bundle_audit_uses_the_same_safe_short_name_as_the_download(self):
+        from billing.models import AuditLog
+
+        self.business.short_name = "Kiran / Shop"
+        self.business.save(update_fields=["short_name"])
+        response = self.client.post("/api/gst/files/bundle/", {
+            "business": self.business.pk, "month": "2026-09", "via": "share", "parts": ["gstr3b", "excel"],
+        }, format="json")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(AuditLog.objects.get(entity="gst_file").entity_name, "GST_Kiran_Shop_092026_for_CA.zip")
 
     def test_legacy_frozen_file_is_downloaded_without_rebuilding(self):
         from django.utils import timezone

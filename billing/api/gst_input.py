@@ -10,7 +10,7 @@ from billing.cache import uncached
 from billing.models import Business
 from billing.tax_rules import to_paise
 
-FIRM_FIELDS = ("id", "name", "gst_number", "state_name", "invoice_prefix")
+FIRM_FIELDS = ("id", "name", "short_name", "gst_number", "state_name", "invoice_prefix")
 MONTH_WORDS = "Give the month like 2026-09."
 
 

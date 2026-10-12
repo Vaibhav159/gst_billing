@@ -11,6 +11,7 @@ from billing.cache import uncached
 from billing.fy import due_dates, fy_label, fy_of
 from billing.models import Business, FilingMonth, FilingRecord, Invoice
 from billing.period_lock import month_status
+from billing.services.firms import short_name
 from billing.tax_rules import state_code
 from billing.text import day_text, money, stamp
 
@@ -36,7 +37,7 @@ def due(month):
 
 
 def firm_ref(business):
-    return {"id": business.pk, "name": business.name, "short": business.name.split()[0].title(),
+    return {"id": business.pk, "name": business.name, "short": short_name(business),
             "gst_number": business.gst_number or "", "state_code": state_code(business)}
 
 

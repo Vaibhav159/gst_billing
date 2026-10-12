@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
@@ -10,6 +11,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from billing.cache import uncached
 from billing.models import AuditLog, BinnedInvoice, FilingMonth, FilingRecord, Invoice, ReturnDownload
+from billing.services.firms import short_name
 from billing.text import person, stamp
 
 
@@ -20,7 +22,8 @@ def fingerprint(body):
 
 def file_name(business, month, kind="gstr1"):
     if kind == "bundle":
-        return f"GST_{business.name.split()[0].title()}_{month:%m%Y}_for_CA.zip"
+        short = re.sub(r"[^A-Za-z0-9_-]+", "_", short_name(business)).strip("_") or "Firm"
+        return f"GST_{short}_{month:%m%Y}_for_CA.zip"
     prefix = "GSTR1" if kind in ("gstr1", "gstr1_filed", "amend") else kind.upper()
     tail = "_amendments" if kind == "amend" else ""
     return f"{prefix}_{business.gst_number}_{month:%m%Y}{tail}.json"
