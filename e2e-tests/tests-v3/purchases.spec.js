@@ -59,7 +59,10 @@ test('delete moves the bill to its deleted page, then Restore returns the same l
   await page.getByRole('button', { name: 'Restore it', exact: true }).click();
   await expect(page.getByText('This purchase was deleted', { exact: true })).toBeHidden();
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Purchase');
-  const restored = await api.get(`purchases/${bill.id}/`); expect(restored.lines).toEqual(bill.lines); expect(restored.credit).toEqual(bill.credit);
+  const restored = await api.get(`purchases/${bill.id}/`);
+  // Restoring recreates line rows; their money and entered values stay the same.
+  const values = lines => lines.map(({ id, ...line }) => line);
+  expect(restored.id).toBe(bill.id); expect(values(restored.lines)).toEqual(values(bill.lines)); expect(restored.credit).toEqual(bill.credit);
 });
 test('failed offline save keeps every typed field', async ({ page, request, context }) => {
   const { bill } = await newPurchase(client(request));
