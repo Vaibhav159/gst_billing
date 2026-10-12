@@ -23,7 +23,9 @@ export function requiredTitles(role) {
   return titles;
 }
 function specs(suites) { return (suites ?? []).flatMap(suite => [...(suite.specs ?? []), ...specs(suite.suites)]); }
-const clean = spec => spec.tests?.length > 0 && spec.tests.every(test => test.results?.length > 0 && test.results.every(result => result.status === 'passed'));
+const clean = spec => spec.ok === true && spec.tests?.length > 0 && spec.tests.every(test =>
+  test.expectedStatus === 'passed' && test.status === 'expected' &&
+  test.results?.length > 0 && test.results.every(result => result.status === 'passed'));
 function executed(spec) {
   const lines = new Set();
   for (const test of spec.tests ?? []) for (const result of test.results ?? []) for (const attachment of result.attachments ?? []) {

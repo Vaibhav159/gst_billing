@@ -10,7 +10,7 @@ function required(role) {
   }
   return titles;
 }
-const passed = (title, lines=[]) => ({title, tests:[{results:[{status:'passed', attachments:[{name:'easy-checks', body:Buffer.from(JSON.stringify({lines})).toString('base64')}]}]}]});
+const passed = (title, lines=[]) => ({title, ok:true, tests:[{expectedStatus:'passed', status:'expected', results:[{status:'passed', attachments:[{name:'easy-checks', body:Buffer.from(JSON.stringify({lines})).toString('base64')}]}]}]});
 function fixture() {
   return {
     coverage: Array.from({ length: 153 }, (_, n) => ({ sourceLine: n + 1, sourceWords: `Original check ${n}`, title: `easy check ${n}` })),
@@ -32,3 +32,28 @@ test('open review and error screenshot comparisons are mandatory', () => { const
 test('duplicate role runs cannot shadow evidence', () => { const v=fixture(); v.runs.push(v.runs[0]); assert.match(checkEasyEvidence(v, () => true).join('\n'), /Exactly one owner/); });
 test('malformed assertion evidence fails the mapped check', () => { const v=fixture(); v.runs[0].report.suites[0].specs[0].tests[0].results[0].attachments[0].body=Buffer.from('no json').toString('base64'); assert.match(checkEasyEvidence(v, () => true).join('\n'), /owner.*sourceLine 1/); });
 test('every GST wrapper boundary needs its own passed browser case', () => { const v=fixture(); v.runs[0].report.suites[0].specs=v.runs[0].report.suites[0].specs.filter(s => !GST_TITLES.includes(s.title)); assert.match(checkEasyEvidence(v, () => true).join('\n'), /Easy GST wrapper.*native cancellation/); });
+test('an expected failure that unexpectedly passes is failed acceptance', () => {
+  const v = fixture();
+  const spec = v.runs[0].report.suites[0].specs.find(spec => spec.title === GST_TITLES[0]);
+  spec.ok = false;
+  spec.tests[0].expectedStatus = 'failed';
+  spec.tests[0].status = 'unexpected';
+  assert.equal(spec.tests[0].results[0].status, 'passed');
+  assert.match(checkEasyEvidence(v, () => true).join('\n'), /owner.*Easy GST wrapper.*native cancellation.*clean passed run/);
+});
+test('raw passing attempts cannot override any negative Playwright verdict', () => {
+  for (const [field, value] of [['ok', false], ['status', 'flaky'], ['expectedStatus', 'failed']]) {
+    const v = fixture();
+    const spec = v.runs[0].report.suites[0].specs[0];
+    (field === 'ok' ? spec : spec.tests[0])[field] = value;
+    assert.match(checkEasyEvidence(v, () => true).join('\n'), /owner.*easy check 0.*clean passed run/, field);
+  }
+});
+test('missing Playwright verdict fields cannot certify passing acceptance', () => {
+  for (const field of ['ok', 'status', 'expectedStatus']) {
+    const v = fixture();
+    const spec = v.runs[0].report.suites[0].specs[0];
+    delete (field === 'ok' ? spec : spec.tests[0])[field];
+    assert.match(checkEasyEvidence(v, () => true).join('\n'), /owner.*easy check 0.*clean passed run/, field);
+  }
+});
