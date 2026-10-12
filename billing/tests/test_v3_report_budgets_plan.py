@@ -150,6 +150,6 @@ class SalesRegisterBudgetTest(TransactionTestCase):
         self.assertEqual(len(purchases["purchases"]), 1)
         self.assertEqual(purchases["sales"], [])
         self.assertLessEqual(len(sales_only), 4)
-        self.assertLessEqual(len(purchases_only), 3)
+        self.assertLessEqual(len(purchases_only), 4)  # + one Sec 16(4) lapse read (P3-15)
         self.assertFalse(any("'inward'" in query["sql"] for query in sales_only))
         self.assertFalse(any("'outward'" in query["sql"] for query in purchases_only))

@@ -214,11 +214,24 @@ def _purchase_lines(business, *, filing_month=None, filing_date=None, today=None
     required = {"itc_month", "itc_eligible", "needs_review"}
     if not required <= {field.name for field in Invoice._meta.fields}:
         raise ImproperlyConfigured("3A ledger requires part 2A's itc_month, itc_eligible and needs_review fields.")
-    lines = (uncached(LineItem).filter(invoice__business_id=business.pk, invoice__type_of_invoice="inward",
-                                      invoice__invoice_date__gte=START)
+    lines = _credit_lines(uncached(LineItem).filter(invoice__business_id=business.pk))
+    return _credit_lapse(lines, filing_month=filing_month, filing_date=filing_date, today=today)
+
+
+def _credit_lines(lines):
+    return (lines.filter(invoice__type_of_invoice="inward", invoice__invoice_date__gte=START)
             .annotate(credit_month=Coalesce("invoice__itc_month", TruncMonth("invoice__invoice_date"), output_field=DateField()),
                       credit_eligible=F("invoice__itc_eligible")))
-    return _credit_lapse(lines, filing_month=filing_month, filing_date=filing_date, today=today)
+
+
+def lapsed_purchase_ids(invoice_ids, *, today=None):
+    """Ids among these purchases whose credit has lapsed under Sec 16(4), in one query.
+
+    The same rule as the GSTR-3B tables: the recorded GSTR-3B filing day where there
+    is one, else the month rule (P3-15, R3A-9). Reports and the credit tab read it.
+    """
+    lines = _credit_lines(uncached(LineItem).filter(invoice_id__in=list(invoice_ids)))
+    return set(_credit_lapse(lines, today=today).filter(lapsed=True).order_by().values_list("invoice_id", flat=True).distinct())
 
 
 def _sums():

@@ -1,7 +1,6 @@
-"""X-40 integration gates for the unlanded 3A P3-15 predecessor fixes.
+"""X-40 integration cases for 3A's P3-15 fixes, run now that 3A has landed.
 
-Remove each explicit skip only after its named 3A change lands. These tests use
-existing public interfaces and assert the adopted ruling, not a guessed new API.
+They read 3A's public interfaces and assert the adopted ruling.
 """
 
 from calendar import monthrange
@@ -11,10 +10,9 @@ from unittest.mock import patch
 
 import pytest
 
-from billing.credit import credit_lapsed
 from billing.services.filing import mark_filed
 from billing.services.gstr1_file import build_gstr1
-from billing.services.ledger import gstr3b_tables
+from billing.services.ledger import gstr3b_tables, lapsed_purchase_ids
 from billing.services.report_context import credit_payload, report_payload
 from billing.tests.v3_helpers import buyer, firm, line, person, sale
 
@@ -22,7 +20,6 @@ pytestmark = pytest.mark.django_db
 TODAY = date(2026, 12, 10)
 
 
-@pytest.mark.skip(reason="X-40: requires 3A P3-15 filing-date-aware shared credit helper and saved GSTR-3B snapshot")
 @pytest.mark.parametrize("filed_on,lapsed", [(date(2026, 11, 30), False), (date(2026, 12, 1), True)])
 def test_recorded_filing_date_controls_credit_and_frozen_tables(filed_on, lapsed):
     with patch("django.utils.timezone.localdate", return_value=TODAY):
@@ -36,7 +33,7 @@ def test_recorded_filing_date_controls_credit_and_frozen_tables(filed_on, lapsed
             "cash_total": "0.00", "confirm_checks": True,
         })
 
-        assert credit_lapsed(purchase, today=TODAY) is lapsed
+        assert (purchase.pk in lapsed_purchase_ids([purchase.pk], today=TODAY)) is lapsed
         buckets = credit_payload(business, 2025)["buckets"]
         expected_state = "lapsed" if lapsed else "claimed"
         other_state = "claimed" if lapsed else "lapsed"
@@ -64,7 +61,6 @@ def test_recorded_filing_date_controls_credit_and_frozen_tables(filed_on, lapsed
         assert Decimal(str(tables["t4c"]["total"])) == (Decimal("0.00") if lapsed else Decimal("902.40"))
 
 
-@pytest.mark.skip(reason="X-40: requires 3A P3-15 April combined HSN, May split HSN and two-decimal section quantities")
 @pytest.mark.parametrize("month", [4, 5])
 def test_ca_passes_through_correct_historical_hsn_and_portal_quantity(month):
     with patch("django.utils.timezone.localdate", return_value=TODAY):
@@ -91,7 +87,6 @@ def test_ca_passes_through_correct_historical_hsn_and_portal_quantity(month):
                 assert [Decimal(str(row["qty"])) for row in portal[table]] == [Decimal("0.13")]
 
 
-@pytest.mark.skip(reason="X-40: requires 3A P3-15 interest_note on the GSTR-3B working response")
 def test_ca_preserves_actual_gstr3b_interest_note():
     with patch("django.utils.timezone.localdate", return_value=TODAY):
         business = firm()

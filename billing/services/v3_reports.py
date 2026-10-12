@@ -62,6 +62,13 @@ def _load_invoices(queryset, *, purchases=False):
             row.update(credit_month=month.strftime("%Y-%m") if month else None, credit_lapsed=credit_lapsed(bill),
                        itc_eligible=bill.itc_eligible, needs_review=bill.needs_review)
         result.append(row)
+    if purchases:
+        from billing.services.ledger import lapsed_purchase_ids
+
+        # P3-15: a GSTR-3B filed after 30 November lapses the credit it claimed, as in its tables.
+        lapsed = lapsed_purchase_ids(row["id"] for row in result if row["credit_month"] and not row["credit_lapsed"])
+        for row in result:
+            row["credit_lapsed"] = row["credit_lapsed"] or row["id"] in lapsed
     return result
 
 

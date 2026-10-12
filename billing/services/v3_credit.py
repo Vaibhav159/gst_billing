@@ -79,6 +79,7 @@ def credit_data(business, fy, *, opening, today=None):
     from billing.fy import due_dates, fy_range
     from billing.models import Invoice
     from billing.services.gst_amounts import paise_expression
+    from billing.services.ledger import lapsed_purchase_ids
     from billing.tax_rules import HEADS, clean_gstin
 
     today = today or timezone.localdate()
@@ -101,10 +102,14 @@ def credit_data(business, fy, *, opening, today=None):
             "entered_on": timezone.localtime(bill["created_at"]).date(), "supplier": {
                 "id": bill["customer_id"], "name": bill["customer__name"],
                 "gst_number": clean_gstin(bill["customer__gst_number"])},
-            "tax": tax, "lapsed": credit_lapsed(invoice, today),
+            "tax": tax, "lapsed": credit_lapsed(invoice),
             "credit_month": month, "credit_month_due": due_dates(month.year, month.month)["gstr3b"] if month else None,
             "eligible": bill["itc_eligible"], "deadline": credit_deadline(bill["invoice_date"]), "claim_months": [],
         })
+    # P3-15: a GSTR-3B filed after 30 November lapses the credit it claimed, as in its tables.
+    lapsed = lapsed_purchase_ids((row["id"] for row in rows if row["credit_month"] and not row["lapsed"]), today=today)
+    for row in rows:
+        row["lapsed"] = row["lapsed"] or row["id"] in lapsed
     candidates = [row for row in rows if row["credit_month"] is not None and not row["lapsed"]
                   and fy_of(row["bill_date"]) == fy - 1 and row["eligible"]
                   and row["tax"] > 0 and has_gstin(row["supplier"]["gst_number"]) and today <= row["deadline"]
