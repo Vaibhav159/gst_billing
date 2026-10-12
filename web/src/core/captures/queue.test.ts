@@ -310,6 +310,34 @@ describe("durable capture queue", () => {
     expect(f.queue.getSnapshot().error).toBe("You're offline. The photo is kept here and goes up by itself when the internet is back.");
   });
 
+  it("reuses one IndexedDB connection across store calls and reopens after the browser closes it", async () => {
+    const rows = new Map<string, QueuedCapture>(); const dbs: { close: () => void; onclose?: () => void; onversionchange?: () => void }[] = [];
+    const transaction = () => {
+      const t: { oncomplete?: () => void; onerror?: () => void; onabort?: () => void; objectStore(): unknown; abort(): void } = { abort() { t.onabort?.(); }, objectStore: () => store };
+      let pending = 1; const finish = () => { if (--pending === 0) queueMicrotask(() => t.oncomplete?.()); };
+      const request = (value: () => unknown) => { pending++; const r: { result?: unknown; onsuccess?: () => void } = {}; queueMicrotask(() => { r.result = value(); r.onsuccess?.(); finish(); }); return r; };
+      const store = {
+        index: () => ({ getAll: (userId: number) => request(() => [...rows.values()].filter((row) => row.userId === userId)) }),
+        get: ([userId, clientId]: [number, string]) => request(() => rows.get(`${userId}:${clientId}`)),
+        put: (row: QueuedCapture) => { rows.set(`${row.userId}:${row.clientId}`, row); }, add: (row: QueuedCapture) => { rows.set(`${row.userId}:${row.clientId}`, row); },
+        delete: ([userId, clientId]: [number, string]) => { rows.delete(`${userId}:${clientId}`); },
+      };
+      queueMicrotask(finish); return t;
+    };
+    const open = vi.fn(() => {
+      const db = { transaction, close: vi.fn() } as unknown as { close: () => void; onclose?: () => void; onversionchange?: () => void };
+      const request: { result: unknown; onsuccess?: () => void } = { result: db }; dbs.push(db);
+      queueMicrotask(() => request.onsuccess?.()); return request;
+    });
+    vi.stubGlobal("indexedDB", { open });
+    const store = new IndexedDbCaptureStore("test-reuse");
+    const row: QueuedCapture = { clientId: "a", userId: 7, files: [], businessId: null, hint: "", note: "", createdAt: "2026-10-12T00:00:00Z", captureId: null, phase: "queued", error: null };
+    await store.putMany([row]); await store.list(7); await store.update(7, "a", { error: "x" }); await store.remove(7, "a");
+    expect(await store.list(7)).toEqual([]); expect(open).toHaveBeenCalledOnce(); expect(dbs[0].close).not.toHaveBeenCalled();
+    dbs[0].onclose?.(); await store.list(7); expect(open).toHaveBeenCalledTimes(2);
+    dbs[1].onversionchange?.(); expect(dbs[1].close).toHaveBeenCalled(); await store.list(7); expect(open).toHaveBeenCalledTimes(3);
+  });
+
   it("reports missing IndexedDB as storage failure instead of falling back to memory", async () => {
     vi.stubGlobal("indexedDB", undefined);
     await expect(new IndexedDbCaptureStore().list(7)).rejects.toThrow("This browser couldn't keep the files. Keep this page open and try again.");

@@ -16,10 +16,13 @@ export interface CaptureStore {
 
 /** Native structured cloning keeps File bytes, MIME types and original names; no base64 or localStorage copy. */
 export class IndexedDbCaptureStore implements CaptureStore {
+  private connection: Promise<IDBDatabase> | null = null;
   constructor(private readonly name = "gst3.capture-queue") {}
 
+  /** One connection per store, reused across calls; forgotten when the browser closes it or another version opens. */
   private open(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
+    if (this.connection) return this.connection;
+    const pending = new Promise<IDBDatabase>((resolve, reject) => {
       if (typeof indexedDB === "undefined") { reject(new Error(STORAGE_FAILURE)); return; }
       let failed = false;
       const request = indexedDB.open(this.name, 1);
@@ -29,26 +32,38 @@ export class IndexedDbCaptureStore implements CaptureStore {
       };
       request.onblocked = request.onerror = () => { failed = true; reject(new Error(STORAGE_FAILURE)); };
       request.onsuccess = () => {
-        if (failed) { request.result.close(); return; }
-        request.result.onversionchange = () => request.result.close();
-        resolve(request.result);
+        const db = request.result;
+        if (failed) { db.close(); return; }
+        db.onclose = () => this.forget(pending);
+        db.onversionchange = () => { this.forget(pending); db.close(); };
+        resolve(db);
       };
     });
+    this.connection = pending;
+    pending.catch(() => this.forget(pending));
+    return pending;
   }
 
+  private forget(connection: Promise<IDBDatabase>) { if (this.connection === connection) this.connection = null; }
+
   private async transaction<T>(mode: IDBTransactionMode, work: (store: IDBObjectStore, result: (value: T) => void) => void): Promise<T> {
-    let db: IDBDatabase;
-    try { db = await this.open(); } catch { throw new Error(STORAGE_FAILURE); }
-    return new Promise<T>((resolve, reject) => {
-      let value: T;
+    // A connection closed without an event (for example after a storage purge) is replaced once.
+    for (let attempt = 0; ; attempt++) {
+      const connection = this.open();
+      let db: IDBDatabase;
+      try { db = await connection; } catch { throw new Error(STORAGE_FAILURE); }
       let transaction: IDBTransaction;
       try { transaction = db.transaction("pending", mode); }
-      catch { db.close(); reject(new Error(STORAGE_FAILURE)); return; }
-      transaction.oncomplete = () => { db.close(); resolve(value); };
-      transaction.onabort = transaction.onerror = () => { db.close(); reject(new Error(STORAGE_FAILURE)); };
-      try { work(transaction.objectStore("pending"), (next) => { value = next; }); }
-      catch { transaction.abort(); }
-    });
+      catch { this.forget(connection); if (attempt) throw new Error(STORAGE_FAILURE); continue; }
+      // Requests are placed in the same turn the transaction is created, before it can auto-commit.
+      return new Promise<T>((resolve, reject) => {
+        let value: T;
+        transaction.oncomplete = () => resolve(value);
+        transaction.onabort = transaction.onerror = () => reject(new Error(STORAGE_FAILURE));
+        try { work(transaction.objectStore("pending"), (next) => { value = next; }); }
+        catch { transaction.abort(); }
+      });
+    }
   }
 
   list(userId: number): Promise<QueuedCapture[]> {
