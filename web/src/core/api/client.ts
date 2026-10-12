@@ -1,6 +1,13 @@
 import { readStored as read, writeStored } from "@/core/storage";
-import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError, CanceledError, type InternalAxiosRequestConfig } from "axios";
 import { markReachable, markUnreachable } from "./network";
+
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /** Durable work belongs to this person even while another tab's /me/ request is pending. */
+    expectedUserId?: number;
+  }
+}
 
 export const ACCESS_KEY = "gst_access_token";
 export const REFRESH_KEY = "gst_refresh_token";
@@ -37,6 +44,9 @@ export const api = axios.create({ baseURL: "/api/", timeout: TIMEOUT_MS, headers
 
 api.interceptors.request.use((config) => {
   const { access } = getTokens();
+  if (config.expectedUserId !== undefined && tokenUser(access) !== String(config.expectedUserId)) {
+    throw new CanceledError("The person signed in changed. These files stay with the person who added them.");
+  }
   if (access) config.headers.Authorization = `Bearer ${access}`;
   if (config.data instanceof FormData) delete config.headers["Content-Type"];
   return config;
