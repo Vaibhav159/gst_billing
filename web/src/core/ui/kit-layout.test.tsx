@@ -27,6 +27,14 @@ test("a table has a name and keeps its header cells", () => {
   expect(screen.getAllByRole("columnheader")).toHaveLength(2);
 });
 
+test("a wide table without controls can be reached by keyboard to scroll", async () => {
+  wrap(<Table label="Restore preview" minWidth={720}><tbody><Tr><Td>Sales bills</Td></Tr></tbody></Table>);
+  await userEvent.tab();
+  const viewport = screen.getByRole("table", { name: "Restore preview" }).parentElement;
+  expect(viewport).toHaveFocus();
+  expect(viewport).toHaveAccessibleName("Restore preview");
+});
+
 /* ── Beyond the brief: the phone header and action bar, the desktop header, cards and the list helpers ── */
 const phone = (on: boolean) => { (window as unknown as { __phone?: boolean }).__phone = on; };
 afterEach(() => { phone(false); window.history.replaceState(null, ""); });

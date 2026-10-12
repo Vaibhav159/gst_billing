@@ -11,7 +11,7 @@ export type TrProps = { selected?: boolean } & HTMLAttributes<HTMLTableRowElemen
 /** `label` names the table for screen readers. It scrolls sideways when it can't fit. */
 export function Table({ children, label, className, minWidth }: TableProps) {
   return (
-    <div className="scroll-x">
+    <div className="scroll-x" role="region" aria-label={label} tabIndex={0}>
       <table aria-label={label} className={cn("w-full border-collapse text-left", className)} style={minWidth ? { minWidth } : undefined}>{children}</table>
     </div>
   );

@@ -160,7 +160,7 @@ test("restore a deleted bill through the bin-id link after seeing its effect", a
   expect(deletion.can.disabled).toBe("");
   expect(deletion.can.effect.length).toBeGreaterThan(0);
   await page.goto(`/audit?restore=${binned.id}`);
-  const dialog = page.getByRole("dialog", { name: `Restore ${bill.number}?` });
+  const dialog = page.getByRole("dialog", { name: `Restore ${deletion.words.target}?`, exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(deletion.can.effect);
   await afterDialog(page);
@@ -297,9 +297,9 @@ test("a backup of more than 3,000 bills is restored one financial year at a time
   test.setTimeout(600_000);
   const api = client(request);
   const stamp = `${Date.now()}`;
-  const firmName = `E2E YEARS FIRM ${stamp}`;
-  const buyer = unique("Years buyer");
-  names.add(buyer);
+  const firmName = "ZZ E2E Years restore firm";
+  const buyer = "ZZ E2E Years restore buyer";
+  // Kept: the restored bills' bin entries protect their original customer reference.
   const line = { product_name: "Silver", hsn_code: "711311", gst_tax_rate: "0.03", quantity: "1", rate: "100", unit: "gms" };
   const invoices = Array.from({ length: 3002 }, (_, n) => ({
     business: 901, customer: 902, invoice_number: `Y${stamp}/${n + 1}`, invoice_date: n < 1501 ? "2024-10-15" : "2025-10-15",
@@ -330,21 +330,26 @@ test("a backup of more than 3,000 bills is restored one financial year at a time
       await dialog.getByRole("button", { name: `Add ${checked.plan.words}`, exact: true }).click();
       const applied = await apply;
       expect(applied.ok()).toBe(true);
-      expect(applied.request().postData()).toContain(checked.fingerprint);
+      const result = await applied.json();
+      expect(result.plan).toEqual(checked.plan);
+      expect(result.plan.bills.add_count).toBe(1501);
+      expect(result.plan.fails).toBe(0);
     }
     await expect(main(page).getByText("Finished checking 2 financial years")).toBeVisible({ timeout: 120_000 });
     await expect(main(page)).toContainText("Added 3,002 bills across these years.");
   } finally {
-    // The restored bills go to the bin so the firm and buyer leave nothing live behind.
+    // The restored bills go to the bin; their firm and buyer remain for those protected references.
     const firms = await api.get("businesses/");
     const firm = (firms.results ?? firms).find((row) => row.name === firmName);
     if (firm) {
-      const tried = new Set();
       for (const fy of ["2024-25", "2025-26"]) {
         for (;;) {
-          const bills = (await api.get("sales/", { business_id: firm.id, fy, page_size: 100 })).results.filter((bill) => !tried.has(bill.id));
+          const bills = (await api.get("sales/", { business_id: firm.id, fy, q: `Y${stamp}/`, page_size: 200 })).results;
           if (!bills.length) break;
-          for (const bill of bills) { tried.add(bill.id); await removeBill(api, bill.id); }
+          for (let start = 0; start < bills.length; start += 4) {
+            const removed = await Promise.allSettled(bills.slice(start, start + 4).map((bill) => api.del(`sales/${bill.id}/`, { reason: "Test bill" })));
+            for (const result of removed) if (result.status === "rejected") throw result.reason;
+          }
         }
       }
     }
@@ -356,7 +361,7 @@ test("the customer form uses the real GSTIN registry endpoint and keeps the name
   await expect(page.getByRole("heading", { level: 1, name: "Add customer" })).toBeVisible();
   await opened(page);
   const name = unique("Lookup only");
-  await page.getByLabel("Name", { exact: true }).fill(name);
+  await page.getByRole("textbox", { name: /^Name/ }).fill(name);
   const gstin = "08AAMFR5567K1ZG";
   const answer = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/registry/${gstin}/`);
   await page.getByLabel("GSTIN", { exact: true }).fill(gstin);
@@ -364,7 +369,7 @@ test("the customer form uses the real GSTIN registry endpoint and keeps the name
   expect(response.ok()).toBe(true);
   const found = await response.json();
   expect(["found", "unknown"]).toContain(found.status);
-  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(name);
+  await expect(page.getByRole("textbox", { name: /^Name/ })).toHaveValue(name);
   await expect(page.getByLabel("PAN", { exact: true })).toHaveValue("AAMFR5567K");
   if (found.status === "found" && found.registry.active) {
     if (found.registry.address) await expect(page.getByRole("textbox", { name: "Address", exact: true })).toHaveValue(found.registry.address);
