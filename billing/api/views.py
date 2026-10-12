@@ -3168,9 +3168,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 class ITCReclaimLedgerView(APIView):
     """
     GET  /api/itc-ledger/<business_id>/  — fetch the ECRRS opening balance for a
-                                            business; auto-creates a zero row on
-                                            first access so the frontend always
-                                            gets a valid object.
+                                            business; returns unsaved zero defaults
+                                            until an opening balance is saved.
     PATCH /api/itc-ledger/<business_id>/ — update opening_cgst/sgst/igst.
 
     The closing balance is computed live elsewhere (gst_summary) — this endpoint
@@ -3180,7 +3179,7 @@ class ITCReclaimLedgerView(APIView):
     permission_classes = [RoleBasedPermission]
     audit_entity = "itc_ledger"
 
-    def _get_or_create(self, business_id):
+    def _get_or_create(self, business_id, *, create=True):
         try:
             business = Business.objects.get(id=business_id)
         except Business.DoesNotExist:
@@ -3189,14 +3188,15 @@ class ITCReclaimLedgerView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         from billing.models import ITCReclaimLedger
-        ledger, _ = ITCReclaimLedger.objects.get_or_create(
-            business=business,
-            defaults={"workspace_id": getattr(business, "workspace_id", 1) or 1},
-        )
+        defaults = {"workspace_id": getattr(business, "workspace_id", 1) or 1}
+        if create:
+            ledger, _ = ITCReclaimLedger.objects.get_or_create(business=business, defaults=defaults)
+        else:
+            ledger = ITCReclaimLedger.objects.filter(business=business).first() or ITCReclaimLedger(business=business, **defaults)
         return ledger, None
 
     def get(self, request, business_id):
-        ledger, err = self._get_or_create(business_id)
+        ledger, err = self._get_or_create(business_id, create=False)
         if err:
             return err
         from .serializers import ITCReclaimLedgerSerializer

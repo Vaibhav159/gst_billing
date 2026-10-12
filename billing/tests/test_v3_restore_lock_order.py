@@ -19,7 +19,7 @@ def wait_for_lock_waiter(seconds=10):
         while time.monotonic() < end:
             # Inside a transaction Postgres keeps one snapshot of the activity view unless told to drop it.
             cursor.execute("SELECT pg_stat_clear_snapshot()")
-            cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()")
+            cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid()")
             if cursor.fetchone()[0]:
                 return True
             time.sleep(0.05)
@@ -76,3 +76,47 @@ class RestoreLockOrderTests(TransactionTestCase):
         self.assertEqual(errors, [None, None])
         self.assertEqual(waited, [True])
         self.assertIsNotNone(BinnedInvoice.objects.get(pk=self.binned.pk).restored_at)
+
+
+@skipUnless(connection.vendor == "postgresql", "PostgreSQL row-lock test")
+class MergeRestoreLockOrderTests(TransactionTestCase):
+    def test_merge_and_backup_restore_do_not_deadlock(self):
+        from billing.services import customer_merge
+        from billing.services.backup_restore import _restore_locks
+        from billing.services.bin import bin_bill
+
+        owner = person("merge-restore-owner", "admin")
+        source, target = buyer("Source"), buyer("Target")
+        binned, _ = bin_bill(sale(firm(), source, "1", "2026-03-01"), owner)
+        holding_customers = Event()
+        real_pair, waited = customer_merge._pair, []
+
+        def pair_then_wait(*args, **kwargs):
+            pair = real_pair(*args, **kwargs)
+            holding_customers.set()
+            waited.append(wait_for_lock_waiter())
+            return pair
+
+        def merge():
+            close_old_connections()
+            try:
+                with patch.object(customer_merge, "_pair", pair_then_wait):
+                    customer_merge.merge_customers(source.pk, target.pk, User.objects.get(pk=owner.pk))
+            finally:
+                connections.close_all()
+
+        def backup():
+            close_old_connections()
+            try:
+                assert holding_customers.wait(timeout=10)
+                with transaction.atomic():
+                    _restore_locks()
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            jobs = [pool.submit(merge), pool.submit(backup)]
+            errors = [job.exception(timeout=30) for job in jobs]
+        self.assertEqual(errors, [None, None])
+        self.assertEqual(waited, [True])
+        self.assertEqual(BinnedInvoice.objects.get(pk=binned.pk).customer_id, target.pk)

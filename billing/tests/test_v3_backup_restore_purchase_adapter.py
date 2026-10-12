@@ -183,10 +183,11 @@ def test_missing_named_supplier_is_added_once_for_two_purchases(purchases):
     assert {call.args[0]["supplier"].pk for call in purchases.save_purchase.call_args_list} == {Customer.objects.get().pk}
 
 
-def test_preledger_nonnull_credit_and_bad_header_are_preview_failures(purchases):
+def test_preledger_credit_is_cleared_and_bad_header_is_a_preview_failure(purchases):
     data = registered()
     data["invoices"][0].update(invoice_date="2025-03-31", itc_month="2026-04-01")
-    assert "before April 2025" in backup_restore.preview(upload(data))["plan"]["purchases"]["fail"][0]["why"]
+    assert backup_restore.preview(upload(data))["plan"]["purchases"]["add_count"] == 1
+    assert purchases.choose_credit_month.call_args.kwargs["value"] is None
     data["invoices"][0].update(invoice_date="2026-03-31", itc_month=None, invoice_number="x" * 51)
     assert backup_restore.preview(upload(data))["plan"]["purchases"]["fail_count"] == 1
     purchases.save_purchase.assert_not_called()

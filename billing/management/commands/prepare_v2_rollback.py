@@ -66,6 +66,19 @@ class Command(BaseCommand):
         self.stdout.write(f"{len(bills)} cancelled bill(s) {'moved' if apply else 'to move'} to the bin for v2.")
         self._chosen_places()
         self._gstr1_locks(apply)
+        self._blacklist_tokens(apply)
+
+    def _blacklist_tokens(self, apply):
+        from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+        tokens = OutstandingToken.objects.filter(blacklistedtoken__isnull=True)
+        count = tokens.count()
+        if apply:
+            BlacklistedToken.objects.bulk_create(
+                [BlacklistedToken(token_id=pk) for pk in tokens.values_list("pk", flat=True)],
+                batch_size=500, ignore_conflicts=True)
+        self.stdout.write(f"{count} outstanding token(s) {'blacklisted' if apply else 'to blacklist'}. "
+                          "Everyone must sign in once after the rollback to v2.")
 
     def _chosen_places(self):
         """Bills whose place of supply was chosen by hand: v2 files them under the customer's state. The place is

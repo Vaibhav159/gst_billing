@@ -73,8 +73,9 @@ def record_rows(model, serializer):
             yield without_media(data)
 
 
-def invoice_rows():
-    for batch in batches(uncached(Invoice).order_by("pk"), fields_of(Invoice)):
+def invoice_rows(*, cancelled=False):
+    rows = uncached(Invoice).filter(type_of_invoice="outward", status="cancelled") if cancelled else uncached(Invoice).exclude(type_of_invoice="outward", status="cancelled")
+    for batch in batches(rows.order_by("pk"), fields_of(Invoice)):
         firms = {row["id"]: Business(**row) for row in uncached(Business).filter(
             pk__in={r["business_id"] for r in batch}).values("id", "name", "gst_number", "state_name")}
         customers = {row["id"]: Customer(**row) for row in uncached(Customer).filter(
@@ -216,7 +217,9 @@ def _full_content(made, user, total):
         ("products", record_rows(Product, ProductSerializer)), ("invoices", invoice_rows())):
         yield f',"{key}":'
         yield from _array(rows)
-    yield ',"v3":{"bin":'
+    yield ',"v3":{"cancelled":'
+    yield from _array(invoice_rows(cancelled=True))
+    yield ',"bin":'
     yield from _array(uncached(BinnedInvoice).live().order_by("pk").values(
         "original_id", "kind", "reason", "deleted_at", "deleted_by", "data").iterator(chunk_size=BATCH))
     yield ',"shop_settings":' + json.dumps(setting, default=json_value, ensure_ascii=False, separators=(",", ":"))

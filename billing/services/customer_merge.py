@@ -18,6 +18,7 @@ from billing.numbering import REF_FIELDS as BILL_REF_FIELDS
 from billing.numbering import bill_ref
 from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
+from billing.services.backup_restore import lock_restore_and_merge
 from billing.services.bill_reads import customer_ref
 from billing.services.firms import firm_ref
 from billing.services.sales import refile_heads
@@ -253,6 +254,7 @@ def merge_preview(source_id, into):
 
 def merge_customers(source_id, into, user):
     with transaction.atomic():
+        lock_restore_and_merge()
         source, target = _pair(source_id, into, lock=True)
         bills, bins, drafts = _bills(source, lock=True), _bins(source, lock=True), _drafts(source, lock=True)
         preview, closed = _preview(source, target, bills, bins, drafts)

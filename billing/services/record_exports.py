@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from django.http import FileResponse, StreamingHttpResponse
 from django.utils import timezone
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
@@ -177,7 +178,7 @@ def response_for(user, kind, params):
         sheet = workbook.create_sheet(kind.title())
         sheet.append(COLUMNS[kind])
         for row in rows:
-            sheet.append([safe_cell(value) for value in row])
+            sheet.append([safe_cell(ILLEGAL_CHARACTERS_RE.sub("", value) if isinstance(value, str) else value) for value in row])
         handle = TemporaryFile()
         try:
             workbook.save(handle)

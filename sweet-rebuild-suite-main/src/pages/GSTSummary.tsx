@@ -25,7 +25,7 @@ const SHORT = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb"
 type TabKey = "summary" | "gstr1" | "gstr3b" | "gstr2b" | "recon" | "itc-ledger" | "aging";
 
 interface ITCLedger {
-  id?: number;
+  id?: number | null;
   business: number;
   opening_cgst: string;
   opening_sgst: string;

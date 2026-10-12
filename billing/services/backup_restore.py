@@ -29,8 +29,9 @@ from billing.period_lock import assert_sales_open
 from billing.refusals import Refusal
 from billing.services.bin import restore_many_from_bin, v2_snapshot
 from billing.services.line_items import build_line_items
-from billing.services.sales import FIRM_FIELDS, LINE_MOST, MOST, _too_big
+from billing.services.sales import FIRM_FIELDS, LINE_MOST, MOST, _date_problem, _too_big
 from billing.tax_rules import (
+    GST_SLABS,
     clean_gstin,
     gstin_problem,
     itc_refusal,
@@ -38,19 +39,20 @@ from billing.tax_rules import (
     normalize_state_name,
     rate_as_percent,
 )
-from billing.text import day_text
+from billing.text import day_text, money
 
 KINDS = ("firms", "customers", "products", "bills", "purchases")
 MODELS = {"firms": Business, "customers": Customer, "products": Product}
 LISTS = ("businesses", "customers", "products", "invoices")
 MAX_BYTES = 25 * 1024 * 1024
+GST_RATES = frozenset(normalize_rate(slab) for slab in GST_SLABS)
 OLD_PURCHASE = "Purchase bills from the old app go through Purchases → Import, which checks each supplier's GSTIN and the credit month"
 CHANGED = "The books changed since the preview. Check the new plan, then restore."
 MASTER_FIELDS = {
     "firms": ("name", "gst_number", "address", "mobile_number", "email", "pan_number", "state_name", "bank_name",
               "bank_account_number", "bank_ifsc_code", "bank_branch_name", "invoice_prefix", "paper_full_number_from",
               "primary_color_theme", "short_name", "city", "pin_code", "jurisdiction", "declaration", "signature_on_bills"),
-    "customers": ("name", "gst_number", "address", "mobile_number", "email", "pan_number", "state_name", "customer_type", "city"),
+    "customers": ("name", "gst_number", "address", "mobile_number", "email", "pan_number", "state_name", "customer_type", "city", "is_supplier"),
     "products": ("name", "hsn_code", "gst_tax_rate", "description", "default_unit", "kind", "purity", "usual_rate", "purchase_only"),
 }
 BILL_FIELDS = ("payment_mode", "place_of_supply", "notes", "paper", "status", "cancel_reason", "cancelled_at",
@@ -99,6 +101,14 @@ def _read(file):
     version = str(data.get("version", ""))
     if data.get("app") == "gst-billing" and version == "5.0":
         kind, words = "this_app", "This app's backup"
+        extra = data.get("v3", {})
+        if not isinstance(extra, dict) or not isinstance(extra.get("cancelled", []), list):
+            _bad(name)
+        cancelled = extra.get("cancelled", [])
+        if any(not isinstance(row, dict) or row.get("type_of_invoice", "outward") != "outward"
+               or row.get("status", "cancelled") != "cancelled" for row in cancelled):
+            _bad(name)
+        data = {**data, "invoices": [*data["invoices"], *({**row, "status": "cancelled"} for row in cancelled)]}
     elif version == "4.0":
         kind, words = "old_v4", "Old app backup (v4.0)"
     elif version == "3.0":
@@ -167,6 +177,8 @@ def _master(kind, raw, old):
         data["hsn_code"] = text(raw.get("hsn_code", raw.get("hsn")))
         data["gst_tax_rate"] = normalize_rate(raw.get("gst_tax_rate", raw.get("gstRate", 0)),
                                                 assume="percent" if old and "gst_tax_rate" not in raw else "fraction")
+        if data["gst_tax_rate"] not in GST_RATES:
+            raise ValueError("tax rate")
         data["default_unit"] = raw.get("default_unit", raw.get("defaultUnit", "gms"))
     return _clean_fields(MODELS[kind], data, MASTER_FIELDS[kind])
 
@@ -187,7 +199,7 @@ def _bill(raw, old):
     lines = []
     for row in items:
         gst = normalize_rate(row.get("gstRate" if old else "gst_tax_rate", 0), assume="percent" if old else "fraction")
-        if not gst.is_finite() or not 0 <= gst <= 1 or gst.as_tuple().exponent < -4:
+        if not gst.is_finite() or gst not in GST_RATES or gst.as_tuple().exponent < -4:
             raise ValueError("tax rate")
         lines.append({"product_name": text(row.get("productName" if old else "product_name")),
                       "hsn_code": text(row.get("hsn" if old else "hsn_code")),
@@ -201,6 +213,8 @@ def _bill(raw, old):
             "customer": raw.get("customerId" if old else "customer"),
             "customer_name": text(raw.get("customerName" if old else "customer_name")),
             "customer_gstin": text(raw.get("customerGST")).upper(), "lines": lines,
+            "file_total": raw.get("total" if old else "total_amount"),
+            "file_heads": [{head: item[head] for head in ("cgst", "sgst", "igst") if head in item} for item in items],
             "purchase": key(raw.get("type" if old else "type_of_invoice")) == "inward",
             "fields": _clean_fields(Invoice, raw, BILL_FIELDS),
             "purchase_fields": {name: raw[name] for name in ("payment_mode", "itc_month", "itc_eligible",
@@ -223,7 +237,7 @@ def _state():
 
 
 class _Candidates:
-    """One kind's rows, indexed once: the first GSTIN match wins, then the first name match (P4-8)."""
+    """Index once; a name fallback never joins two different registered parties (X-74)."""
 
     def __init__(self, rows):
         self.ids, self.gstins, self.names = set(), {}, {}
@@ -238,10 +252,50 @@ class _Candidates:
 
     def find(self, row):
         gstin = key(row.get("gst_number"))
-        return (self.gstins.get(gstin) if gstin else None) or self.names.get(key(row["name"]))
+        found = self.gstins.get(gstin) if gstin else None
+        named = self.names.get(key(row["name"]))
+        return found or (named if not self.conflict(row, named) else None)
+
+    def conflict(self, row, named=None):
+        named = named or self.names.get(key(row["name"]))
+        gstin = key(row.get("gst_number"))
+        if named and gstin and key(named.get("gst_number")) and gstin != key(named["gst_number"]):
+            return f"same name as {named['name']}, but a different GSTIN"
+        return ""
 
     def __contains__(self, row):
         return row["id"] in self.ids
+
+
+def _party(candidates, mapping, reference, name, gstin=""):
+    row = {"name": name, "gst_number": gstin}
+    found = mapping.get(("id", key(reference)))
+    if found is None:
+        found = candidates.gstins.get(key(gstin)) or mapping.get(("name", key(name)))
+    if found and "_problem" in found:
+        return found
+    if found:
+        problem = candidates.conflict(row, found)
+        return {"_problem": problem} if problem else found
+    found = candidates.find(row) if name or gstin else None
+    problem = candidates.conflict(row) if found is None else ""
+    return {"_problem": problem} if problem else found
+
+
+def _money_detail(row, lines, total):
+    def differs(value, actual):
+        try:
+            given = Decimal(str(value))
+            return not given.is_finite() or given != actual
+        except InvalidOperation:
+            return True
+    words = []
+    if any(differs(value, getattr(line, head)) for given, line in zip(row["file_heads"], lines, strict=True)
+           for head, value in given.items()):
+        words.append("Recalculated tax heads differ from the file.")
+    if row["file_total"] is not None and differs(row["file_total"], total):
+        words.append(f"Recalculated total differs from the file ({money(total)}).")
+    return " ".join(words)
 
 
 class _Sales:
@@ -301,8 +355,10 @@ def _purchase_services():
 
 
 def _credit_input(value, day):
+    if day < date(2025, 4, 1):
+        return None
     if value is None:
-        return None if day < date(2025, 4, 1) else day.strftime("%Y-%m")
+        return day.strftime("%Y-%m")
     if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-01", value):
         value = value[:7]
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}", value):
@@ -343,7 +399,7 @@ def _purchase_input(row, day, business, supplier, services):
     lines, total = build_line_items(draft, row["lines"], source="api")
     if _too_big(lines) or total > MOST:
         raise ValueError("money")
-    return data
+    return data, _money_detail(row, lines, total)
 
 
 def _purchase_credit(services, cache, business, day, value, *, binned=False):
@@ -380,6 +436,7 @@ def _plan(data, info, raw_hash):
     candidates = {kind: _Candidates(state[kind]) for kind in MODELS}
     live, binned_sales = _Sales(state["bills"]), _Sales(state["bin"])
     locked, months = [], {}
+    binned_values = None
 
     def record(kind, action, name, why="", detail=""):
         bucket = plan[kind]
@@ -392,27 +449,33 @@ def _plan(data, info, raw_hash):
             row = _master(kind, raw, info["kind"] == "old_v3")
             name = row["name"]
             hit = candidates[kind].find(row)
+            problem = "" if hit else candidates[kind].conflict(row)
             if hit:
                 why = ("listed twice in the file" if isinstance(hit["id"], str) else
                        f"same GSTIN as {hit['name']}" if row.get("gst_number") and key(hit.get("gst_number")) == key(row["gst_number"]) else
                        f"same name as {hit['name']}")
                 record(kind, "skip", name, why)
+            elif problem:
+                pass
             elif not name:
-                record(kind, "fail", f"A { {'firms': 'firm', 'customers': 'customer', 'products': 'product'}[kind]} with no name", "No name in the file")
+                problem = "No name in the file"
             elif row.get("gst_number") and not valid_gstin(row["gst_number"])[0]:
-                record(kind, "fail", name, f"Its GSTIN {row['gst_number']} doesn't check out")
+                problem = f"Its GSTIN {row['gst_number']} doesn't check out"
             elif kind == "products" and not row["hsn_code"]:
-                record(kind, "fail", name, "No HSN code; add it by hand with its HSN and rate")
+                problem = "No HSN code; add it by hand with its HSN and rate"
             else:
                 hit = {**row, "id": f"new:{kind}:{index}"}
                 if kind == "customers":
                     refs = raw.get("businesses", [])
                     if not isinstance(refs, list):
                         raise ValueError("businesses")
-                    hit["_businesses"] = [matched["id"] for ref in refs if (matched := maps["firms"].get(("id", key(ref))))]
+                    hit["_businesses"] = [matched["id"] for ref in refs if (matched := maps["firms"].get(("id", key(ref)))) and "_problem" not in matched]
                 candidates[kind].add(hit)
                 ops[kind].append(hit)
                 record(kind, "add", name)
+            if problem:
+                record(kind, "fail", name or f"A { {'firms': 'firm', 'customers': 'customer', 'products': 'product'}[kind]} with no name", problem)
+                hit = {"_problem": problem}
             if hit and kind in maps:
                 if key(raw.get("id")):
                     maps[kind][("id", key(raw.get("id")))] = hit
@@ -427,9 +490,10 @@ def _plan(data, info, raw_hash):
             record("purchases", "fail", name, OLD_PURCHASE)
             continue
         kind = "purchases" if row["purchase"] else "bills"
-        firm = maps["firms"].get(("id", key(row["firm"]))) or maps["firms"].get(("name", key(row["firm_name"])))
-        if not firm and row["firm_name"]:
-            firm = candidates["firms"].find({"name": row["firm_name"]})
+        firm = _party(candidates["firms"], maps["firms"], row["firm"], row["firm_name"])
+        if firm and "_problem" in firm:
+            record(kind, "fail", name, firm["_problem"])
+            continue
         if not firm:
             record(kind, "fail", name, f"No firm called {row['firm_name'] or '(blank)'} on file or in the file")
             continue
@@ -446,11 +510,13 @@ def _plan(data, info, raw_hash):
         if len(row["number"]) > 255:
             raise ValueError("number")
         if row["purchase"]:
-            supplier = maps["customers"].get(("id", key(row["customer"]))) or maps["customers"].get(("name", key(row["customer_name"])))
+            supplier = _party(candidates["customers"], maps["customers"], row["customer"], row["customer_name"], row["customer_gstin"])
+            if supplier and "_problem" in supplier:
+                record(kind, "fail", name, supplier["_problem"])
+                continue
             if not supplier and row["customer_name"]:
-                supplier = candidates["customers"].find({"name": row["customer_name"], "gst_number": row["customer_gstin"]})
-                supplier = supplier or {"id": f"new:purchase-supplier:{key(row['customer_name'])}",
-                                        "name": row["customer_name"], "gst_number": row["customer_gstin"]}
+                supplier = {"id": f"new:purchase-supplier:{key(row['customer_name'])}",
+                            "name": row["customer_name"], "gst_number": row["customer_gstin"]}
             if supplier is None:
                 record("purchases", "fail", name, "No customer name on the bill")
                 continue
@@ -474,7 +540,7 @@ def _plan(data, info, raw_hash):
                     day = saved["invoice_date"]
                     month = _purchase_credit(purchase_services, months, business, day, saved["data__invoice__itc_month"], binned=True)
                 else:
-                    inputs = _purchase_input(row, day, business, party, purchase_services)
+                    inputs, detail = _purchase_input(row, day, business, party, purchase_services)
                     month = _purchase_credit(purchase_services, months, business, day, inputs["itc_month"])
             except (ValidationError, Refusal) as error:
                 locked.append(error.detail)
@@ -485,7 +551,7 @@ def _plan(data, info, raw_hash):
                 candidates["customers"].add(supplier)
                 ops["customers"].append(supplier)
                 record("customers", "add", supplier["name"])
-            record("purchases", "add", name, detail=f"deleted {binned_purchase.deleted_at:%d %b %Y}; comes back from the bin" if binned_purchase else "")
+            record("purchases", "add", name, detail=f"deleted {binned_purchase.deleted_at:%d %b %Y}; comes back from the bin" if binned_purchase else detail)
             ops["purchases"].append({**row, "day": day, "business": firm["id"], "buyer": supplier["id"],
                 "bin": binned_purchase.pk if binned_purchase else None, "credit_month": month})
             continue
@@ -503,7 +569,26 @@ def _plan(data, info, raw_hash):
         if binned_clash and not binned:
             record("bills", "skip", name, f"same number part as {binned_clash['invoice_number']} on file")
             continue
-        day = binned["invoice_date"] if binned else day
+        checked_lines = row["lines"]
+        if binned:
+            # Read only line checks and saved dates, once, outside the matching fingerprint.
+            if binned_values is None:
+                ids = [item["id"] for item in state["bin"] if item["type_of_invoice"] == "outward"]
+                binned_values = {item["id"]: item for item in uncached(BinnedInvoice).filter(pk__in=ids).values(
+                    "id", "data__lines", "data__invoice__invoice_date")}
+            saved = binned_values[binned["id"]]
+            day = parse_date(saved["data__invoice__invoice_date"]) or binned["invoice_date"]
+            checked_lines = saved["data__lines"]
+        problem = _date_problem(day)
+        if not checked_lines:
+            problem = problem or "Add at least one item: pick a product, then type its weight."
+        elif any(not re.fullmatch(r"[0-9]{4,8}", item.get("hsn_code", "")) for item in checked_lines):
+            problem = problem or "Type the HSN code, 4 to 8 digits (7113 for jewellery)."
+        elif any(normalize_rate(item.get("gst_tax_rate", 0), assume="fraction") not in GST_RATES for item in checked_lines):
+            problem = problem or "Choose the GST rate. Gold and silver jewellery is 3%; cut diamonds are 0.25%."
+        if problem:
+            record("bills", "fail", name, problem)
+            continue
         if isinstance(firm["id"], int):
             try:
                 _open_month(months, firm["id"], day, "restore")
@@ -513,9 +598,10 @@ def _plan(data, info, raw_hash):
                 locked.append(error.detail)
                 record("bills", "fail", name, f"{day:%B %Y} is filed for {firm['name']}. Have the owner unlock {day:%B %Y} in GST returns first.")
                 continue
-        customer = maps["customers"].get(("id", key(row["customer"]))) or maps["customers"].get(("name", key(row["customer_name"])))
-        if not customer and row["customer_name"]:
-            customer = candidates["customers"].find({"name": row["customer_name"], "gst_number": row["customer_gstin"]})
+        customer = _party(candidates["customers"], maps["customers"], row["customer"], row["customer_name"], row["customer_gstin"])
+        if customer and "_problem" in customer:
+            record("bills", "fail", name, customer["_problem"])
+            continue
         if not customer and not row["customer_name"]:
             record("bills", "fail", name, "No customer name on the bill")
             continue
@@ -537,7 +623,7 @@ def _plan(data, info, raw_hash):
         for line in lines:
             _clean_fields(LineItem, {field.name: getattr(line, field.name) for field in LineItem._meta.concrete_fields
                                     if not field.is_relation}, ("product_name", "hsn_code", "unit", "note"))
-        record("bills", "add", name, detail=f"deleted {binned['deleted_at']:%d %b %Y}; comes back from the bin" if binned else "")
+        record("bills", "add", name, detail=f"deleted {binned['deleted_at']:%d %b %Y}; comes back from the bin" if binned else _money_detail(row, lines, total))
         ops["bills"].append({**row, "day": day, "business": firm["id"], "buyer": customer["id"], "bin": binned["id"] if binned else None})
         planned = {"id": None, "business_id": firm["id"], "invoice_date": day, "invoice_number": row["number"], "type_of_invoice": "outward"}
         state["bills"].append(planned)
@@ -621,12 +707,16 @@ def _imported(instance, kind, user, filename, lines=None):
                     snapshot=v2_snapshot(instance, lines) if kind in ("bills", "purchases") else snapshot_of(instance))
 
 
-def _restore_locks():
+def lock_restore_and_merge():
     # Restore against an empty book still needs a shared row: every authenticated request has a User.
-    # Only its primary key is read. This serializes two owners restoring a previously unseen firm.
+    # Only its primary key is read. Restore and merge take it before their different row-lock orders.
     from django.contrib.auth import get_user_model
     # No-key, so audit rows that point at this user (a purchase restore's, say) aren't blocked behind it.
     get_user_model().objects.order_by("pk").select_for_update(no_key=True).values_list("pk", flat=True).first()
+
+
+def _restore_locks():
+    lock_restore_and_merge()
     # Purchase restores lock audit -> inward bin row -> firm (2A); sale bin restores lock audit -> firm -> bin (4A),
     # and firm edits hold the firm before its bin rows. So: audit, inward bin rows, firms, then outward bin rows.
     ids = BinnedInvoice.objects.live().exclude(audit_log_id=None).values_list("audit_log_id", flat=True)
@@ -697,7 +787,7 @@ def apply_restore(file, fingerprint, user, fy=None):
                 binned = uncached(BinnedInvoice).get(pk=row["bin"])
                 invoice = services.restore_purchase(binned, user)
             else:
-                inputs = _purchase_input(row, row["day"], mapped["firms"][row["business"]], mapped["customers"][row["buyer"]], services)
+                inputs, _detail = _purchase_input(row, row["day"], mapped["firms"][row["business"]], mapped["customers"][row["buyer"]], services)
                 # The plan, re-run under these locks, already refused file and book duplicates by 2A's identity.
                 invoice = services.save_purchase({**inputs, "duplicate_ok": True}, user)
             # 2A returns its narrow read; the audit snapshot needs every field, read once.
