@@ -32,7 +32,7 @@ class EasyShareTest(TestCase):
             "to": ["A walk-in has no number on record. Type theirs to send the bill to their WhatsApp."],
         }))
         self.assertEqual(list(AuditLog.objects.filter(action="sent").order_by("id").values_list("details", flat=True)), [
-            "On the share sheet to Walk-in Customer", "Again on the share sheet to Walk-in Customer",
+            "On the share sheet", "Again on the share sheet",
         ])
         self.bill.refresh_from_db()
         self.assertEqual(self.bill.sent_count, 2)
@@ -53,6 +53,9 @@ class EasyShareTest(TestCase):
         self.assertEqual(self.send(via="whatsapp", to="+91 98290-41122").data["sent"]["to"], "9829041122")
         self.assertEqual(self.send().data["sent"]["to"], "9829041122")
         self.assertEqual(self.send(to="98290 41123").data["sent"]["to"], "9829041123")
+        self.assertEqual(list(AuditLog.objects.filter(action="sent").order_by("id").values_list("details", flat=True)), [
+            "WhatsApp to +91 98290 41122", "Again on the share sheet", "Again on the share sheet to +91 98290 41123",
+        ])
         self.customer.refresh_from_db()
         self.assertEqual(self.customer.mobile_number, "")
 

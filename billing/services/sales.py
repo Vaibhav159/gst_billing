@@ -146,6 +146,7 @@ def record_send(invoice, user, via, to=""):
     `to` is a one-off number typed for this bill, kept on the bill and never on the customer;
     WhatsApp needs one when the customer has no mobile. The share sheet chooses its own chat.
     """
+    number_typed = bool(to)
     with transaction.atomic():
         invoice = locked_bill(invoice)
         refuse_cancelled(invoice, f"{invoice.invoice_number} is cancelled, so it can't be sent.")
@@ -166,7 +167,8 @@ def record_send(invoice, user, via, to=""):
         invalidate(Invoice)
         who = f"+91 {to[:5]} {to[5:]}" if to else customer.name
         first, repeat = VIA_WORDS[via]
-        log(invoice, user, "sent", f"{repeat if again else first} to {who}")
+        destination = f" to {who}" if via == "whatsapp" or number_typed else ""
+        log(invoice, user, "sent", f"{repeat if again else first}{destination}")
         # Re-read under the row lock: a delete that lands now waits for this send to commit (review M2).
         invoice.refresh_from_db()
     return invoice

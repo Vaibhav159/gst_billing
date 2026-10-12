@@ -44,7 +44,7 @@ class SentTest(TestCase):
         self.assertEqual((again["count"], again["at"], again["via"]), (2, first["at"], "share"))
         self.assertGreater(again["last_at"], first["last_at"])
         details = list(AuditLog.objects.filter(action="sent").order_by("id").values_list("details", flat=True))
-        self.assertEqual(details, ["WhatsApp to Anil Gupta", "Again on the share sheet to Anil Gupta"])
+        self.assertEqual(details, ["WhatsApp to Anil Gupta", "Again on the share sheet"])
 
     def test_a_walk_in_needs_a_number_kept_on_the_bill_only(self):
         walkin = Customer.objects.create(name="Walk-in Customer", customer_type="walkin", state_name="RAJASTHAN")
@@ -121,7 +121,7 @@ class SentTest(TestCase):
         self.send(via="share")
         self.send(via="share", to="98290 41123")
         details = list(AuditLog.objects.filter(action="sent").order_by("id").values_list("details", flat=True))
-        self.assertEqual(details, ["On the share sheet to Anil Gupta", "Again on the share sheet to +91 98290 41123"])
+        self.assertEqual(details, ["On the share sheet", "Again on the share sheet to +91 98290 41123"])
 
     def test_a_bill_never_sent_has_no_sends(self):
         self.assertIsNone(sent_block(self.bill))  # contract 0.2: null when never sent
