@@ -1,10 +1,17 @@
-"""3B review fixes (review g2 Minors) on the reconciliation, report parameters and query budgets."""
+"""3B review fixes: the reconciliation's period totals and checks, and the credit tab against 3A's risk summary."""
 
 from datetime import date
 from decimal import Decimal as D
+from unittest.mock import patch
 
+import pytest
+
+from billing.services.ledger import credit_at_risk_summary
+from billing.services.report_context import credit_payload
 from billing.services.v3_reconciliation import _check, reconcile
 from billing.tests.test_v3_reports_plan import row
+from billing.tests.v3_helpers import buyer, firm, line, sale
+from billing.text import money
 
 TODAY = date(2026, 10, 8)
 FILED = {"2026-09": {"gstr1": {"taxable": "80390.00", "igst": "0.00", "cgst": "1205.95", "sgst": "1205.95", "bills": 1},
@@ -40,3 +47,18 @@ def test_count_checks_have_no_rupee_tolerance():
     assert _check("split-cgst", "money", "FY", D("5.00"), D("4.50"))["status"] == "rounding"
     coverage = [check for check in reconcile(3, "2026-27", [row()], today=TODAY)["checks"] if check["id"] == "coverage"]
     assert {check["status"] for check in coverage} == {"pass"}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("today,at_risk,lapsed", [(date(2026, 11, 1), 1, 0), (date(2026, 12, 1), 0, 1)])
+def test_credit_tab_risk_agrees_with_3a_summary_before_and_after_30_november(today, at_risk, lapsed):
+    with patch("django.utils.timezone.localdate", return_value=today):
+        business = firm()
+        supplier = buyer("Risk supplier", gst_number="08ABCDE1234F1Z5", customer_type="business")
+        sale(business, supplier, "RISK/1", date(2026, 2, 18), line(rate="30080"),
+             kind="inward", itc_month=date(2026, 9, 1), itc_eligible=True)
+        summary = credit_at_risk_summary([business.pk])
+        tab = credit_payload(business, 2026)["at_risk"]
+        assert (tab["count"], D(tab["tax"])) == (summary["count"], summary["tax"]) == (at_risk, D("902.40") * at_risk)
+        assert summary["lapsed"] == {"count": lapsed, "tax": D("902.40") * lapsed}
+        assert credit_payload(business, 2025)["buckets"]["lapsed"] == {"bills": lapsed, "tax": money(D("902.40") * lapsed)}
