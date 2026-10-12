@@ -35,7 +35,7 @@ export function HomeBody({ sales, fetchUnsent, firmId, today, welcome, drafts, d
     {!welcome.seen ? <Welcome onDone={welcome.done} /> : null}
     {evening && sales.data ? <section aria-label="End of the day">
       <QueryView query={due} what="the end-of-day count" skeleton={<Skeleton w={220} h={38} />}>
-        {(data) => <EndOfDay fetchUnsent={fetchUnsent} firmId={firmId} today={today} sales={sales.data!} unsent={data.items.find((i) => i.kind === "unsent")?.count ?? 0} drafts={{ ...drafts, bills: scoped }} />}
+        {(data) => <EndOfDay fetchUnsent={fetchUnsent} firmId={firmId} today={today} sales={sales.data!} countReady={due.isSuccess && due.fetchStatus === "idle" && !due.isPlaceholderData} unsent={data.items.find((i) => i.kind === "unsent")?.count ?? 0} drafts={{ ...drafts, bills: scoped }} />}
       </QueryView>
     </section> : null}
     {scoped.map((d) => <Unfinished key={d.id} draft={d} firmId={firmId} />)}
@@ -103,12 +103,12 @@ function Unfinished({ draft: d, firmId }: { draft: UnfinishedBill; firmId: numbe
   </section>;
 }
 
-function EndOfDay({ fetchUnsent, firmId, today, sales, unsent, drafts }: { fetchUnsent: FetchUnsent; firmId: number | null; today: string; sales: SalesPage; unsent: number; drafts: HomeDrafts }) {
+function EndOfDay({ fetchUnsent, firmId, today, sales, countReady, unsent, drafts }: { fetchUnsent: FetchUnsent; firmId: number | null; today: string; sales: SalesPage; countReady: boolean; unsent: number; drafts: HomeDrafts }) {
   const { can } = useAuth(); const [open, setOpen] = useState(false);
   const parts = [plural(sales.summary.bills, "bill"), inr(sales.summary.total_amount)];
   if (unsent) parts.push(`${unsent} not sent`);
   if (drafts.bills.length) parts.push(`${drafts.bills.length} unfinished`);
-  const clear = !unsent && !drafts.bills.length && drafts.answered && can("bill.send");
+  const clear = countReady && !unsent && !drafts.bills.length && drafts.answered && can("bill.send");
   return <section aria-labelledby="easy-eod-t" className={cn("card p-4 flex flex-col gap-3", clear ? "" : "border-brand-line")}>
     <div className="flex items-start gap-3"><span aria-hidden="true" className="w-11 h-11 rounded-ctl bg-brand-tint border border-brand-line grid place-items-center text-brand shrink-0"><Moon size={20} /></span><div className="min-w-0"><h2 id="easy-eod-t" className="text-lg font-semibold leading-snug">End of the day</h2><p className="text-md text-fg2 tnum">Today: {parts.map((x, i) => <span key={i}>{i ? "\u00a0· " : null}<span className="whitespace-nowrap">{x}</span></span>)}</p></div></div>
     {clear ? <p className="flex items-center gap-2 text-sale font-medium"><CheckCircle2 size={18} aria-hidden="true" />Every bill is sent and nothing is left unfinished.</p> : null}

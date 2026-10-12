@@ -89,6 +89,31 @@ it("a failed due-next read cannot say every bill is sent", async () => {
   expect(screen.queryByText("Every bill is sent and nothing is left unfinished.")).not.toBeInTheDocument();
   expect(within(screen.getByRole("region", { name: "Today's rates" })).getByText("Not set today")).toBeVisible();
 });
+it("retains figures but withholds the all-clear during a count refresh and after its failure", async () => {
+  const zero = { items: [{ kind: "unsent", count: 0 }] };
+  let rejectRefresh!: (error: Error) => void;
+  const read = vi.fn().mockResolvedValueOnce(zero).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRefresh = reject; })).mockResolvedValue(zero);
+  function RefreshHome() {
+    const sales = useSalesPage(3, { start_date: "2026-10-08", end_date: "2026-10-08" });
+    const due = useQuery<HomeDue>({ queryKey: ["refresh-due"], queryFn: read });
+    return <><button onClick={() => void due.refetch()}>Refresh count</button><HomeBody sales={sales} due={due} firmId={3} today="2026-10-08" welcome={{ seen: true, done }}
+      fetchUnsent={async () => []} drafts={{ bills: [], loading: false, answered: true }} rates={null} renderRows={() => null} /></>;
+  }
+  salesServer([["GET", "sales/", () => wirePage([wireRow()], { summary: { bills: 1, total_amount: "1234.56", cancelled: 0 } })]]);
+  renderApp(<RefreshHome />);
+  const clear = "Every bill is sent and nothing is left unfinished.";
+  expect(await screen.findByText(clear)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh count" }));
+  await waitFor(() => expect(rejectRefresh).toBeDefined());
+  expect(screen.queryByText(clear)).not.toBeInTheDocument();
+  expect(within(screen.getAllByRole("region", { name: "End of the day" })[0]).getByText("₹1,234.56")).toBeVisible();
+  await act(async () => rejectRefresh(new Error("unavailable")));
+  await waitFor(() => expect(screen.getAllByRole("region", { name: "End of the day" })[0]).toHaveTextContent("Couldn't refresh"));
+  expect(screen.queryByText(clear)).not.toBeInTheDocument();
+  expect(within(screen.getAllByRole("region", { name: "End of the day" })[0]).getByText("₹1,234.56")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh count" }));
+  expect(await screen.findByText(clear)).toBeVisible();
+});
 it("Undo is available while DELETE is still waiting for the server", async () => {
   let finish!: (value: unknown) => void;
   const s = salesServer([["GET", "sales/", () => wirePage([])], ["DELETE", /^drafts\//, () => new Promise((resolve) => { finish = resolve; })], ["PUT", /^drafts\//, ({ body }) => ({ ...d, ...(body as object) })]]);
