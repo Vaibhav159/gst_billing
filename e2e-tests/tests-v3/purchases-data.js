@@ -44,7 +44,7 @@ function makesPurchases(test) {
 }
 async function attachPhoto(request, bill) {
   const response = await request.post(`/api/purchases/${bill.id}/files/`, { headers: { Authorization: `Bearer ${savedToken()}` }, multipart: { file: {
-    name: 'synthetic-purchase.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aKncAAAAASUVORK5CYII=', 'base64'),
+    name: 'synthetic-purchase.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGO4tCUFAARGAes42ZwhAAAAAElFTkSuQmCC', 'base64'),
   } } });
   expect(response.ok(), `Attach synthetic purchase: ${response.status()}`).toBe(true);
 }
