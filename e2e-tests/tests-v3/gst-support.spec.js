@@ -1,6 +1,7 @@
 // Part 3D acceptance. Real reads/exports use the assigned sandbox. The one live write makes its own purchase and
 // restores then bins it in afterEach. The explicitly named mocked test never sends its synthetic id to the server.
 const fs = require("fs");
+const XLSX = require("node:module").createRequire(require.resolve("../../web/package.json"))("xlsx");
 const { test, expect } = require("@playwright/test");
 const { opened, savedToken } = require("./session");
 const { afterDialog, client, today } = require("./sales-data");
@@ -79,6 +80,7 @@ async function downloadExcel(page, dialog, filename, info) {
   await downloaded.saveAs(target);
   expect(await downloaded.failure()).toBeNull();
   expect(fs.readFileSync(target).subarray(0, 2).toString("ascii")).toBe("PK");
+  return target;
 }
 
 // A timeout still enters afterEach with its request fixture. Only rows returned by this file's POST are recorded.
@@ -244,7 +246,8 @@ for (const theme of ["obsidian", "pearl"]) {
     await expect(dialog.getByText("Sales and purchases sit side by side and are never added together.", { exact: true })).toBeVisible();
     // Firm names are sanitized/deduplicated by the writer, so derive the actual tab names from the UI.
     const fixed = new Set(["Summary", "GSTR-1", "GSTR-3B", "Amendments"]);
-    const firmTabs = (await dialog.getByRole("tab").allTextContents()).filter(name => !fixed.has(name));
+    const sheetNames = await dialog.getByRole("tab").allTextContents();
+    const firmTabs = sheetNames.filter(name => !fixed.has(name));
     expect(firmTabs).toHaveLength(workbook.firms.length);
     const withMonths = workbook.firms.findIndex(firm => firm.months.length > 0);
     if (withMonths >= 0) {
@@ -254,7 +257,14 @@ for (const theme of ["obsidian", "pearl"]) {
       await expect(sheet.getByRole("cell", { name: /making charges/i })).toHaveCount(0);
     }
     expect(await problems(page), "CA workbook preview").toEqual([]);
-    await downloadExcel(page, dialog, workbook.file, info);
+    const downloaded = XLSX.readFile(await downloadExcel(page, dialog, workbook.file, info));
+    expect(downloaded.SheetNames).toEqual(sheetNames);
+    expect(workbook.summary.length).toBeGreaterThan(0);
+    const firm = workbook.summary[0];
+    const summary = XLSX.utils.sheet_to_json(downloaded.Sheets.Summary, { header: 1 });
+    const row = summary.find(row => row[0] === firm.firm);
+    expect(row, `Summary includes ${firm.firm}`).toBeTruthy();
+    expect(row[7], `${firm.firm} sales bill value matches the preview JSON`).toBe(Number(firm.sales.value));
   });
 }
 
