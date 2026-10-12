@@ -39,22 +39,33 @@ test("2D percentage displays reach the GST allowlist; raw 0.1 displayed as 10% i
   expect(raw.rows[1]).toEqual([0.1, 0.0025, 9829041122, 0.03]);
   const [adapted] = await readRecordsWorkbook(file);
   expect(adapted.rows[0]).toEqual([]);
-  expect(adapted.rows[1]).toEqual(["10", "0.25", 9829041122, 0.03]);
+  expect(adapted.rows[1]).toEqual(["10%", "0.25%", 9829041122, 0.03]);
   const checked = await checkRecordRows("products", [
     { name: "Wrong slab", hsn_code: "7113", gst_percent: String(adapted.rows[1][0]) },
     { name: "Diamond", hsn_code: "7102", gst_percent: String(adapted.rows[1][1]) },
+    { name: "Unformatted fraction", hsn_code: "7113", gst_percent: String(adapted.rows[1][3]) },
   ]);
-  expect(checked.map((row) => row.state)).toEqual(["fix", "ready"]);
+  expect(checked.map((row) => row.state)).toEqual(["fix", "ready", "ready"]);
   expect(checked[0].note).toContain("Choose one of the GST rates:");
   expect(checked[1].note).toContain("0.25%");
+  expect(checked[2].note).toContain("3%");
 });
 
 
 test.each([0, 0.1, 0.25, 1, 1.5, 3, 5, 12, 18, 28, 40])("a whole-percent display retains the exact numeric %s%% slab", async (slab) => {
   serve({ "GET catalog/": { results: [], next: null } });
   const [sheet] = await readRecordsWorkbook(await percentageWorkbook(slab));
-  expect(sheet.rows[0][0]).toBe(String(slab));
+  expect(sheet.rows[0][0]).toBe(`${slab}%`);
   const [row] = await checkRecordRows("products", [{ name: "Test product", hsn_code: "7113", gst_percent: String(sheet.rows[0][0]) }]);
   expect(row.state).toBe("ready");
   expect(row.note).toContain(`${slab}%`);
+});
+
+
+test.each([0.03, 0.01, 0.001])("an explicit off-slab %s%% never becomes an allowed fractional rate", async (percent) => {
+  serve({ "GET catalog/": { results: [], next: null } });
+  const [sheet] = await readRecordsWorkbook(await percentageWorkbook(percent));
+  const [row] = await checkRecordRows("products", [{ name: "Off-slab product", hsn_code: "7113", gst_percent: String(sheet.rows[0][0]) }]);
+  expect(row.state).toBe("fix");
+  expect(row.note).toContain("Choose one of the GST rates:");
 });
