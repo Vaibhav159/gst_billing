@@ -74,3 +74,12 @@ test("unused product deletion offers Undo through the returned audit id", async 
   fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
   await waitFor(() => expect(calls.some((c) => c.url === "audit/9131/restore/" && c.method === "POST")).toBe(true));
 });
+
+test("list and detail show the effective kind when no kind was stored", async () => {
+  const product = { ...PRODUCT_DETAIL, kind: null, kind_effective: "diamond" };
+  recordsServer({ "GET catalog/": { ...CATALOG, results: [product] }, "GET catalog/12/": product });
+  mount(routes, ["/products"]);
+  expect(await screen.findByText("Diamond · Plain and Rajkot designs")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Gold necklace 22K" }));
+  expect(await screen.findByText("Diamond")).toBeInTheDocument();
+});

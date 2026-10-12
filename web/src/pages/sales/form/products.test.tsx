@@ -30,7 +30,7 @@ test("a product's GST rate reads as the percent a line takes, 0.25% and 28% exac
   expect(percentOf(0.28)).toBe("28");
   expect(percentOf("0.0010")).toBe("0.1");
   expect(percentOf("")).toBeNull();
-  expect(toSaleProduct(DIAMOND)).toEqual({ id: 6, name: "Cut Diamond", hsn_code: "710239", gst_percent: "0.25", unit: "ct", description: "VVS1", usage: 2 });
+  expect(toSaleProduct(DIAMOND)).toEqual({ id: 6, name: "Cut Diamond", hsn_code: "710239", gst_percent: "0.25", unit: "ct", description: "VVS1", usage: 2, kind: null, kind_effective: "diamond", purity: "", usual_rate: null, purchase_only: false });
 });
 
 test("every product is asked for once, then searched here: every word typed, names starting with it first; the most billed for quick picks", async () => {
@@ -73,19 +73,35 @@ test("a paper run reuses products for 30 minutes; time alone never asks again", 
   }
 });
 
-test("the owner keeps an item for the next bill: v2's products/ with the rate as a fraction", async () => {
+test("the owner keeps an item through catalog's validation, without filling its usual rate", async () => {
   let listed: object[] = [RING];
   const { calls } = salesServer([
     ["GET", "products/", () => ({ count: listed.length, results: listed })],
-    ["POST", "products/", ({ body }) => { const made = { id: 9, ...(body as object) }; listed = [...listed, made]; return made; }],
+    ["POST", "catalog/", ({ body }) => { const made = { id: 9, ...(body as object) }; listed = [...listed, made]; return made; }],
   ]);
   const { result } = renderHook(() => ({ list: useSaleProducts(), create: useCreateProduct() }), { wrapper: wrapper() });
   await waitFor(() => expect(result.current.list.data).toHaveLength(1));
   let made: unknown;
-  await act(async () => { made = await result.current.create.mutateAsync({ name: "Silver Idol", hsn_code: "7114", gst_percent: "3", unit: "pcs", description: "Ganesh" }); });
-  expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "Silver Idol", hsn_code: "7114", gst_tax_rate: "0.03", default_unit: "pcs", description: "Ganesh" });
+  await act(async () => { made = await result.current.create.mutateAsync({ name: "Silver Idol", hsn_code: "7114", gst_percent: "3", unit: "pcs", description: "Ganesh", kind: "silver", purity: "925" }); });
+  expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "Silver Idol", hsn_code: "7114", gst_percent: "3", unit: "pcs", description: "Ganesh", kind: "silver", purity: "925", usual_rate: null, purchase_only: false });
   expect(made).toMatchObject({ id: 9, gst_percent: "3", unit: "pcs" });
   // the products are asked for again, so the next bill can pick it (and the test ends on that settled answer)
   await waitFor(() => expect(result.current.list.data?.map((p) => p.name)).toEqual(["Gold Ring 22K", "Silver Idol"]));
   expect(result.current.create.isSuccess).toBe(true);
+});
+test("the picker reads beyond 1000 products and filters bought-only on every page", async () => {
+  const { calls } = salesServer([["GET", "products/", ({ params }) => params.page === 2
+    ? { count: 1002, next: null, results: [{ ...DIAMOND, purchase_only: true }, { ...CHAIN, usual_rate: "123.456" }] }
+    : { count: 1002, next: "https://example.invalid/api/products/?page=2", results: Array.from({ length: 1000 }, (_, id) => ({ ...RING, id: 100 + id, purchase_only: id === 0 })) }]]);
+  const { result } = renderHook(() => useSaleProducts(), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.data).toHaveLength(1000));
+  expect(result.current.data?.some((p) => p.id === CHAIN.id)).toBe(true);
+  expect(result.current.data?.some((p) => p.id === 100 || p.id === DIAMOND.id)).toBe(false);
+  expect(calls.map((c) => c.url)).toEqual(["products/", "products/"]);
+  expect(calls[1].params.page).toBe(2);
+});
+
+test("the shared picker adapter keeps nullable kind, effective kind and purity for Dashboard and Easy", () => {
+  expect(toSaleProduct({ ...DIAMOND, kind: null, kind_effective: "diamond", purity: "VVS", usual_rate: "123.456", purchase_only: false })).toMatchObject({ kind: null, kind_effective: "diamond", purity: "VVS", usual_rate: "123.456", purchase_only: false });
+  expect(toSaleProduct({ ...DIAMOND, kind: "packing", kind_effective: "packing", purity: "999" })).toMatchObject({ kind: "packing", kind_effective: "packing", purity: "999" });
 });

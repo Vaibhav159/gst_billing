@@ -6,13 +6,35 @@ import type { FirmId } from "@/core/scope";
 import type { BillRef } from "@/core/sales/types";
 
 export type ProductKind = "gold" | "silver" | "diamond" | "bullion" | "service" | "packing" | "other";
+
+/** X-13's stored kind and server-effective kind stay separate for Records, Dashboard and Easy. */
+export type ProductTraits = { kind: ProductKind | null; readonly kind_effective: ProductKind; purity: string; usual_rate: string | null; purchase_only: boolean };
+export function inferredKind(hsn: string, name: string): ProductKind {
+  if (hsn.startsWith("7102")) return "diamond";
+  if (/^(7106|7108)/.test(hsn)) return "bullion";
+  if (/^(7113|7114|7117)/.test(hsn)) return /silver|chandi/i.test(name) ? "silver" : "gold";
+  if (/^(9983|9988)/.test(hsn)) return "service";
+  if (/^(4819|4823)/.test(hsn)) return "packing";
+  return "other";
+}
+export function productTraits(raw: unknown): ProductTraits {
+  const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const kind = typeof d.kind === "string" && d.kind ? d.kind as ProductKind : null;
+  return {
+    // Accept the old contract's kind_set while the amended server and readers land together.
+    kind: d.kind_set === false ? null : kind,
+    kind_effective: (d.kind_effective as ProductKind | undefined) ?? kind ?? inferredKind(String(d.hsn_code ?? ""), String(d.name ?? "")),
+    purity: String(d.purity ?? ""), usual_rate: d.usual_rate == null ? null : String(d.usual_rate), purchase_only: d.purchase_only === true,
+  };
+}
+
 export type RecordRef = { id: number; name: string };
 export type FirmRef = RecordRef & { short: string };
 export type Change = { key: string; field: string; from: string; to: string };
 export type ProductFigures = { bills: number; quantity: string; other_units: { unit: string; quantity: string }[]; taxable: number; tax: number; cancelled?: number };
-export type Product = {
+export type Product = ProductTraits & {
   id: number; name: string; hsn_code: string; hsn_text: string; gst_percent: string; slab_ok: boolean;
-  unit: string; kind: ProductKind; kind_set: boolean; purity: string; usual_rate: string | null; purchase_only: boolean;
+  unit: string;
   description: string; sold?: ProductFigures;
 };
 export type ProductDetail = Product & {
@@ -22,7 +44,7 @@ export type ProductDetail = Product & {
   hsn_on_bills: { lines: number; groups: { hsn_code: string; matches: boolean; lines: number; sales: BillRef[]; purchases: { id: number; bill_no: string }[] }[]; blocking: { bill: BillRef; business: FirmRef; month: string }[] };
   uses: { sales: number; cancelled: number; purchases: number; bin: number }; changes?: Change[];
 };
-export type ProductBody = { name: string; hsn_code: string; gst_percent: string; unit: string; kind: ProductKind | ""; purity: string; usual_rate: string | null; purchase_only: boolean; description: string };
+export type ProductBody = { name: string; hsn_code: string; gst_percent: string; unit: string; kind: ProductKind | null; purity: string; usual_rate: string | null; purchase_only: boolean; description: string };
 export type CatalogPage = { count: number; next: string | null; previous: string | null; results: Product[]; total_products: number; twins: RecordRef[][]; summary?: { taxable: number; bills: number; cancelled: number; no_items: BillRef[]; no_items_count: number } };
 type WireFigures = Omit<ProductFigures, "taxable" | "tax"> & { taxable: string; tax: string };
 type WireProduct = Omit<Product, "sold"> & { sold?: WireFigures };
@@ -34,11 +56,11 @@ const money = (s: string) => toPaise(s) ?? 0;
 const figures = (v: WireFigures): ProductFigures => ({ ...v, other_units: v.other_units ?? [], taxable: money(v.taxable), tax: money(v.tax) });
 export function toProduct(raw: unknown): Product {
   const d = raw as WireProduct;
-  return { ...d, sold: d.sold ? figures(d.sold) : undefined };
+  return { ...d, ...productTraits(d), sold: d.sold ? figures(d.sold) : undefined };
 }
 export function toProductDetail(raw: unknown): ProductDetail {
   const d = raw as WireDetail;
-  return { ...d, sold: figures(d.sold), bought: figures(d.bought), by_firm: d.by_firm.map((r) => ({ ...r, sold: figures(r.sold), bought: figures(r.bought) })), lines: d.lines.map((l) => ({ ...l, taxable: money(l.taxable) })) };
+  return { ...d, ...productTraits(d), sold: figures(d.sold), bought: figures(d.bought), by_firm: d.by_firm.map((r) => ({ ...r, sold: figures(r.sold), bought: figures(r.bought) })), lines: d.lines.map((l) => ({ ...l, taxable: money(l.taxable) })) };
 }
 export function toCatalogPage(raw: unknown): CatalogPage {
   const d = raw as Omit<CatalogPage, "results" | "summary"> & { results: WireProduct[]; summary?: Omit<NonNullable<CatalogPage["summary"]>, "taxable"> & { taxable: string } };

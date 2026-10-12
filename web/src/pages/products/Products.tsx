@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router";
 import { Package, Plus, Upload, Download, ChevronRight, Search, MoreVertical, AlertTriangle } from "lucide-react";
 import { api } from "@/core/api/client";
 import { problemOf } from "@/core/api/errors";
-import { useCatalog, type CatalogFilters, type RecordRef } from "@/core/api/catalog";
+import { useCatalog, useProduct, type CatalogFilters, type RecordRef } from "@/core/api/catalog";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { cn } from "@/core/cn";
 import { inr, plural, todayIST } from "@/core/format";
@@ -44,8 +44,11 @@ export default function Products() {
   const [sort, setSort] = useState<CatalogFilters["ordering"]>("name");
   const [exporting, setExporting] = useState(false);
   const query = useCatalog({ firmId, fy, q: typed, show, gst_rate: rate, ordering: sort });
+  const saved = useProduct(flash, { firmId, fy });
   const first = query.data?.pages[0];
-  const rows = query.data?.pages.flatMap((p) => p.results) ?? [];
+  const loaded = query.data?.pages.flatMap((p) => p.results) ?? [];
+  // The newly added product flashes even when its name sorts after the first page.
+  const rows = saved.data && !q.trim() && show === "all" && !rate && !loaded.some((p) => p.id === flash) ? [saved.data, ...loaded].slice(0, loaded.length || 1) : loaded;
   const moreFocus = useMoreFocus(rows.map((p) => p.id));
   const scope = scopeName(firms, firmId);
   const clear = () => { setQ(""); setShow("all"); setRate(""); };
@@ -65,7 +68,7 @@ export default function Products() {
     {isPhone ? <FirmChips firms={firms} value={firmId} onChange={setFirmId} /> : null}
     <Segmented label="Show" full={isPhone} options={SHOW} value={show} onChange={setShow} />
     <Select aria-label="GST rate" value={rate} onChange={(e) => setRate(e.target.value)} className={isPhone ? "" : "w-[170px]"} options={[{ value: "", label: "Every GST rate" }, ...[...SLABS].sort((a, b) => Number(a) - Number(b)).map((s) => ({ value: s, label: `GST ${s}%` }))]} />
-    {!isPhone ? <><div className="flex-1" /><Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as CatalogFilters["ordering"])} className="w-[190px]" options={[{ value: "name", label: "Sort: Name" }, { value: "-sold", label: "Sort: Most sold" }, { value: "hsn", label: "Sort: HSN" }]} /></> : null}</>;
+    {<><div className="flex-1" /><Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as CatalogFilters["ordering"])} className={isPhone ? "" : "w-[190px]"} options={[{ value: "name", label: "Sort: Name" }, { value: "-sold", label: "Sort: Most sold" }, { value: "hsn", label: "Sort: HSN" }]} /></>}</>;
   const empty = <EmptyState icon={Search} title={q.trim() ? `No product matches “${q.trim()}”` : "No products match these filters"} actions={<><Button onClick={clear}>Clear search and filters</Button>{can("product.edit") ? <ButtonLink variant="primary" icon={Plus} to={`/products/new?from=list${q.trim() && !/^\d+$/.test(q.trim()) ? `&name=${encodeURIComponent(q.trim())}` : ""}`}>Add a product</ButtonLink> : null}</>}>Search looks at names, HSN codes, purity (22K, 999) and descriptions.</EmptyState>;
   return <Page icon={Package} title="Products" back={isPhone ? "/more" : undefined} context={first ? `${plural(first.total_products, "product")} · HSN, GST rate and unit print on every bill · sold figures for FY ${fy}, ${scope}` : "Loading the list…"}
     phoneSubtitle={first ? `${plural(first.total_products, "product")} · sold in FY ${fy} · ${scope}` : "Loading…"} actions={actions}
@@ -85,7 +88,7 @@ export default function Products() {
           right={p.purchase_only ? <span className="text-muted">Bought only</span> : p.sold?.bills ? soldQuantity(p.sold, p.unit) : <span className="text-muted">Not sold</span>}
           rightSub={p.purchase_only ? null : p.sold?.bills ? inr(p.sold.taxable) : `FY ${fy}`} />) : <Table label="Products"><thead><tr><Th>Product</Th><Th>HSN</Th><Th>GST</Th><Th className="hidden xl:table-cell">Unit</Th><Th className="hidden xl:table-cell">Purity</Th><Th align="right">Usual rate</Th><Th align="right">Sold · FY {fy}</Th><Th align="right">Value before GST</Th><Th align="right">Bills</Th><Th className="w-10"><span className="sr-only">Open</span></Th></tr></thead>
           <tbody>{rows.map((p) => <Tr key={p.id} data-row={p.id} tabIndex={-1} onKeyDown={openOnEnter(() => navigate(`/products/${p.id}`))} onClick={() => navigate(`/products/${p.id}`)} className={cn(p.id === flash && "anim-flash")}>
-            <Td><Link to={`/products/${p.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand">{p.name}</Link><span className="block text-xs text-muted mt-0.5 max-w-[280px] truncate">{[KIND_LABEL[p.kind], p.description].filter(Boolean).join(" · ")}</span></Td><Td className="tnum">{p.hsn_code}</Td><Td><Badge>{p.slab_ok ? `${p.gst_percent}%` : "Not a GST rate"}</Badge></Td><Td className="text-fg2 hidden xl:table-cell">{p.unit}</Td><Td className="text-fg2 hidden xl:table-cell">{p.purity || "None"}</Td><Td align="right">{usualRate(p)}</Td>
+            <Td><Link to={`/products/${p.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand">{p.name}</Link><span className="block text-xs text-muted mt-0.5 max-w-[280px] truncate">{[KIND_LABEL[p.kind_effective], p.description].filter(Boolean).join(" · ")}</span></Td><Td className="tnum">{p.hsn_code}</Td><Td><Badge>{p.slab_ok ? `${p.gst_percent}%` : "Not a GST rate"}</Badge></Td><Td className="text-fg2 hidden xl:table-cell">{p.unit}</Td><Td className="text-fg2 hidden xl:table-cell">{p.purity || "None"}</Td><Td align="right">{usualRate(p)}</Td>
             <Td align="right">{p.purchase_only ? <Badge>Bought only</Badge> : p.sold?.bills ? soldQuantity(p.sold, p.unit) : <span className="text-muted">Not sold</span>}</Td><Td align="right">{p.sold?.bills ? <Money value={p.sold.taxable} /> : "—"}</Td><Td align="right">{p.sold?.bills ?? 0}</Td><Td><ChevronRight size={18} className="text-muted" aria-hidden="true" /></Td></Tr>)}</tbody></Table>}
         <MoreButton shown={rows.length} total={page.count} what="products" pageSize={20} loading={query.isFetchingNextPage} problem={query.isFetchNextPageError ? problemOf(query.error) : null} onMore={() => { moreFocus(); void query.fetchNextPage(); }} />
       </Card></>;

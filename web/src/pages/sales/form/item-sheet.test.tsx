@@ -157,7 +157,7 @@ test("local errors use the unit being edited instead of the saved line's old uni
 test("saving a new product holds the sheet through Close and Esc, then puts the returned product on the item", async () => {
   const user = fakeToday();
   let answer = () => {};
-  const { calls } = formServer([["POST", "products/", ({ body }) => new Promise((resolve) => {
+  const { calls } = formServer([["POST", "catalog/", ({ body }) => new Promise((resolve) => {
     answer = () => resolve({ id: 12, ...(body as object) });
   })]]);
   const sheet = await openItem(user);
@@ -178,7 +178,7 @@ test("saving a new product holds the sheet through Close and Esc, then puts the 
   await user.keyboard("10{Enter}100{Enter}");
   await tick(400);
   expect(savedLines()).toMatchObject([{ productId: 12, name: "Silver idol", hsn: "7114", gst: "3", qty: 10, rate: "100" }]);
-  expect(calls.filter((c) => c.method === "POST" && c.url === "products/")).toHaveLength(1);
+  expect(calls.filter((c) => c.method === "POST" && c.url === "catalog/")).toHaveLength(1);
 });
 
 test("a save refusal shows each line field in its sheet, clearing each server error only when that field changes", async () => {

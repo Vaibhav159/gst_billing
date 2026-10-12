@@ -58,7 +58,7 @@ export function NewItemForm({ initialName = "", idBase = "np", onDone, onCancel,
     const line = { name: v.name.trim(), hsn: v.hsn, gst: v.gst, unit: v.unit, rate: v.rate, description: v.description.trim() };
     if (!(canAdd && v.keep)) { onDone({ productId: null, line }); return; }
     setFail(null);
-    create.mutate({ name: line.name, hsn_code: line.hsn, gst_percent: line.gst, unit: line.unit, description: line.description }, {
+    create.mutate({ name: line.name, hsn_code: line.hsn, gst_percent: line.gst, unit: line.unit, description: line.description, kind: null, purity: "" }, {
       onSuccess: (p) => {
         show({ title: `${line.name} added to Products`, body: `HSN ${line.hsn} · GST ${line.gst}% · per ${line.unit}. It's on this bill now.` });
         onDone({ productId: p.id, line });

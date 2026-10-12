@@ -82,7 +82,7 @@ function Detail({ p, all, setAll }: { p: Product; all: boolean; setAll: (v: bool
     ["GST rate", <span key="g"><span className="font-semibold">{p.slab_ok ? `${p.gst_percent}%` : "Not a GST rate"}</span><span className="block text-xs text-muted">{slabSplit(p.gst_percent)}</span></span>],
     ["Unit", unitName(p.unit)], ["Purity", p.purity || "None"],
     ["Usual rate", <span key="r">{usualRate(p)}<span className="block text-xs text-muted">Shown on the product; bills take the rate written on the paper bill</span></span>],
-    ["Kind", KIND_LABEL[p.kind]], ["On sales bills", p.purchase_only ? "No · bought only" : "Yes"],
+    ["Kind", KIND_LABEL[p.kind_effective]], ["On sales bills", p.purchase_only ? "No · bought only" : "Yes"],
     p.description ? ["Description", <span key="d" className="text-fg2">{p.description}</span>] : null,
     p.earlier_names.length ? ["Earlier names", p.earlier_names.join(", ")] : null,
   ]} />;

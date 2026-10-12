@@ -394,7 +394,7 @@ test("an item that isn't in Products: counter staff use it on this bill only", a
 test("the owner keeps it in Products; a name Products already has is said under the name, and a lost connection keeps what was typed", async () => {
   const done = vi.fn<(i: NewItem) => void>();
   let tries = 0;
-  const { calls } = salesServer([["POST", "products/", ({ body }) => {
+  const { calls } = salesServer([["POST", "catalog/", ({ body }) => {
     tries += 1;
     if (tries === 1) return refuse(400, { name: ["product with this Product Name already exists."] });
     if (tries === 2) throw new AxiosError("Network Error", "ERR_NETWORK");
@@ -404,6 +404,7 @@ test("the owner keeps it in Products; a name Products already has is said under 
   expect(screen.getByRole("checkbox", { name: /Also save to Products/ })).toBeChecked();
   await userEvent.type(screen.getByLabelText(/^HSN code/), "7114");
   await userEvent.selectOptions(screen.getByLabelText(/^GST rate/), "3");
+  await userEvent.type(screen.getByLabelText("Rate per gms"), "6512.125");
   await userEvent.click(screen.getByRole("button", { name: "Save and use on this bill" }));
   expect(await screen.findByText("Products already has Silver idol. Pick it from the list, or name this one differently.")).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText(/^Name/), " (Ganesh)");
@@ -411,8 +412,9 @@ test("the owner keeps it in Products; a name Products already has is said under 
   expect(await screen.findByRole("alert")).toHaveTextContent("Not saved: the app couldn't get through");
   expect(screen.getByLabelText(/^Name/)).toHaveValue("Silver idol (Ganesh)");
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(done).toHaveBeenCalledWith({ productId: 12, line: expect.objectContaining({ name: "Silver idol (Ganesh)", hsn: "7114", gst: "3" }) }));
+  await waitFor(() => expect(done).toHaveBeenCalledWith({ productId: 12, line: expect.objectContaining({ name: "Silver idol (Ganesh)", hsn: "7114", gst: "3", rate: "6512.125" }) }));
   expect(calls.filter((c) => c.method === "POST")).toHaveLength(3);
+  expect(calls.filter((c) => c.method === "POST").at(-1)?.body).toMatchObject({ usual_rate: null });
   expect(await screen.findByText("Silver idol (Ganesh) added to Products")).toBeInTheDocument();
 });
 
@@ -435,7 +437,7 @@ test("the owner can use it on this bill only: unticked, nothing is sent; it need
 });
 
 test("a problem puts the cursor on its field with its words read out: the form's own, and a name Products already has", async () => {
-  salesServer([["POST", "products/", () => refuse(400, { name: ["product with this Product Name already exists."] })]]);
+  salesServer([["POST", "catalog/", () => refuse(400, { name: ["product with this Product Name already exists."] })]]);
   renderApp(<NewItemForm initialName="Silver idol" onDone={() => {}} />);
   const name = screen.getByLabelText(/^Name/);
   const hsn = screen.getByLabelText(/^HSN code/);
@@ -458,7 +460,7 @@ test("a problem puts the cursor on its field with its words read out: the form's
 test("Try again takes the last failure away while it saves", async () => {
   let tries = 0;
   let answer = () => {};
-  salesServer([["POST", "products/", ({ body }) => {
+  salesServer([["POST", "catalog/", ({ body }) => {
     tries += 1;
     if (tries === 1) throw new AxiosError("Network Error", "ERR_NETWORK");
     return new Promise((ok) => { answer = () => ok({ id: 12, ...(body as object) }); });

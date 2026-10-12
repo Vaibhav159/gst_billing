@@ -91,7 +91,7 @@ test("an unfinished bill round-trips through its data, lines with nothing on the
 });
 
 test("a product brings its name, HSN, GST rate and unit; the rate is typed as written", () => {
-  const l = lineFromProduct({ id: 5, name: "Gold Ring 22K", hsn_code: "711319", gst_percent: "3", unit: "gms", description: "", usage: 4 }, { ...blankLine(), qty: 4.5, rate: "6500" });
+  const l = lineFromProduct({ id: 5, name: "Gold Ring 22K", hsn_code: "711319", gst_percent: "3", unit: "gms", description: "", usage: 4, kind: null, kind_effective: "gold", purity: "22K", usual_rate: "9999.125", purchase_only: false }, { ...blankLine(), qty: 4.5, rate: "6500" });
   expect(l).toMatchObject({ productId: 5, name: "Gold Ring 22K", hsn: "711319", gst: "3", unit: "gms", qty: 4.5, rate: "6500", custom: false });
 });
 

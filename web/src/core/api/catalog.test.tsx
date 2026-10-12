@@ -7,7 +7,7 @@ import { toProduct, useCatalog, useProduct, useSaveProduct } from "./catalog";
 import { useRegistry } from "./registry";
 import { useSetup } from "./setup";
 
-const raw = { id: 12, name: "Gold necklace 22K", hsn_code: "711319", hsn_text: "Gold jewellery", gst_percent: "3", slab_ok: true, unit: "gms", kind: "gold", kind_set: true, purity: "22K", usual_rate: "6470.125", purchase_only: false, description: "", sold: { bills: 14, quantity: "508.062", other_units: [{ unit: "pcs", quantity: "2.000" }], taxable: "3283912.40", tax: "98517.37", cancelled: 1 } };
+const raw = { id: 12, name: "Gold necklace 22K", hsn_code: "711319", hsn_text: "Gold jewellery", gst_percent: "3", slab_ok: true, unit: "gms", kind: "gold", kind_effective: "gold", purity: "22K", usual_rate: "6470.125", purchase_only: false, description: "", sold: { bills: 14, quantity: "508.062", other_units: [{ unit: "pcs", quantity: "2.000" }], taxable: "3283912.40", tax: "98517.37", cancelled: 1 } };
 function wrap() {
   const qc = testQueryClient();
   return { qc, wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> };
@@ -64,4 +64,9 @@ test("setup preserves permission-hidden people and absent backup", async () => {
   serve({ "GET setup/": answer });
   const { result } = renderHook(() => useSetup(), wrap());
   await waitFor(() => expect(result.current.data).toEqual(answer));
+});
+
+test("catalog preserves the stored kind separately from the server's effective classification", () => {
+  expect(toProduct({ ...raw, kind: null, kind_effective: "diamond", purity: "VVS" })).toMatchObject({ kind: null, kind_effective: "diamond", purity: "VVS" });
+  expect(toProduct({ ...raw, kind: "packing", kind_effective: "packing" })).toMatchObject({ kind: "packing", kind_effective: "packing" });
 });

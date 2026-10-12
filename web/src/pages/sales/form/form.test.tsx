@@ -278,9 +278,9 @@ test("an item that isn't in Products fills its line, with its HSN and GST rate t
 test("an item kept in Products: the sheet stays while the save is on its way (Esc and its Close wait for it), then the line takes the product", async () => {
   const user = fakeToday();
   let answer = () => {};
-  const { calls } = formServer([["POST", "products/", ({ body }) => new Promise((ok) => {
+  const { calls } = formServer([["POST", "catalog/", ({ body }) => new Promise((ok) => {
     const b = body as Record<string, unknown>;
-    answer = () => ok({ id: 12, name: b.name, hsn_code: b.hsn_code, gst_tax_rate: b.gst_tax_rate, default_unit: b.default_unit, description: b.description, usage_count: 0 });
+    answer = () => ok({ id: 12, ...b });
   })]]);
   mountForm("/sales/new");
   await screen.findByRole("combobox", { name: /Customer/ });
@@ -300,7 +300,7 @@ test("an item kept in Products: the sheet stays while the save is on its way (Es
   expect(within(sheet).getByRole("button", { name: "Back" })).toBeDisabled();
   await act(async () => { answer(); });
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "An item that isn't in Products" })).not.toBeInTheDocument());
-  expect(calls.filter((c) => c.method === "POST" && c.url === "products/")).toHaveLength(1);
+  expect(calls.filter((c) => c.method === "POST" && c.url === "catalog/")).toHaveLength(1);
   expect(screen.getByRole("combobox", { name: "Line 1 product" })).toHaveValue("silver idol");
   expect(screen.getByRole("combobox", { name: "Line 1 product" }).closest("[data-line]")).toHaveTextContent("HSN 7114 · GST 3%");
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Line 1 weight in grams" })).toHaveFocus());

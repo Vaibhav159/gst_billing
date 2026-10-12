@@ -19,7 +19,8 @@ import { ButtonLink, Card, EmptyState, Page, Skeleton } from "@/core/ui";
 import { useView } from "@/core/view";
 import { DesktopForm } from "./DesktopForm";
 import { PAY_KEYS } from "./fields";
-import { idParam, startCopy, startDraft, startNew, startPaper, startRemake, type Start } from "./model";
+import { blankLine, idParam, lineFromProduct, startCopy, startDraft, startNew, startPaper, startRemake, type Start } from "./model";
+import { useSaleProducts } from "./products";
 import { lastPaperDate } from "./paperDates";
 import { PhoneForm } from "./PhoneForm";
 import { parseDateText } from "./rules";
@@ -118,10 +119,12 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
   const source = useBillDetail(deciding ? remakeId ?? fromId : null);
   const customerId = idParam(params.get("customer"));
   const customer = useCustomer(deciding ? customerId : null);
+  const productId = idParam(params.get("product"));
+  const products = useSaleProducts(deciding && productId !== null);
   const paper = params.get("paper") === "1";
   const title = paper ? "Bill from the paper book" : "New sales bill";
   if (opened.current) return <BillForm start={opened.current} formKey={formKey} />;
-  if (loading || !ready || ((remakeId ?? fromId) !== null && source.isPending) || (customerId !== null && customer.isPending) || (lookUp && unfinished.loading)) return <FormLoading title={title} />;
+  if (loading || !ready || ((remakeId ?? fromId) !== null && source.isPending) || (customerId !== null && customer.isPending) || (productId !== null && products.isPending) || (lookUp && unfinished.loading)) return <FormLoading title={title} />;
   if (!firms.length) {
     return (
       <Page icon={FilePlus2} title={title} breadcrumbs={[{ label: "Sales", to: "/sales" }]} back="/sales">
@@ -151,6 +154,8 @@ function NewBillStart({ params, formKey }: { params: URLSearchParams; formKey: s
   } else {
     // ?paid= picks how it was paid only when it names a way a bill is paid
     start = startNew({ ...fallback, today, customer: customer.data ?? null, payment: PAY_KEYS.find((k) => k === params.get("paid")) ?? null });
+    const product = products.data?.find((p) => p.id === productId);
+    if (product) start.form.lines = [lineFromProduct(product, blankLine())];
   }
   opened.current = start;
   return <BillForm start={start} formKey={formKey} />;
