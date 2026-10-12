@@ -271,9 +271,9 @@ def checked_current(user, data):
     # R4B-2: a stolen session must not be able to point password codes at a new phone.
     current = data.get("current")
     if not isinstance(current, str) or not current:
-        raise ValidationError({"current": ["Enter your current password."]})
+        raise ValidationError({"current": ["Type your current password to change your phone."]})
     if not user.check_password(current):
-        raise ValidationError({"current": ["That isn't your current password. Check Caps Lock and try again."]})
+        raise ValidationError({"current": ["That isn't your current password."]})
 
 
 @transaction.atomic

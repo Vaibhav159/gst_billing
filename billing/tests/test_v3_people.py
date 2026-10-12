@@ -277,8 +277,10 @@ class PeopleTest(TestCase):
         there = SignInSession.objects.create(user=self.owner, device="Safari on Mac")
         self.owner._session_id = str(here.pk)
         client = client_for(self.owner)
-        for extra, words in (({}, "Enter your current password."), ({"current": 5}, "Enter your current password."),
-                             ({"current": "wrong"}, "That isn't your current password. Check Caps Lock and try again.")):
+        # Contract §7.1's R4B-2 words, not the password change's (§7.2).
+        for extra, words in (({}, "Type your current password to change your phone."),
+                             ({"current": 5}, "Type your current password to change your phone."),
+                             ({"current": "wrong"}, "That isn't your current password.")):
             response = client.patch("/api/account/", {"first_name": "Kailashji", "phone": "9829017210", **extra}, format="json")
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.data, {"current": [words]})
