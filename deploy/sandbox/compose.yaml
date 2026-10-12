@@ -62,6 +62,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: gst_billing.sandbox_settings
       GST_SANDBOX: "1"
+      SANDBOX_FAKE_SMS: ${SANDBOX_FAKE_SMS:-0}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?run through sandbox.sh so the env file is loaded}
       DB_HOST: db
       DB_PORT: "5432"

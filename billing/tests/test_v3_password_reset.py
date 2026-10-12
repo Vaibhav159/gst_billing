@@ -377,6 +377,11 @@ def test_sandbox_fake_sms_is_explicit_and_sets_a_private_file(enabled, tmp_path)
         sandbox = runpy.run_module("gst_billing.sandbox_settings")
     assert sandbox["DEBUG"] is enabled
     assert sandbox["SMS_RESET_ENABLED"] is enabled
+    assert production.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"] == "10/min"
+    assert production.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["reset"] == "10/hour"
+    rates = sandbox["REST_FRAMEWORK"]["DEFAULT_THROTTLE_RATES"]
+    assert rates["login"] == "120/min"
+    assert rates["reset"] == ("120/hour" if enabled else "10/hour")
     if enabled:
         assert sandbox["SMS_PROVIDER"] == "fake"
         assert sandbox["SMS_FAKE_OUTBOX_FILE"] == str(tmp_path / "outbox.json")

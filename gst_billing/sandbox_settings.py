@@ -44,8 +44,13 @@ REST_FRAMEWORK = {**REST_FRAMEWORK, "NUM_PROXIES": 1}
 
 # The end-to-end suites run here as the shop's owner, about 600 requests a run and several runs a day across
 # helpers, so production's 5000 a day per user would lock the owner out of the sandbox for the rest of the day.
-# Production keeps 5000/day; the login, refresh and drafts rates stay as production's.
-REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {**REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"], "user": "50000/day"}
+# Acceptance signs in many generated accounts from the same localhost proxy.
+# Keep finite sandbox limits; production's login, reset and anonymous limits are unchanged.
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    **REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"],
+    "user": "50000/day", "anon": "10000/day", "login": "120/min",
+    **({"reset": "120/hour"} if SMS_PROVIDER == "fake" else {}),
+}
 
 # Only this settings module can enable deterministic synthetic reads.
 AI_READER = os.environ.get("AI_READER", "fake")
