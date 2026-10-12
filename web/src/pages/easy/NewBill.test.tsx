@@ -242,6 +242,39 @@ test('only the first positive weight starts keeping, without moving away from th
   expect(writes(calls)[0]).toMatchObject({ url: `drafts/${id}/`, body: { data: { lines: [expect.objectContaining({ qty: 12.345, rate: '' })] } } });
 });
 
+test('saving a dirty customer returns to the same bill without a leave prompt and keeps later bill guarding', async () => {
+  const { calls } = serve([['POST', 'customers/', ({ body }) => ({ ...ANIL, ...body as object, id: 12 })]]);
+  const { router } = draw(); await newRing(); fillRing();
+  const before = state().form;
+  await act(async () => { await router.navigate('/e/new/customer'); });
+  fireEvent.change(await shown(() => screen.getByLabelText('Name')), { target: { value: 'Meena Jain' } });
+  fireEvent.change(screen.getByLabelText('Mobile number'), { target: { value: '9414123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save and continue the bill' }));
+  await shown(() => expect(router.state.location.pathname).toBe('/e/new/items'));
+  expect(state().form).toEqual({ ...before, customer: expect.objectContaining({ id: 12, name: 'Meena Jain' }) });
+  expect(screen.queryByRole('dialog', { name: 'Leave this customer?' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Keep this bill for later?' })).not.toBeInTheDocument();
+  expect(calls.filter(call => call.method === 'POST' && call.url === 'customers/')).toHaveLength(1);
+  expect(await leave(router)).toHaveTextContent('Meena Jain');
+  expect(router.state.location.pathname).toBe('/e/new/items');
+});
+
+test('using a duplicate from a dirty customer form returns to the bill without a save or leave prompt', async () => {
+  const { calls } = serve([['GET', 'customers/', () => ({ results: [ANIL] })]], [row()]);
+  const { router } = draw(`/e/new/items?draft=${ID}`);
+  await shown(() => screen.getByLabelText(weightLabel));
+  const before = state().form;
+  await act(async () => { await router.navigate('/e/new/customer'); });
+  fireEvent.change(await shown(() => screen.getByLabelText('Name')), { target: { value: 'Meena Jain' } });
+  fireEvent.change(screen.getByLabelText('Mobile number'), { target: { value: ANIL.mobile_number } });
+  fireEvent.click(await shown(() => screen.getByRole('button', { name: 'Use Anil' })));
+  await shown(() => expect(router.state.location.pathname).toBe('/e/new/items'));
+  expect(state().form).toMatchObject({ ...before, customer: { id: ANIL.id, name: ANIL.name } });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(calls.filter(call => call.method === 'POST' && call.url === 'customers/')).toEqual([]);
+  expect(await leave(router)).toHaveTextContent('Anil Gupta');
+});
+
 test('Keep waits for an outstanding write, keeps the latest values under the same id and then leaves', async () => {
   const held = deferred<unknown>(); let first!: Call; let waiting = true;
   const { calls, drafts } = serve([['PUT', /^drafts\/[^/]+\/$/, call => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Outlet, useBlocker, useLocation, useNavigate, useOutletContext } from 'react-router';
 import { newDraftId, useKeepDraft } from '@/core/api/drafts';
@@ -33,7 +33,13 @@ export default function NewBill() {
   const navigate = useNavigate();
   const location = useLocation();
   const keep = useKeepDraft();
-  const [customerDirty, onCustomerDirty] = useState(false);
+  const [customerDirty, setCustomerDirty] = useState(false);
+  const customerDirtyNow = useRef(false);
+  const onCustomerDirty = useCallback((dirty: boolean) => {
+    // Read the cleared flag when the customer completion effect immediately navigates.
+    customerDirtyNow.current = dirty;
+    setCustomerDirty(dirty);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
   const allowed = useRef(false);
@@ -49,7 +55,7 @@ export default function NewBill() {
       && ownDraft && currentParams.toString() === nextParams.toString();
     if (ownDraftAddress) return false;
     if (busy || F.saving) return true;
-    return customerDirty || (hasBill && !inside(nextLocation.pathname));
+    return customerDirtyNow.current || (hasBill && !inside(nextLocation.pathname));
   });
   // Requires 6B's keeper option address:false: naming a draft must never change its current child screen.
   useEffect(() => {
