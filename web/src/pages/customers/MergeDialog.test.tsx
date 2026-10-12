@@ -113,3 +113,22 @@ test.each([false, true])("a raced supplier GSTIN refusal retains its purchase li
   expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   expect(calls.filter((c) => c.url.endsWith("merge-preview/"))).toHaveLength(2);
 });
+
+
+const duplicatePurchase = {
+  code: "duplicate_purchase", months: [], detail: "Delete one copy first, or keep both customers.",
+  bills: [1, 2].map(n => ({ id: 600 + n, invoice_number: `DUP-${n}`, invoice_date: "2026-10-01", customer_name: "Anil G", status: "active" })),
+};
+test.each([false, true])("duplicate purchase references render in the preview or a raced refusal, raced=%s", async (raced) => {
+  let refused = !raced;
+  const calls = serve({ ...replies(),
+    "GET customers/31/merge-preview/": () => ({ status: 200, data: refused ? { ...preview, can_merge: false, refusal: duplicatePurchase } : preview }),
+    "POST customers/31/merge-into/": () => { refused = true; return { status: 409, data: duplicatePurchase }; },
+  });
+  open(); await pass(400); fireEvent.click(screen.getByRole("radio", { name: /Anil Gupta/ })); await pass();
+  if (raced) { fireEvent.click(screen.getByRole("checkbox")); fireEvent.click(screen.getByRole("button", { name: "Merge into Anil Gupta" })); await pass(); }
+  const list = screen.getByRole("list", { name: "Bills that prevent this merge" });
+  expect(within(list).getAllByRole("listitem").map(row => row.textContent)).toEqual(["DUP-1", "DUP-2"]);
+  expect(screen.getByRole("button", { name: "Merge into Anil Gupta" })).toBeDisabled();
+  expect(calls.filter(c => c.method === "POST")).toHaveLength(raced ? 1 : 0);
+});

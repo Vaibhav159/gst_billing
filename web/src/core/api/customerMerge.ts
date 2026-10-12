@@ -9,8 +9,12 @@ export type MergeCustomer = CustomerRef & { state_name: string; type: CustomerTy
 export type MergeChange = { bill: BillRef; sent: boolean; paper: boolean; sent_at: string | null; sent_via: string;
   heads: { from: "igst" | "cgst_sgst"; to: "igst" | "cgst_sgst" } | null;
   segment: { from: string; to: string } | null; gstin_changes: boolean; words: string };
+export type MergeRefusal = { detail: string; months: string[] } & (
+  { code: "duplicate_purchase"; bills: BillRef[] } |
+  { code: "month_closed" | "sent_changes" | "walkin"; bills: MergeChange[] }
+);
 export type MergePreview = { source: MergeCustomer; target: MergeCustomer; can_merge: boolean;
-  refusal: { code: "month_closed" | "sent_changes" | "walkin"; detail: string; months: string[]; bills: MergeChange[] } | null;
+  refusal: MergeRefusal | null;
   bills: { count: number; cancelled: number; numbers: string[] }; purchases: number; bin: number; drafts: number;
   changes: MergeChange[]; firms_added: { id: number; name: string; short: string }[]; keeps: string };
 export type MergeResult = { target: number; moved: { bills: number; purchases: number; bin: number; drafts: number }; refiled: number; firms_added: number };

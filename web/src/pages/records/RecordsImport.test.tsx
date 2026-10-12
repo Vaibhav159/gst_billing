@@ -108,3 +108,24 @@ test("the import route keeps 2D's bills branch and selects each records branch b
   }
   expect(read).not.toHaveBeenCalled();
 });
+
+
+test("checking records names a daily request limit instead of promising a one-minute retry", async () => {
+  serve({ "GET catalog/": () => ({ status: 429, data: {} }) });
+  renderApp(<RecordsImport kind="products" readWorkbook={async () => workbook} />);
+  fireEvent.change(screen.getByLabelText("Excel or CSV file to import"), { target: { files: [file] } });
+  await userEvent.click(await screen.findByRole("button", { name: "Check the rows" }));
+  expect(await screen.findByText("The daily request limit has been reached. Try again tomorrow.")).toBeInTheDocument();
+});
+
+test("the confirmation explains that a bad row stops later records, and reports the first bad worksheet row", async () => {
+  const calls = serve({ "GET catalog/": { results: [], next: null }, "POST catalog/": { id: 9 } });
+  renderApp(<RecordsImport kind="products" readWorkbook={async () => [{ name: "Products", rows: [["Name", "HSN", "GST rate"], ["First", "7113", "3"], ["Bad", "7", "3"], ["Later", "7113", "3"]] }]} />);
+  fireEvent.change(screen.getByLabelText("Excel or CSV file to import"), { target: { files: [file] } });
+  await userEvent.click(await screen.findByRole("button", { name: "Check the rows" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Continue to import" }));
+  expect(screen.getByText(/Import stops at the first row that needs a fix/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Import 2 products" }));
+  expect(await screen.findByText(/Added 1 of 3. Row 3:/)).toBeInTheDocument();
+  expect(calls.filter(c => c.method === "POST")).toHaveLength(1);
+});

@@ -3,8 +3,7 @@ import { FileSpreadsheet, Lock, Upload } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "@/core/auth/AuthProvider";
-import { problemOf } from "@/core/api/errors";
-import { checkRecordRows, saveRecordRows, type RecordCells, type RecordImportKind, type RecordImportRow } from "@/core/api/recordsImport";
+import { checkRecordRows, saveRecordRows, recordImportMessage, type RecordCells, type RecordImportKind, type RecordImportRow } from "@/core/api/recordsImport";
 import { plural } from "@/core/format";
 import { Banner, Button, ButtonLink, Card, Field, Input, Page, Segmented, Select, Table, Td, Th, Tr } from "@/core/ui";
 
@@ -111,7 +110,7 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
   const check = async (values: RecordCells[]) => {
     setChecked(false); setError("");
     try { setRows(await checkedRows.mutateAsync(values)); setChecked(true); setSavedCount(null); setStep(3); }
-    catch (problem) { setError(problemOf(problem).message); }
+    catch (problem) { setError(recordImportMessage(problem)); }
   };
   const mapped = () => cells.map((row) => ({ ...Object.fromEntries(columns.filter((column) => column.field).map((column) => [column.field, String(row.cells[column.index] ?? "").trim()])), __row: String(row.row) }));
   const reset = () => { readId.current++; setSheets([]); setRows([]); setColumns([]); setFileName(""); setSavedCount(null); setChecked(false); setError(""); setStep(1); };
@@ -163,11 +162,11 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
     </Card> : null}
     {step === 4 && savedCount === null ? <Card title="4. Import" subtitle={`From ${fileName}`}>
       <div className="flex flex-col gap-4">
-        <p>{plural(ready, ONE[kind])} will be added.</p>
-        <p className="text-sm text-muted">{rows.filter((row) => row.state === "skip").length} already on file or repeated rows will be skipped. {rows.filter((row) => row.state === "fix").length} rows still need a fix and will be left out.</p>
+        <p>{plural(ready, ONE[kind])} {rows.some(row => row.state === "fix") ? "passed the checks" : "will be added"}.</p>
+        <p className="text-sm text-muted">{rows.filter((row) => row.state === "skip").length} already on file or repeated rows will be skipped. {rows.filter((row) => row.state === "fix").length} rows still need a fix. Import stops at the first row that needs a fix; later rows stay untouched.</p>
         <p className="text-sm text-muted">Each row is saved separately. If a save stops, the report shows which rows were saved. Check the rows again before another import.</p>
         <div className="flex flex-wrap justify-between gap-3"><Button disabled={busy} onClick={() => setStep(3)}>Back</Button><Button variant="primary" loading={save.isPending} disabled={busy || !allowed || !checked || !ready}
-          onClick={async () => { try { const result = await save.mutateAsync(); setRows(result.rows); setSavedCount(result.saved); setChecked(false); setStep(3); } catch (problem) { setError(problemOf(problem).message); } }}>Import {plural(ready, ONE[kind])}</Button></div>
+          onClick={async () => { try { const result = await save.mutateAsync(); setRows(result.rows); setSavedCount(result.saved); setChecked(false); setStep(3); } catch (problem) { setError(recordImportMessage(problem)); } }}>Import {plural(ready, ONE[kind])}</Button></div>
       </div>
     </Card> : null}
   </Page>;

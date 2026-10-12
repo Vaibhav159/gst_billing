@@ -6,6 +6,6 @@ export const readRecordsWorkbook: ReadRecordWorkbook = async (file) => (await re
   name: sheet.name,
   rows: sheet.rows.map((row, r) => row.map((value, c) => {
     const display = sheet.shown?.[r]?.[c];
-    return typeof value === "number" && display?.trim().endsWith("%") ? display : value;
+    return typeof value === "number" && display?.trim().endsWith("%") ? String(+(value * 100).toFixed(6)) : value;
   })),
 }));

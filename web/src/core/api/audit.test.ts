@@ -68,7 +68,7 @@ test("exports the active filters through the API, then invalidates the new downl
 test("audit actions send no body, keep server words, and invalidate every affected cache", async () => {
   const calls = serve({ "POST audit/9012/revert/": { entry: { ...ENTRY, result: "reverted", can: null }, new_entry: { ...ENTRY, id: 9013 }, link: "/customers/7" } });
   const { qc, wrapper } = setup();
-  for (const root of ["sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "audit", "drafts"]) qc.setQueryData([root, "list"], []);
+  for (const root of ["sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "audit", "drafts", "suppliers", "captures", "shop-settings", "registry"]) qc.setQueryData([root, "list"], []);
   qc.setQueryData(["customers", "one", 7], { name: "Priya" });
   const { result } = renderHook(() => useAuditAction(), { wrapper });
   await act(async () => { await result.current.mutateAsync({ id: 9012, kind: "revert" }); });
@@ -176,4 +176,15 @@ test("a JSON refusal received as a Blob retains its exact field words", async ()
   await act(async () => { try { await result.current.mutateAsync({ start_date: "2026-04-01", end_date: "2026-03-31" }); } catch (error) { failed = error; } });
   expect(problemOf(failed).message).toBe("The start date is after the end date.");
   expect(saveFile).not.toHaveBeenCalled();
+});
+
+
+test("a refused audit action disables the cached action using the server's words", async () => {
+  const detail = "Phone changed again since. Revert the later change first.";
+  serve({ "POST audit/9012/revert/": () => ({ status: 409, data: { code: "changed_since", detail } }) });
+  const { qc, wrapper } = setup();
+  qc.setQueryData(["audit", "list", {}], { pages: [PAGE], pageParams: [1] });
+  const { result } = renderHook(() => useAuditAction(), { wrapper });
+  await act(async () => { await expect(result.current.mutateAsync({ id: 9012, kind: "revert" })).rejects.toBeDefined(); });
+  expect(qc.getQueryData<{ pages: AuditPage[] }>(["audit", "list", {}])?.pages[0].results[0].can?.disabled).toBe(detail);
 });

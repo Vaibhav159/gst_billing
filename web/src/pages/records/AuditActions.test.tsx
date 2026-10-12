@@ -28,6 +28,10 @@ test("revert names every field going back; it sends nothing before confirmation 
   opened(); fireEvent.click(within(dialog).getByRole("button", { name: "Revert" }));
   expect(await within(dialog).findByText("Phone changed again since. Revert the later change first.")).toBeInTheDocument();
   expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Revert" })).toBeDisabled();
+  expect(within(dialog).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Revert Priya Sharma" })).toBeDisabled();
 });
 
 test("undo an unused record confirms, refreshes and shows Undone without a toast", async () => {

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { serve, serveWith } from "@/test/server";
-import { checkRecordRows, saveRecordRows, type RecordCells, type RecordImportKind } from "./recordsImport";
+import { serve, serveWith, type Call } from "@/test/server";
+import { checkRecordRows, saveRecordRows, type RecordCells, type RecordImportKind, type RecordImportRow } from "./recordsImport";
 
 test("product rates use the allowlist: 0.25 stays 0.25 and 0.18 becomes 18; explicit product fields survive", async () => {
   const calls = serve({ "GET catalog/": { results: [], next: null }, "POST catalog/": { id: 9 } });
@@ -25,12 +25,10 @@ test("invalid HSN, off-slab rate and invalid bought-only switch are fix rows and
   expect(calls).toHaveLength(0);
 });
 
-test("customers skip matching normalized phones and duplicate rows in the file", async () => {
+test("customers sharing only a phone remain separate records in both the books and the file", async () => {
   const calls = serve({ "GET customers/": { results: [{ id: 7, name: "Anil", mobile_number: "9829041122", gst_number: "" }], next: null } });
   const rows = await checkRecordRows("customers", [{ name: "Anil G", mobile_number: "+91 98290 41122" }, { name: "New", mobile_number: "9414123456" }, { name: "New again", mobile_number: "9414123456" }]);
-  expect(rows.map((row) => row.state)).toEqual(["skip", "ready", "skip"]);
-  expect(rows[0].note).toContain("Already a customer: Anil");
-  expect(rows[2].note).toBe("Listed twice in the file. Will be skipped.");
+  expect(rows.map((row) => row.state)).toEqual(["ready", "ready", "ready"]);
   expect(calls.every((call) => call.method === "GET")).toBe(true);
 });
 
@@ -197,4 +195,63 @@ test("a re-run skips both confirmed rows and a row saved before its response was
   expect(checkedAgain.map(row => row.state)).toEqual(["skip", "skip", "ready"]);
   expect((await saveRecordRows("products", checkedAgain)).saved).toBe(1);
   expect(calls.filter(call => call.method === "POST").map(call => (call.data as RecordCells).name)).toEqual(["A", "B", "C"]);
+});
+
+
+test("customers and supplier-only rows are matched from one unfiltered paginated snapshot per batch", async () => {
+  const calls = serve({ "GET customers/": ({ params }: Call) => ({ status: 200, data: { results: params.page === 1 ? [] : [{ id: 8, name: "  OLD   SUPPLIER ", gst_number: "08AAMFR5567K1ZG", mobile_number: "9414123456", is_supplier: true }], next: params.page === 1 ? "next" : null } }), "POST customers/": { id: 9 } });
+  const rows = await checkRecordRows("customers", [{ name: "Old supplier", mobile_number: "9414123457" }, ...Array.from({ length: 8 }, (_, i) => ({ name: `New ${i}`, mobile_number: "9414123458" }))]);
+  expect(rows.map(r => r.state)).toEqual(["skip", ...Array(8).fill("ready")]);
+  expect(calls).toHaveLength(2);
+  expect(calls.every(c => c.params.role === undefined && c.params.search === undefined)).toBe(true);
+  expect((await saveRecordRows("customers", rows)).saved).toBe(8);
+  expect(calls.filter(c => c.method === "GET")).toHaveLength(4);
+});
+
+test("product matching collapses whitespace without filtering the server by the typed spelling", async () => {
+  const calls = serve({ "GET catalog/": ({ params }: Call) => ({ status: 200, data: { results: params.q ? [] : [{ id: 8, name: "Gold   ring" }], next: null } }) });
+  const rows = await checkRecordRows("products", [{ name: "Gold ring", hsn_code: "7113", gst_percent: "3" }]);
+  expect(rows[0].state).toBe("skip");
+  expect(calls[0].params.q).toBeUndefined();
+});
+
+test("an invalid row stops saving before later valid rows and retains its worksheet row number", async () => {
+  const calls = serve({ "GET catalog/": { results: [], next: null }, "POST catalog/": { id: 9 } });
+  const rows = await checkRecordRows("products", [
+    { name: "First", hsn_code: "7113", gst_percent: "3", __row: "4" },
+    { name: "Bad", hsn_code: "7", gst_percent: "3", __row: "9" },
+    { name: "Later", hsn_code: "7113", gst_percent: "3", __row: "12" },
+  ]);
+  const result = await saveRecordRows("products", rows);
+  expect(result).toMatchObject({ saved: 1, total: 3, failure: { row: 9 } });
+  expect(result.rows.map(r => r.state)).toEqual(["saved", "fix", "ready"]);
+  expect(calls.filter(c => c.method === "POST").map(c => (c.data as RecordCells).name)).toEqual(["First"]);
+});
+
+test.each(["name", "GSTIN"])("a successful save is in the in-memory snapshot before a repeated %s", async (match) => {
+  const calls = serve({ "GET customers/": { results: [], next: null }, "POST customers/": { id: 9 } });
+  const first = { name: "First", gst_number: "08AAMFR5567K1ZG", mobile_number: "9414123456" };
+  const rows: RecordImportRow[] = [first, { ...first, name: match === "name" ? "  FIRST " : "Another spelling", gst_number: match === "name" ? "27XTZPS7585P1ZB" : first.gst_number }].map((values, i) => ({ row: i + 2, values, state: "ready", note: "" }));
+  const result = await saveRecordRows("customers", rows);
+  expect(result.rows.map(r => r.state)).toEqual(["saved", "skip"]);
+  expect(calls.filter(c => c.method === "POST")).toHaveLength(1);
+  expect(calls.filter(c => c.method === "GET")).toHaveLength(1);
+});
+
+test.each(["fix", "uncertain"] as const)("a previous %s row stops before later ready rows without lookup or writes", async (state) => {
+  const calls = serve({});
+  const values = { name: "First", hsn_code: "7113", gst_percent: "3" };
+  const result = await saveRecordRows("products", [{ row: 8, values, state, note: "Check this row first." }, { row: 10, values: { ...values, name: "Later" }, state: "ready", note: "" }]);
+  expect(result).toMatchObject({ saved: 0, total: 2, failure: { row: 8, problem: "Check this row first." } });
+  expect(calls).toHaveLength(0);
+});
+
+test.each(["lookup", "write"])("a daily throttle during %s is clearly unsaved and stops immediately", async (stage) => {
+  const calls = serve({ "GET catalog/": () => stage === "lookup" ? { status: 429, data: {} } : { status: 200, data: { results: [], next: null } }, "POST catalog/": () => ({ status: 429, data: {} }) });
+  const rows: RecordImportRow[] = ["A", "B"].map((name, i) => ({ row: i + 2, values: { name, hsn_code: "7113", gst_percent: "3" }, state: "ready", note: "" }));
+  const result = await saveRecordRows("products", rows);
+  expect(result).toMatchObject({ saved: 0, total: 2, failure: { row: 2, problem: "The daily request limit has been reached. Try again tomorrow." } });
+  expect(result.rows.map(r => r.state)).toEqual(["fix", "ready"]);
+  expect(result.rows[0].note).not.toContain("may have been saved");
+  expect(calls.filter(c => c.method === "POST")).toHaveLength(stage === "write" ? 1 : 0);
 });

@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "@/test/render";
-import { serve } from "@/test/server";
+import { serve, type Call } from "@/test/server";
 import { saveFile } from "@/core/print/files";
 import Audit from "./Audit";
 
@@ -65,4 +65,15 @@ test("server failure is retryable; an empty successful list is not shown as a lo
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByText("No changes match")).toBeInTheDocument();
+});
+
+
+test("load more removes repeated IDs and keeps the first page's total when later pages omit it", async () => {
+  serve({ "GET audit/": ({ params }: Call) => ({ status: 200, data: Number(params.page) === 1 ? page : { count: 31, next: null, previous: "previous", results: [entry, { ...entry, id: 9000, words: { text: "Made bill", target: "NEW-1", after: "" } }] } }) });
+  renderApp(<Audit />);
+  await screen.findByRole("link", { name: "Priya Sharma" });
+  fireEvent.click(screen.getByRole("button", { name: "Load 30 more" }));
+  expect(await screen.findByRole("link", { name: "NEW-1" })).toBeInTheDocument();
+  expect(screen.getAllByRole("link", { name: "Priya Sharma" })).toHaveLength(1);
+  expect(screen.getByText(/5,123 changes recorded, all financial years/)).toBeInTheDocument();
 });

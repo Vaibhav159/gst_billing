@@ -1,6 +1,5 @@
 import { api } from "@/core/api/client";
 import { problemOf } from "@/core/api/errors";
-import { fetchAllCustomers } from "@/core/api/customers";
 import { checkGstin, emailProblem, gstinPlaceholder, mobileDigits, mobileProblem, panProblem, stateCodeOf, GST_STATES } from "@/core/ids";
 import { UNITS } from "@/core/format";
 import { SLABS, slabOf } from "@/pages/sales/form/model";
@@ -106,45 +105,42 @@ function problem(kind: RecordImportKind, v: RecordCells): string {
   return "";
 }
 
-async function matchingProduct(name: string): Promise<Wire | undefined> {
-  for (let page = 1; ; page++) {
-    const data = (await api.get("catalog/", { params: { q: name.slice(0, 100), page, page_size: 200 } })).data as { results: Wire[]; next: string | null };
-    const hit = data.results.find((row) => nameKey(row.name) === nameKey(name));
-    if (hit || !data.next) return hit;
+/** Read each existing record once per batch, including supplier-only customers. */
+async function existingRecords(kind: RecordImportKind): Promise<Wire[]> {
+  const rows: Wire[] = [];
+  for (let page = 1; page <= 100; page++) {
+    const data = (await api.get(kind === "products" ? "catalog/" : `${kind}/`, { params: { page, page_size: 1000 } })).data as { results: Wire[]; next?: string | null } | Wire[];
+    rows.push(...(Array.isArray(data) ? data : data.results));
+    if (Array.isArray(data) || !data.next) return rows;
   }
+  throw new Error("The record list didn't end after 100 pages.");
 }
 
-async function checkOne(kind: RecordImportKind, row: RecordImportRow): Promise<RecordImportRow> {
+export function recordImportMessage(error: unknown): string {
+  const p = problemOf(error);
+  return p.kind === "throttled" ? "The daily request limit has been reached. Try again tomorrow." : p.message;
+}
+
+function checkOne(kind: RecordImportKind, row: RecordImportRow, existing: Wire[]): RecordImportRow {
   const v = row.values, bad = problem(kind, v);
   if (bad) return { ...row, state: "fix", note: bad };
-  if (kind === "products") {
-    const found = await matchingProduct(v.name);
-    return found ? { ...row, state: "skip", note: `Already in products: ${found.name}. Will be skipped.` } : { ...row, state: "ready", note: `${productBody(v).gst_percent}% · sold by ${productBody(v).unit}` };
-  }
-  if (kind === "customers") {
-    const c = customerBody(v);
-    for (const term of [...new Set([String(c.mobile_number), String(c.gst_number), String(c.name)].filter(Boolean))]) {
-      const list = await fetchAllCustomers({ search: term });
-      const found = list.find((r) => mobileDigits(r.mobile_number) === c.mobile_number || (c.gst_number && r.gst_number.toUpperCase() === c.gst_number) || nameKey(r.name) === nameKey(c.name));
-      if (found) return { ...row, state: "skip", note: `Already a customer: ${found.name}. Will be skipped.` };
-    }
-    return { ...row, state: "ready", note: c.gst_number ? "Business customer" : "Person, no GSTIN" };
-  }
-  const firms = (await api.get("firms/")).data as { results: Wire[] };
-  const match = firms.results.find((firm) => text(firm.gst_number).toUpperCase() === text(v.gst_number).toUpperCase() || nameKey(firm.name) === nameKey(v.name));
-  return match ? { ...row, state: "skip", note: `Already a firm: ${match.name}. Will be skipped.` } : { ...row, state: "ready", note: "New firm. Will be added." };
+  const gstin = kind === "products" || gstinPlaceholder(v.gst_number) ? "" : text(v.gst_number).toUpperCase();
+  const found = existing.find(record => nameKey(record.name) === nameKey(v.name) || (gstin && text(record.gst_number).toUpperCase() === gstin));
+  if (found) return { ...row, state: "skip", note: kind === "products" ? `Already in products: ${found.name}. Will be skipped.` : `Already a ${kind === "firms" ? "firm" : "customer"}: ${found.name}. Will be skipped.` };
+  return { ...row, state: "ready", note: kind === "products" ? `${productBody(v).gst_percent}% · sold by ${productBody(v).unit}` : kind === "firms" ? "New firm. Will be added." : gstin ? "Business customer" : "Person, no GSTIN" };
 }
 
 export async function checkRecordRows(kind: RecordImportKind, values: RecordCells[]): Promise<RecordImportRow[]> {
   const rows: RecordImportRow[] = [];
   const seen = new Set<string>();
+  const existing = values.some(cells => !problem(kind, cells)) ? await existingRecords(kind) : [];
   for (const [index, cells] of values.entries()) {
-    const keys = kind === "customers" ? [cells.mobile_number && `phone:${mobileDigits(cells.mobile_number)}`, cells.gst_number && !gstinPlaceholder(cells.gst_number) && `gst:${cells.gst_number.toUpperCase()}`, `name:${nameKey(cells.name)}`]
+    const keys = kind === "customers" ? [cells.gst_number && !gstinPlaceholder(cells.gst_number) && `gst:${text(cells.gst_number).toUpperCase()}`, `name:${nameKey(cells.name)}`]
       : kind === "firms" ? [`gst:${text(cells.gst_number).toUpperCase()}`, `name:${nameKey(cells.name)}`] : [`name:${nameKey(cells.name)}`];
     const row: RecordImportRow = { row: Number(cells.__row) || index + 2, values: cells, state: "ready", note: "" };
     if (keys.some((key) => key && seen.has(key))) rows.push({ ...row, state: "skip", note: "Listed twice in the file. Will be skipped." });
     else {
-      const checked = await checkOne(kind, row);
+      const checked = checkOne(kind, row, existing);
       rows.push(checked);
       if (checked.state !== "fix") for (const key of keys) if (key) seen.add(key);
     }
@@ -155,25 +151,34 @@ export async function checkRecordRows(kind: RecordImportKind, values: RecordCell
 /** CRUD has no batch transaction or idempotency token. Never retry a write; report confirmed rows and stop. */
 export async function saveRecordRows(kind: RecordImportKind, preview: RecordImportRow[]): Promise<RecordImportResult> {
   const rows = preview.map((row) => ({ ...row }));
-  const total = rows.filter((row) => row.state === "ready").length;
+  const total = rows.filter((row) => row.state !== "skip" && row.state !== "saved").length;
   let saved = 0;
   let failure: RecordImportResult["failure"];
+  let existing: Wire[] | undefined;
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i].state !== "ready") continue;
+    if (rows[i].state === "skip" || rows[i].state === "saved") continue;
+    if (rows[i].state === "fix" || rows[i].state === "uncertain") {
+      failure = { row: rows[i].row, problem: rows[i].note };
+      break;
+    }
     let writing = false;
     try {
-      rows[i] = await checkOne(kind, rows[i]);
-      if (rows[i].state !== "ready") continue;
+      existing ??= await existingRecords(kind);
+      rows[i] = checkOne(kind, rows[i], existing);
+      if (rows[i].state === "skip") continue;
+      if (rows[i].state === "fix") { failure = { row: rows[i].row, problem: rows[i].note }; break; }
       const v = rows[i].values;
       writing = true;
-      await api.post(kind === "customers" ? "customers/" : kind === "products" ? "catalog/" : "firms/", kind === "customers" ? customerBody(v) : kind === "products" ? productBody(v) : firmBody(v));
+      const body = kind === "customers" ? customerBody(v) : kind === "products" ? productBody(v) : firmBody(v);
+      const answer = await api.post(kind === "customers" ? "customers/" : kind === "products" ? "catalog/" : "firms/", body);
+      existing.push({ ...body, ...answer.data });
       rows[i] = { ...rows[i], state: "saved", note: "Imported" };
       saved++;
     } catch (error) {
       const p = problemOf(error);
-      const uncertain = writing && !["validation", "conflict", "forbidden", "auth", "notfound"].includes(p.kind);
-      rows[i] = { ...rows[i], state: uncertain ? "uncertain" : "fix", note: uncertain ? "The answer didn't arrive, so this row may have been saved. Check the rows again before another import." : p.message };
-      failure = { row: rows[i].row, problem: p.message };
+      const uncertain = writing && !["validation", "conflict", "forbidden", "auth", "notfound", "throttled"].includes(p.kind);
+      rows[i] = { ...rows[i], state: uncertain ? "uncertain" : "fix", note: uncertain ? "The answer didn't arrive, so this row may have been saved. Check the rows again before another import." : recordImportMessage(error) };
+      failure = { row: rows[i].row, problem: recordImportMessage(error) };
       break;
     }
   }

@@ -16,7 +16,7 @@ export type AuditEntry = {
   can: { kind: AuditAction; label: string; disabled: string; hint: string; effect: string } | null;
 };
 export type AuditPage = {
-  count: number; next: string | null; previous: string | null; results: AuditEntry[]; total: number;
+  count: number; next: string | null; previous: string | null; results: AuditEntry[]; total?: number;
   counts?: Record<string, number>; people?: { id: number | null; name: string }[];
 };
 export type AuditFilters = { by?: string; kind?: string; group?: string; q?: string; entity?: string; entity_id?: number; start_date?: string; end_date?: string };
@@ -49,7 +49,7 @@ export function useAuditExport() {
 
 /** Shared by audit, merge and backup restore. Removed detail pages become stale without asking for a deleted row. */
 export async function invalidateRecords(qc: QueryClient): Promise<void> {
-  const roots = new Set(["audit", "sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "drafts"]);
+  const roots = new Set(["audit", "sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "drafts", "suppliers", "captures", "shop-settings", "registry"]);
   const affected = (q: { queryKey: readonly unknown[] }) => roots.has(String(q.queryKey[0]));
   await qc.invalidateQueries({ predicate: affected, refetchType: "none" });
   await qc.invalidateQueries({ predicate: (q) => affected(q) && !["one", "detail", "bill", "record", "restore-entry", "statement", "itax"].includes(String(q.queryKey[1])) });
@@ -60,6 +60,14 @@ export function useAuditAction() {
   return useMutation({
     mutationFn: async ({ id, kind }: { id: number; kind: AuditAction }) => (await api.post<AuditActionResult>(`audit/${id}/${kind}/`)).data,
     onSuccess: () => invalidateRecords(qc),
+    onError: (error, { id }) => {
+      const problem = problemOf(error);
+      if (problem.kind !== "conflict") return;
+      qc.setQueriesData<InfiniteData<AuditPage>>({ queryKey: ["audit", "list"] }, (data) => data && {
+        ...data, pages: data.pages.map(page => ({ ...page, results: page.results.map(entry => entry.id === id && entry.can
+          ? { ...entry, can: { ...entry.can, disabled: problem.message } } : entry) })),
+      });
+    },
   });
 }
 export type AuditRecord = { number: string; date: string; party: string; total: number | null; deletedAt?: string; deletedBy?: Person };

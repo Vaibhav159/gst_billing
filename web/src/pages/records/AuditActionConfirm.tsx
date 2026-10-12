@@ -9,6 +9,7 @@ export function AuditActionConfirm({ entry, record, busy, error, onClose, onConf
 }) {
   const query = useAuditRecord(entry, record);
   const action = entry.can!.kind;
+  const refused = Boolean(error && problemOf(error).kind === "conflict");
   const purchase = entry.kind === "purchases";
   const bill = purchase || entry.kind === "sales";
   const name = entry.words.target;
@@ -39,8 +40,8 @@ export function AuditActionConfirm({ entry, record, busy, error, onClose, onConf
     if (b.deletedAt) rows.push(["Deleted", `${dateLong(dayOf(b.deletedAt))}, ${timeOf(b.deletedAt)}${b.deletedBy ? ` by ${b.deletedBy.name}` : ""}`]);
   }
   return <ConfirmDialog open onClose={onClose} onConfirm={onConfirm} title={title} confirmLabel={label} record={rows} tone={action === "undo" ? "danger" : "primary"}
-    busy={busy} busyLabel={action === "restore" ? "Restoring…" : action === "revert" ? "Reverting…" : "Undoing…"} confirmDisabled={loading || query.isError || gone}
-    extra={<><FailNote error={query.isError ? saveFailure(problemOf(query.error)) : null} onRetry={() => void query.refetch()} /><FailNote error={error ? saveFailure(problemOf(error)) : null} onRetry={onConfirm} busy={busy} /></>}>
+    busy={busy} busyLabel={action === "restore" ? "Restoring…" : action === "revert" ? "Reverting…" : "Undoing…"} confirmDisabled={loading || query.isError || gone || refused}
+    extra={<><FailNote error={query.isError ? saveFailure(problemOf(query.error)) : null} onRetry={() => void query.refetch()} /><FailNote error={error ? saveFailure(problemOf(error)) : null} onRetry={refused ? undefined : onConfirm} busy={busy} /></>}>
     {loading ? <BusyText>Loading the bill…</BusyText> : null}
     {gone ? <p>That bill changed since this entry. Close this question and load the log again.</p> : null}
     {entry.can?.effect ? <p>{entry.can.effect}</p> : null}<p>{words}</p>
