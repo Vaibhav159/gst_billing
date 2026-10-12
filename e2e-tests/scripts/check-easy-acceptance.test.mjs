@@ -1,10 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkEasyEvidence, EASY_ROUTES, GST_TITLES } from './check-easy-acceptance.mjs';
+const BILL_TITLES = [
+  'Easy: an earlier paper day drives the number, historical board, draft resume and save',
+  'Easy: Wrong customer remake keeps the lines and records replaces after choosing the buyer',
+];
 function required(role) {
   const titles = [`${role}: Easy permissions and plain GST words`];
   if (role === 'owner') {
-    titles.push('Easy acceptance: scoped GST share, bill links and no idle polling', ...GST_TITLES);
+    titles.push('Easy acceptance: scoped GST share, bill links and no idle polling', ...GST_TITLES, ...BILL_TITLES);
     for (const route of EASY_ROUTES) for (const width of [320,390]) for (const theme of ['obsidian','pearl']) titles.push(`Easy visual ${route} ${width} ${theme}: WCAG, targets and prototype pair`);
     for (const [state,route] of [['review','/e/new/items'],['error','/e/customers']]) for (const width of [320,390]) for (const theme of ['obsidian','pearl']) titles.push(`Easy visual ${route} ${state} ${width} ${theme}: WCAG, targets and prototype pair`);
   }
@@ -19,6 +23,18 @@ function fixture() {
   };
 }
 test('complete evidence accepts every role and both widths/themes', () => { const v=fixture(); assert.deepEqual(checkEasyEvidence(v, () => true), []); });
+for (const title of BILL_TITLES) {
+  test(`missing owner evidence fails: ${title}`, () => {
+    const v = fixture();
+    v.runs[0].report.suites[0].specs = v.runs[0].report.suites[0].specs.filter(spec => spec.title !== title);
+    assert.ok(checkEasyEvidence(v, () => true).includes(`owner: ${title} needs a clean passed run.`));
+  });
+  test(`skipped owner evidence fails: ${title}`, () => {
+    const v = fixture();
+    v.runs[0].report.suites[0].specs.find(spec => spec.title === title).tests[0].results[0].status = 'skipped';
+    assert.ok(checkEasyEvidence(v, () => true).includes(`owner: ${title} needs a clean passed run.`));
+  });
+}
 test('a skipped mapped check is not acceptance', () => { const v=fixture(); v.runs[2].report.suites[0].specs[7].tests[0].results[0].status='skipped'; assert.match(checkEasyEvidence(v, () => true).join('\n'), /staff.*easy check 7/); });
 test('retrying a failing check to green still requires a clean run', () => { const v=fixture(); v.runs[0].report.suites[0].specs[0].tests[0].results.unshift({status:'failed'}); assert.match(checkEasyEvidence(v, () => true).join('\n'), /owner.*easy check 0/); });
 test('missing check, duplicate inventory row and missing role fail', () => { const v=fixture(); v.coverage[1].sourceLine=1; v.coverage.pop(); v.runs.pop(); const words=checkEasyEvidence(v, () => true).join('\n'); assert.match(words,/153/); assert.match(words,/sourceLine/); assert.match(words,/viewer/); });

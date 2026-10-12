@@ -18,6 +18,10 @@ export function requiredTitles(role) {
   const titles = [`${role}: Easy permissions and plain GST words`];
   if (role === 'owner') {
     titles.push('Easy acceptance: scoped GST share, bill links and no idle polling', ...GST_TITLES);
+    titles.push(
+      'Easy: an earlier paper day drives the number, historical board, draft resume and save',
+      'Easy: Wrong customer remake keeps the lines and records replaces after choosing the buyer',
+    );
     for (const {route,state} of EASY_STATES) for (const width of [320,390]) for (const theme of ['obsidian','pearl']) titles.push(`Easy visual ${state==='base' ? route : `${route} ${state}`} ${width} ${theme}: WCAG, targets and prototype pair`);
   }
   return titles;

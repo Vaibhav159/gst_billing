@@ -62,7 +62,11 @@ async function prototypeShot(browser, info, screen, width, theme) {
     const file = process.env.EASY_PROTOTYPE_FILE || '/home/ubuntu/projects/gst-billing-sandbox/ui-prototype/dist/gst-billing-prototype.html';
     await page.goto(pathToFileURL(file).href);
     await expect(page.locator(`[data-view="${screen.view || 'easy'}"]`)).toBeVisible();
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible(); await page.waitForTimeout(500);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForFunction(() => document.getAnimations().every(animation =>
+      animation.playState !== 'running' || animation.effect?.getComputedTiming().iterations === Infinity));
     const output = info.outputPath('prototype.png'); await page.screenshot({ path: output, fullPage: true }); return output;
   } finally { await context.close(); }
 }
