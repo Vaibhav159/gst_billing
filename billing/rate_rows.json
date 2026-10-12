@@ -1,0 +1,7 @@
+[
+  {"key":"gold-24K","label":"Gold 24K","sub":"999","per":10,"per_label":"10 g"},
+  {"key":"gold-22K","label":"Gold 22K","sub":"916","per":10,"per_label":"10 g"},
+  {"key":"gold-18K","label":"Gold 18K","sub":"750","per":10,"per_label":"10 g"},
+  {"key":"silver-999","label":"Silver 999","sub":"fine","per":1000,"per_label":"kg"},
+  {"key":"silver-925","label":"Silver 925","sub":"sterling","per":1000,"per_label":"kg"}
+]

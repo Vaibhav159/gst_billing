@@ -1,15 +1,16 @@
 """The shop's quotes. A board is a reference, never a bill's typed rate."""
 import json
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from pathlib import Path
 
-from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
 from billing.models import RateBoard
 from billing.text import money, person, stamp
 
-RATE_ROWS = json.loads((settings.BASE_DIR / "web/src/core/rates/rows.json").read_text())
+# The server keeps its own copy: the web/ folder isn't in the server's image. test_v3_rates keeps the two equal.
+RATE_ROWS = json.loads((Path(__file__).resolve().parent / "rate_rows.json").read_text())
 
 
 def per_gram(quoted, row):
