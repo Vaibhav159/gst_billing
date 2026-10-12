@@ -17,6 +17,14 @@ function Location() { const l = useLocation(); return <output>{l.pathname}{l.sea
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30")); salesServer(); });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
+test("a sent Easy list row is a passive status and keeps its bill link", () => {
+  const sent = { at: "2026-10-08T10:44:00+05:30", last_at: "2026-10-08T10:44:00+05:30", count: 1, via: "whatsapp", to: "" };
+  renderApp(<BillRows bills={[toBillRow(wireRow({ sent }))]} />);
+  expect(screen.getByText("Sent")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Sent/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("link")).toHaveAttribute("href", "/e/bill/412");
+});
+
 test("payment order, disabled choices, roving focus and error description", async () => {
   function Pay() { const [value, setValue] = useState<PaymentMode | null>(null); return <><h2 id="easy-paid-t">How did they pay?</h2><p id="pay-error">Choose how they paid.</p><PayChoice value={value} onChange={setValue} invalid describedBy="pay-error" disabled={{ bank: true }} /></>; }
   renderApp(<Pay />);

@@ -34,7 +34,7 @@ for (const supported of [true, false]) {
     if (supported) {
       const ready = page.getByRole("dialog", { name: "Your PDF is ready" });
       await expect(ready).toBeVisible();
-      await expect(page.getByLabel("WhatsApp number")).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "WhatsApp number", exact: true })).toHaveCount(0);
       expect(posts).toEqual([]);
       await afterDialog(page);
       await page.evaluate(() => Object.defineProperty(navigator, "userActivation", { configurable: true, value: { isActive: true, hasBeenActive: true } }));

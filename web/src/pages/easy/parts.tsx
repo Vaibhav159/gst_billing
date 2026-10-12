@@ -135,6 +135,7 @@ export function BillRows({ bills, flash, withDate, longDate }: { bills: BillRow[
               </span>
             </Link>
             {off ? <Badge tone="neg" className="mx-1">Cancelled</Badge> : empty ? null
+              : b.sent ? <span className="inline-flex items-center gap-1 text-sale font-semibold shrink-0 px-2" title={`Sent ${sentWhen(b.sent)}`}><CheckCircle2 size={15} aria-hidden="true" />Sent</span>
               // no number to send to (a walk-in): a plain status here; the bill itself has Send and Print
               : !mobileOf(c.mobile_number) && !b.sent ? <span className="shrink-0 px-2 text-[15px] text-muted">Not sent</span>
               : <SendCell bill={b} compact />}
