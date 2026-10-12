@@ -97,7 +97,7 @@ class FinalPartyDeleteTest(TestCase):
         self.assertFalse(Customer.objects.filter(pk=self.customer.pk).exists())
         self.assertFalse(BinnedInvoice.objects.filter(pk=row.pk).exists())
 
-    def test_admin_firm_bulk_delete_cleans_saved_drafts(self):
+    def test_admin_firm_bulk_delete_is_disabled_and_keeps_drafts(self):
         row = self.settled()
         key = uuid4()
         SaleDraft.objects.create(id=key, business=self.biz)
@@ -105,10 +105,12 @@ class FinalPartyDeleteTest(TestCase):
         response = self.admin.post(reverse("admin:billing_business_changelist"), {
             "action": "delete_selected", "_selected_action": [self.biz.pk], "post": "yes",
         })
-        self.assertEqual(response.status_code, 302)
-        self.assertFalse(Business.objects.filter(pk=self.biz.pk).exists())
-        self.assertFalse(SaleDraft.objects.filter(pk=key).exists())
-        self.assertFalse(BinnedInvoice.objects.filter(pk=row.pk).exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'value="delete_selected"')
+        self.assertTrue(Business.objects.filter(pk=self.biz.pk).exists())
+        self.assertTrue(SaleDraft.objects.filter(pk=key).exists())
+        self.assertTrue(SavedDraft.objects.filter(pk=key).exists())
+        self.assertTrue(BinnedInvoice.objects.filter(pk=row.pk).exists())
 
     def test_admin_delete_keeps_live_bin_and_settled_rows_when_protected(self):
         stale = self.settled()

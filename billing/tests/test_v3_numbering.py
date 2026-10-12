@@ -810,7 +810,8 @@ class MoveAndV2SaveTest(TestCase):
                 "lineitem_set-TOTAL_FORMS": "0", "lineitem_set-INITIAL_FORMS": "0",
                 "lineitem_set-MIN_NUM_FORMS": "0", "lineitem_set-MAX_NUM_FORMS": "1000"})
         self.assertEqual(r.status_code, 302)
-        self.assertEqual(self.state(), ("KIRAN GOLD HOUSE", "1", None))
+        self.assertEqual(self.state(), ("KIRAN GOLD HOUSE", "1", "KIRAN GOLD HOUSE"))
+        self.assertEqual(self.bill.firm_snapshot, firm_snapshot(self.kgh))
 
     def test_a_patch_reads_the_bill_inside_its_transaction(self):
         # v2's PATCH reads, checks and saves in one transaction that opens with the row lock (MoveLockTest proves the

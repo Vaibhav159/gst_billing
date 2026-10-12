@@ -323,8 +323,8 @@ class FirmAndNotesTest(TestCase):
 
 
 class FirmChangeTest(TestCase):
-    """Ruling 1A-23: a firm changed outside v3's move clears the frozen firm in the same save, so the bill reads its
-    new firm live; without a firm change the frozen firm stays. One test per path."""
+    """Changing a bill's firm freezes the new firm's print fields in the same save;
+    without a firm change the historical snapshot stays. One test per path."""
 
     def setUp(self):
         self.kgh, self.cust = firm(), buyer()
@@ -351,8 +351,8 @@ class FirmChangeTest(TestCase):
             r = getattr(self.owner, method)(reverse("invoice-detail", args=[bill.pk]), body, format="json")
             self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual([self.frozen(b) for b in (kept, moved, put_kept, put_moved)], [
-            ("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", None),
-            ("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", None)])
+            ("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", "MEERA ORNAMENTS"),
+            ("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", "MEERA ORNAMENTS")])
         self.assertEqual((kept.payment_mode, put_kept.payment_mode), ("cash", "bank"))  # the saves did go through
 
     def test_the_audit_row_of_a_firm_change_leaves_the_frozen_firm_out(self):
@@ -375,7 +375,7 @@ class FirmChangeTest(TestCase):
                                 {"invoice": {"business": firm_named.pk}, "line_items": priced * 2}, format="json")
             self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual([self.frozen(b) for b in (kept, moved)],
-                         [("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", None)])
+                         [("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", "MEERA ORNAMENTS")])
         self.assertEqual(kept.total_amount, 20600)  # the replace did go through
 
     def test_the_admins_save(self):
@@ -390,7 +390,7 @@ class FirmChangeTest(TestCase):
                 "lineitem_set-MIN_NUM_FORMS": "0", "lineitem_set-MAX_NUM_FORMS": "1000"})
             self.assertEqual(r.status_code, 302, r.context and r.context["adminform"].form.errors)
         self.assertEqual([self.frozen(b) for b in (kept, moved)],
-                         [("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", None)])
+                         [("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"), ("MEERA ORNAMENTS", "MEERA ORNAMENTS")])
         self.assertEqual(kept.invoice_number, "11")  # the save did go through
 
     def test_the_admins_history_revert(self):
@@ -406,7 +406,7 @@ class FirmChangeTest(TestCase):
             "customer": self.cust.pk, "business": self.kgh.pk, "invoice_number": "1", "invoice_date": "2026-09-10",
             "type_of_invoice": "outward"})
         self.assertEqual(r.status_code, 302, r.context and r.context["adminform"].form.errors)
-        self.assertEqual(self.frozen(bill), ("KIRAN GOLD HOUSE", None))
+        self.assertEqual(self.frozen(bill), ("KIRAN GOLD HOUSE", "KIRAN GOLD HOUSE"))
 
 
 class RepairCommandsTest(TestCase):
