@@ -12,6 +12,7 @@ from billing.credit import (
     LEDGER_START,
     credit_deadline,
     credit_lapsed,
+    credit_lapses,
     credit_month_of,
     last_credit_month,
     open_credit_months,
@@ -19,7 +20,6 @@ from billing.credit import (
 from billing.fy import due_dates, fy_label, fy_of, fy_range
 from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, LineItem
 from billing.services.gst_amounts import paise_expression
-from billing.services.ledger import lapsed_purchase_ids
 from billing.tax_rules import HEADS, clean_gstin, has_gstin, registered
 from billing.text import money
 
@@ -93,6 +93,8 @@ def credit_data(business, fy, *, opening, today=None):
         "customer_id", "customer__name", "customer__gst_number",
     ).annotate(**{f"tax_{head}": Sum(paise_expression(f"lineitem__{head}")) for head in HEADS}))
     rows = []
+    # One Sec 16(4) read for every bill: the GSTR-3B tables' rule, filing day included (P3-15, R3A-9).
+    lapses = credit_lapses([SimpleNamespace(pk=bill["id"]) for bill in raw], today)
     for bill in raw:
         tax = sum((bill[f"tax_{head}"] or Decimal("0") for head in HEADS), Decimal("0"))
         invoice = SimpleNamespace(pk=bill["id"], business_id=business.pk, itc_month=bill["itc_month"],
@@ -103,14 +105,10 @@ def credit_data(business, fy, *, opening, today=None):
             "entered_on": timezone.localtime(bill["created_at"]).date(), "supplier": {
                 "id": bill["customer_id"], "name": bill["customer__name"],
                 "gst_number": clean_gstin(bill["customer__gst_number"])},
-            "tax": tax, "lapsed": credit_lapsed(invoice),
+            "tax": tax, "lapsed": credit_lapsed(invoice, today, lapse=lapses.get(bill["id"], (False, None))),
             "credit_month": month, "credit_month_due": due_dates(month.year, month.month)["gstr3b"] if month else None,
             "eligible": bill["itc_eligible"], "deadline": credit_deadline(bill["invoice_date"]), "claim_months": [],
         })
-    # P3-15: a GSTR-3B filed after 30 November lapses the credit it claimed, as in its tables.
-    lapsed = lapsed_purchase_ids((row["id"] for row in rows if row["credit_month"] and not row["lapsed"]), today=today)
-    for row in rows:
-        row["lapsed"] = row["lapsed"] or row["id"] in lapsed
     candidates = [row for row in rows if row["credit_month"] is not None and not row["lapsed"]
                   and fy_of(row["bill_date"]) == fy - 1 and row["eligible"]
                   and row["tax"] > 0 and has_gstin(row["supplier"]["gst_number"]) and today <= row["deadline"]

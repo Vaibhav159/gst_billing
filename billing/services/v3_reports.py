@@ -43,7 +43,13 @@ def _load_invoices(queryset, *, purchases=False):
         Prefetch("lineitem_set", queryset=uncached(LineItem).only(*LINE_FIELDS).order_by("id"), to_attr="report_lines"),
     ).order_by("invoice_date", "id")
     result = []
-    for bill in queryset:
+    bills = list(queryset)
+    if purchases:
+        from billing.credit import credit_lapsed, credit_lapses, credit_month_of
+
+        # One Sec 16(4) read for the page: the GSTR-3B tables' rule, filing day included (P3-15, R3A-9).
+        lapses = credit_lapses(bills)
+    for bill in bills:
         customer = bill.customer
         section, _, pos, _ = classify_b2c(bill.business, bill)
         row = {"id": bill.pk, "number": bill.invoice_number, "date": bill.invoice_date,
@@ -56,20 +62,12 @@ def _load_invoices(queryset, *, purchases=False):
                           "taxable": line_taxable(li), **{head: to_paise(getattr(li, head)) for head in HEADS}}
                          for li in bill.report_lines]}
         if purchases:
-            from billing.credit import credit_lapsed, credit_month_of
-
             month = credit_month_of(bill)
             bill._purchase_tax = sum((sum((line[head] for head in HEADS), ZERO) for line in row["lines"]), ZERO)
-            row.update(credit_month=month.strftime("%Y-%m") if month else None, credit_lapsed=credit_lapsed(bill),
+            row.update(credit_month=month.strftime("%Y-%m") if month else None,
+                       credit_lapsed=credit_lapsed(bill, lapse=lapses.get(bill.pk, (False, None))),
                        itc_eligible=bill.itc_eligible, needs_review=bill.needs_review)
         result.append(row)
-    if purchases:
-        from billing.services.ledger import lapsed_purchase_ids
-
-        # P3-15: a GSTR-3B filed after 30 November lapses the credit it claimed, as in its tables.
-        lapsed = lapsed_purchase_ids(row["id"] for row in result if row["credit_month"] and not row["credit_lapsed"])
-        for row in result:
-            row["credit_lapsed"] = row["credit_lapsed"] or row["id"] in lapsed
     return result
 
 

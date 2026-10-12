@@ -114,7 +114,7 @@ class SalesRegisterBudgetTest(TransactionTestCase):
         with CaptureQueriesContext(connection) as many:
             data = load_register(*scope)
         self.assertEqual(len(first), len(many))
-        self.assertLessEqual(len(many), 6)
+        self.assertLessEqual(len(many), 7)  # + one Sec 16(4) lapse read for the page (P3-15)
         old = next(bill for bill in data["purchases"] if bill["number"] == "OLD")
         self.assertIsNone(old["credit_month"])
         self.assertTrue(all(bill["credit_lapsed"] for bill in data["purchases"] if bill["number"].startswith("L")))

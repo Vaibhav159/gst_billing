@@ -10,9 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
+from billing.credit import credit_lapsed
 from billing.services.filing import mark_filed
 from billing.services.gstr1_file import build_gstr1
-from billing.services.ledger import gstr3b_tables, lapsed_purchase_ids
+from billing.services.ledger import gstr3b_tables
 from billing.services.report_context import credit_payload, report_payload
 from billing.tests.v3_helpers import buyer, firm, line, person, sale
 
@@ -33,7 +34,7 @@ def test_recorded_filing_date_controls_credit_and_frozen_tables(filed_on, lapsed
             "cash_total": "0.00", "confirm_checks": True,
         })
 
-        assert (purchase.pk in lapsed_purchase_ids([purchase.pk], today=TODAY)) is lapsed
+        assert credit_lapsed(purchase, today=TODAY) is lapsed
         buckets = credit_payload(business, 2025)["buckets"]
         expected_state = "lapsed" if lapsed else "claimed"
         other_state = "claimed" if lapsed else "lapsed"
