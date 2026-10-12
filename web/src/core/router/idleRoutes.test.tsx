@@ -1,5 +1,5 @@
 // Ruling 1E-12: check the app's actual warm-up list without downloading any page or the PDF renderer.
-import { isValidElement } from "react";
+import { isValidElement, type ReactElement } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router";
@@ -53,7 +53,10 @@ test("the real routes warm every other lazy screen (GST returns and reports incl
       expect(isValidElement(element) && pages.includes(element.type as unknown as Code)).toBe(true);
     }
     for (const page of owned) expect(pages).toContain(page);
-    const expected: Code[] = [...pages.filter(page => !owned.includes(page)), paletteCode];
+    // the sign-in page sits inside its own boundary and Suspense, and is warmed too (X-47)
+    const signIn = (all(appRoutes).find(r => r.path === "/login")?.element as ReactElement<{ children: ReactElement<{ children: ReactElement }> }>).props.children.props.children.type as unknown as Code;
+    expect("load" in signIn).toBe(true);
+    const expected: Code[] = [...pages.filter(page => !owned.includes(page)), signIn, paletteCode];
     for (const page of owned) expect(queues[0]).not.toContain(page);
     expect(queues).toHaveLength(1);
     expect(queues[0]).toHaveLength(expected.length);

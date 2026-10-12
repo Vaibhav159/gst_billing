@@ -5,7 +5,6 @@ import { AppLayout, RootLayout } from "@/core/shell/AppLayout";
 import { paletteCode } from "@/core/shell/Palette";
 import { AppFailed, ScreenBoundary } from "@/core/shell/ScreenBoundary";
 import { ListSkeleton } from "@/core/ui";
-import Login from "@/pages/core/Login";
 import NotFound from "@/pages/core/NotFound";
 import Placeholder from "@/pages/core/Placeholder";
 import { capturePages, captureRoutes } from "@/pages/purchases/capture/routes";
@@ -23,6 +22,8 @@ const SettingsPage = lazyPage(() => import("@/pages/records/Settings"));
 const UsersPage = lazyPage(() => import("@/pages/people/Users"));
 const ProfilePage = lazyPage(() => import("@/pages/people/Profile"));
 const ChoosePassword = lazyPage(() => import("@/pages/people/ChoosePassword"));
+// the sign-in page too: a signed-in tab warms it while idle, so a session that runs out offline still shows it (X-47)
+const Login = lazyPage(() => import("@/pages/core/Login"));
 const More = lazyPage(() => import("@/pages/core/More"));
 
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
@@ -40,7 +41,7 @@ const PurchasePage = lazyPage(() => import('@/pages/purchases/PurchasePage'));
 const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseFormPage'));
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, More, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -111,7 +112,7 @@ export const appRoutes: RouteObject[] = [{
   // a page has its own ScreenBoundary; anything else that fails to draw lands here
   errorElement: <AppFailed />,
   children: [
-    { path: "/login", element: <Login /> },
+    { path: "/login", element: <ScreenBoundary><Suspense fallback={<div className="p-6"><ListSkeleton what="the sign-in page" /></div>}><Login /></Suspense></ScreenBoundary> },
     // its own boundary: a page file that fails to load (offline, a stale tab) offers Reload, not the whole-app failure
     { path: "/password", element: <RequireAuth><ScreenBoundary><Suspense fallback={<div className="p-6"><ListSkeleton what="your password page" /></div>}><ChoosePassword /></Suspense></ScreenBoundary></RequireAuth> },
     // outside the sign-in check, so a signed-out visit is sent to sign in with the new address to come back to
