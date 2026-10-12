@@ -77,7 +77,7 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
   const duplicate = new Set(used).size !== used.length;
   const missing = fields.filter((field) => field.required && !used.includes(field.key));
 
-  const useSheet = (source: Awaited<ReturnType<ReadRecordWorkbook>>, index: number) => {
+  const applySheet = (source: Awaited<ReturnType<ReadRecordWorkbook>>, index: number) => {
     const table = source[index]?.rows || [];
     const head = table.findIndex((row) => row.filter((value) => String(value ?? "").trim()).length >= 2);
     if (head < 0) throw new Error(`No ${kind} were found in this sheet. The first row should name the columns, with one ${ONE[kind]} on each row below it.`);
@@ -100,10 +100,10 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
     try {
       if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name}: file too large (${(file.size / 1048576).toFixed(1)} MB). The most is 20 MB.`);
       if (/\.xls$/i.test(file.name)) throw new Error(`${file.name} is in the old Excel format (.xls). In Excel, use File › Save as › Excel Workbook (.xlsx), or CSV, and choose that file.`);
-      if (!/\.(xlsx|csv)$/i.test(file.name)) throw new Error(`${file.name}: unsupported file type. Choose an Excel (.xlsx, .xls) or CSV file.`);
+      if (!/\.(xlsx|csv)$/i.test(file.name)) throw new Error(`${file.name}: unsupported file type. Choose an Excel (.xlsx) or CSV file.`);
       const source = await readWorkbook(file);
       if (id !== readId.current) return;
-      useSheet(source, 0); setSheets(source); setFileName(file.name);
+      applySheet(source, 0); setSheets(source); setFileName(file.name);
     } catch (problem) { if (id === readId.current) setError(problem instanceof Error ? problem.message : "This file couldn't be used."); }
     finally { if (id === readId.current) setReading(false); }
   };
@@ -138,7 +138,7 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
     {step === 2 ? <Card title="2. Match the columns" subtitle={fileName}>
       <div className="flex flex-col gap-4">
         {sheets.length > 1 ? <Field label="Sheet" htmlFor="records-sheet"><Select id="records-sheet" value={String(sheet)} options={sheets.map((item, index) => ({ value: String(index), label: item.name }))}
-          onChange={(event) => { try { useSheet(sheets, Number(event.target.value)); setError(""); } catch (problem) { setError(problem instanceof Error ? problem.message : "This sheet couldn't be read."); } }} /></Field> : null}
+          onChange={(event) => { try { applySheet(sheets, Number(event.target.value)); setError(""); } catch (problem) { setError(problem instanceof Error ? problem.message : "This sheet couldn't be read."); } }} /></Field> : null}
         {columns.map((column, index) => <Field key={column.index} label={`${column.heading} means`} htmlFor={`record-column-${index}`}><Select id={`record-column-${index}`} value={column.field}
           options={[{ value: "", label: "Skip this column" }, ...fields.map((field) => ({ value: field.key, label: field.label }))]}
           onChange={(event) => setColumns((before) => before.map((item, i) => i === index ? { ...item, field: event.target.value } : item))} /></Field>)}
@@ -165,7 +165,7 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
         <p className="text-sm text-muted">{rows.filter((row) => row.state === "skip").length} already on file or repeated rows will be skipped. {rows.filter((row) => row.state === "fix").length} rows still need a fix and will be left out.</p>
         <p className="text-sm text-muted">Each row is saved separately. If a save stops, the report shows which rows were saved. Check the rows again before another import.</p>
         <div className="flex flex-wrap justify-between gap-3"><Button disabled={busy} onClick={() => setStep(3)}>Back</Button><Button variant="primary" loading={save.isPending} disabled={busy || !allowed || !checked || !ready}
-          onClick={async () => { const result = await save.mutateAsync(); setRows(result.rows); setSavedCount(result.saved); setChecked(false); setStep(3); }}>Import {plural(ready, ONE[kind])}</Button></div>
+          onClick={async () => { try { const result = await save.mutateAsync(); setRows(result.rows); setSavedCount(result.saved); setChecked(false); setStep(3); } catch (problem) { setError(problemOf(problem).message); } }}>Import {plural(ready, ONE[kind])}</Button></div>
       </div>
     </Card> : null}
   </Page>;

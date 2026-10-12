@@ -36,6 +36,14 @@ test("an invalid rate stays editable and a changed row must be checked before im
   await waitFor(() => expect(screen.getByRole("button", { name: "Continue to import" })).toBeEnabled());
 });
 
+test("an unsupported file type names only the types the importer accepts", async () => {
+  const read = vi.fn();
+  renderApp(<RecordsImport kind="products" readWorkbook={read} />);
+  fireEvent.change(screen.getByLabelText("Excel or CSV file to import"), { target: { files: [new File(["x"], "Products.ods")] } });
+  expect(await screen.findByText("Products.ods: unsupported file type. Choose an Excel (.xlsx) or CSV file.")).toBeInTheDocument();
+  expect(read).not.toHaveBeenCalled();
+});
+
 test("a viewer cannot read a file into the importer or save records", () => {
   const read = vi.fn();
   renderApp(<RecordsImport kind="products" readWorkbook={read} />, { me: { role: "viewer", permissions: ["view"] } });

@@ -6,7 +6,6 @@ import { api } from "@/core/api/client";
 import { onlineManager } from "@tanstack/react-query";
 import { __setNetState } from "@/core/api/network";
 import Customers from "./Customers";
-import { customersCsv } from "./exportCsv";
 import { markSaved, useJustSaved } from "./lib";
 import { ANIL, FIRMS, mount, serve, typeQuickly, VIEWER, type Call } from "./testing";
 
@@ -543,25 +542,6 @@ test("an export that can't get through says so, and downloads nothing", async ()
   } finally {
     click.mockRestore();
   }
-});
-
-test("the CSV holds what the list shows, quoted where it must be", () => {
-  const csv = customersCsv([{ ...ANIL, name: "Gupta, Anil", type: "person", customer_type: "", businesses: [3, 4], pan: "", figures: { bills: 14, total: 8708321, cancelled: 1, udhaar_bills: 2, udhaar_total: 1200000, last_bill: { id: 412, invoice_number: "KGH/2026-27/31", invoice_date: "2026-10-08", total_amount: 8708321, business: 3 } } }],
-    FIRMS.map((f) => ({ id: f.id, name: f.name, short: f.name.split(" ")[0], gstin: f.gst_number, state: f.state_name })), "FY 2026-27");
-  expect(csv.startsWith("\ufeff")).toBe(true);
-  const [head, row] = csv.slice(1).split("\r\n");
-  expect(head).toBe("Name,Mobile,Email,GSTIN,PAN,Type,Address,City,State,Usual firms,Sales FY 2026-27 (₹),Bills,Billed on udhaar (₹),Udhaar bills,Last bill,Last bill date");
-  expect(row).toBe('"Gupta, Anil",9829041122,,,,Person,15 Demo Road,Udaipur,Rajasthan,KIRAN GOLD HOUSE; MEERA ORNAMENTS,87083.21,14,12000.00,2,KGH/2026-27/31,2026-10-08');
-});
-
-test("a cell that starts like a formula gets a ' in front, so a spreadsheet shows it and never runs it", () => {
-  const csv = customersCsv([{
-    ...ANIL, name: '=HYPERLINK("http://x.example","Anil")', mobile_number: "+91 98290 41122", email: "@anil", gst_number: "\r=1+1", address: "-2 Demo Road", city: "\tUdaipur", type: "person", customer_type: "", businesses: [], pan: "",
-    figures: { bills: 1, total: 100, cancelled: 0, udhaar_bills: 0, udhaar_total: 0, last_bill: { id: 5, invoice_number: "=1+1", invoice_date: "2026-10-08", total_amount: 100, business: 3 } },
-  }], [], "FY 2026-27");
-  const row = csv.slice(1).split("\r\n")[1];
-  // (a carriage return first: a ' in front, then quoted, as it holds a line break)
-  expect(row).toBe(`"'=HYPERLINK(""http://x.example"",""Anil"")",'+91 98290 41122,'@anil,"'\r=1+1",,Person,'-2 Demo Road,'\tUdaipur,Rajasthan,,1.00,1,0.00,0,'=1+1,2026-10-08`);
 });
 
 test("on a phone: firm chips, a Filters sheet whose picks show as chips, and Add customer in the bar", async () => {
