@@ -7,6 +7,7 @@ import { cn } from "@/core/cn";
 import { useFirms } from "@/core/scope";
 import { AppMark, Kbd } from "@/core/ui";
 import { AccountMenu } from "./AccountMenu";
+import { AttentionBoundary } from "./AttentionBoundary";
 import { MOD } from "@/core/modifierKeys";
 import { MORE_NAV, sectionOf } from "./nav";
 import { NavBar } from "./NavBar";
@@ -49,7 +50,7 @@ export function DesktopShell({ children, openPalette }: { children: ReactNode; o
                 <Search size={16} aria-hidden="true" />{narrow ? null : <><span className="text-sm">Search</span> <Kbd>{MOD} K</Kbd></>}
               </button>
             )}
-            {empty ? null : <><FirmPicker /><FyPicker /><Suspense fallback={<span className="h-10 w-10" aria-hidden="true" />}><AttentionButton /></Suspense></>}
+            {empty ? null : <><FirmPicker /><FyPicker /><AttentionBoundary><Suspense fallback={<span className="h-10 w-10" aria-hidden="true" />}><AttentionButton /></Suspense></AttentionBoundary></>}
             <AccountMenu onShortcuts={() => setKeys(true)} />
           </div>
         </div>

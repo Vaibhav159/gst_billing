@@ -15,6 +15,7 @@ import { OfflineBanner } from "./OfflineBanner";
 import { PhoneShell } from "./PhoneShell";
 import { Palette } from "./Palette";
 import { ScreenBoundary } from "./ScreenBoundary";
+import { AttentionBoundary } from "./AttentionBoundary";
 
 const CaptureUploadHost = lazy(() => import("@/core/captures/useUploads").then(module => ({ default: module.CaptureUploadHost })));
 
@@ -31,7 +32,7 @@ const AttentionFeed = lazy(attentionPaletteCode.load);
 
 function ScopedPalette(props: { open: boolean; onClose(): void }) {
   const [attention, setAttention] = useState<Parameters<typeof Palette>[0]["attention"]>();
-  return <><Palette {...props} attention={attention} /><Suspense fallback={null}><AttentionFeed onItems={setAttention} /></Suspense></>;
+  return <><Palette {...props} attention={attention} /><AttentionBoundary><Suspense fallback={null}><AttentionFeed onItems={setAttention} /></Suspense></AttentionBoundary></>;
 }
 
 export function RootLayout() {
