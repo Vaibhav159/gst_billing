@@ -128,6 +128,43 @@ test.each(['12', 'not-an-id'])('missing capture %s gives the unavailable screen'
   if (id !== '12') expect(calls).toHaveLength(0);
 });
 
+test.each(['filled', 'discarded'] as const)('a refresh to %s keeps what was typed and shows the news above the form (X-62)', async status => {
+  server(); const view = mount(); await ready();
+  fireEvent.change(screen.getByLabelText("Supplier's bill number"), { target: { value: 'TYPED' } }); await tick(400);
+  view.replace(captureFixture({ status, read: read(), purchase: status === 'filled' ? { id: 905, invoice_number: 'P/1', invoice_date: '2026-10-07', supplier_name: 'Supplier', total_amount: '10.00', business_name: 'Firm' } : null }));
+  expect(await screen.findByText(status === 'filled' ? 'Someone has already filled in this bill' : 'Someone discarded this photo')).toBeVisible();
+  expect(screen.getByLabelText("Supplier's bill number")).toHaveValue('TYPED');
+  expect(screen.queryByText("This photo isn't in the inbox any more")).not.toBeInTheDocument();
+  if (status === 'filled') expect(screen.getByRole('link', { name: 'Open the purchase' })).toHaveAttribute('href', '/purchases/905');
+});
+
+test('a refresh to gone (404) keeps what was typed; with nothing typed it shows the unavailable screen', async () => {
+  let missing = false;
+  server(readyCapture(), { 'GET captures/12/': () => missing ? { status: 404, data: { detail: 'Not found.' } } : { status: 200, data: readyCapture() } });
+  const view = mount(); await ready();
+  fireEvent.change(screen.getByLabelText("Supplier's bill number"), { target: { value: 'TYPED' } }); await tick(400);
+  missing = true; await act(() => view.client.invalidateQueries({ queryKey: captureKeys.one(12) }));
+  expect(await screen.findByText("This photo isn't in the inbox any more")).toBeVisible();
+  expect(screen.getByLabelText("Supplier's bill number")).toHaveValue('TYPED');
+  view.unmount(); missing = false;
+  const clean = mount(); await ready();
+  missing = true; await act(() => clean.client.invalidateQueries({ queryKey: captureKeys.one(12) }));
+  await waitFor(() => expect(screen.queryByLabelText("Supplier's bill number")).not.toBeInTheDocument());
+  expect(screen.getByText("This photo isn't in the inbox any more")).toBeVisible();
+});
+
+test('the discard dialog warns that typed details are not kept only after typing (X-62)', async () => {
+  server(); const view = mount(); await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Discard photo' }));
+  let dialog = await screen.findByRole('dialog', { name: 'Discard this photo?' });
+  expect(within(dialog).queryByText('What you typed here is not kept.')).not.toBeInTheDocument();
+  view.unmount(); server(); mount(); await ready();
+  fireEvent.change(screen.getByLabelText("Supplier's bill number"), { target: { value: 'TYPED' } }); await tick(400);
+  fireEvent.click(screen.getByRole('button', { name: 'Discard photo' }));
+  dialog = await screen.findByRole('dialog', { name: 'Discard this photo?' });
+  expect(within(dialog).getByText('What you typed here is not kept.')).toBeVisible();
+});
+
 test('discard after typing uses immediate DELETE, leaves without another guard and offers restore Undo', async () => {
   const calls = server(readyCapture(), { 'DELETE captures/12/': captureFixture({ status: 'discarded' }), 'POST captures/12/restore/': readyCapture() });
   mount(); await ready(); fireEvent.change(screen.getByLabelText("Supplier's bill number"), { target: { value: 'TYPED' } });

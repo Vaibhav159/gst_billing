@@ -145,7 +145,7 @@ export function CaptureRow({ capture, onDiscard, onPhoto, onRefresh }: { capture
     </div>
   </div>;
 }
-export function DiscardCaptureDialog({ capture, onClose, onDone }: { capture: Capture | null; onClose(): void; onDone?: () => void }) {
+export function DiscardCaptureDialog({ capture, typed = false, onClose, onDone }: { capture: Capture | null; typed?: boolean; onClose(): void; onDone?: () => void }) {
   const discard = useCaptureAction('discard');
   const restore = useCaptureAction('restore');
   const toast = useToast();
@@ -155,5 +155,5 @@ export function DiscardCaptureDialog({ capture, onClose, onDone }: { capture: Ca
   if (!capture) return null;
   return <ConfirmDialog open onClose={onClose} title="Discard this photo?" tone="danger" confirmLabel={error ? 'Try again' : 'Discard photo'} busy={discard.isPending} busyLabel="Discarding…" record={[["Firm", capture.business_name || 'Not decided'], ['Photo', captureTitle(capture)], ['Captured', `${captureWhen(capture)} by ${capture.captured_by?.name || 'someone'}`], ['Pages', plural(capture.pages.length, 'page')]]} extra={error ? <p role="alert" className="text-neg">{error}</p> : null} onConfirm={() => {
     void discard.mutateAsync(capture.id).then(() => { onClose(); onDone?.(); toast.show({ title: 'Photo discarded', body: `${captureTitle(capture)} is out of the inbox. No purchase figures changed.`, action: { label: 'Undo', onClick: () => undo(capture.id) } }); }).catch((error) => setError(captureProblem(error).message));
-  }}><p>The photo is set aside and leaves the inbox. It was never added to purchases, so no figures change.</p></ConfirmDialog>;
+  }}><p>The photo is set aside and leaves the inbox. It was never added to purchases, so no figures change.</p>{typed ? <p>What you typed here is not kept.</p> : null}</ConfirmDialog>;
 }

@@ -148,7 +148,7 @@ describe("durable capture queue", () => {
     window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange"));
     await f.queue.idle();
     expect(f.upload).toHaveBeenCalledOnce(); expect(f.read).toHaveBeenCalledOnce();
-    expect(f.store.rows).toHaveLength(1);
+    expect(f.store.rows).toHaveLength(1);    expect(f.changed.mock.calls.every(([id]) => id === 12)).toBe(true); expect(f.changed).toHaveBeenCalledTimes(2);
   });
 
   it("a receipt recovered after a crash asks the safe read adapter without uploading", async () => {

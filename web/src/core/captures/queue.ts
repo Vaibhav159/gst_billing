@@ -11,7 +11,8 @@ export type QueueDependencies = {
   upload(row: QueuedCapture, signal?: AbortSignal): Promise<{ id: number }>;
   /** Inspect first: never POST read for a stored result, ready/failed/filled/discarded capture. Failed reads retry only from the inbox. */
   read(id: number, signal: AbortSignal | undefined, owner: number): Promise<unknown>;
-  changed(): void;
+  /** A capture changed on the server; refresh lists and that capture only (never another open fill page). */
+  changed(captureId: number | null): void;
   isOnline?(): boolean;
   uuid?(): string;
 };
@@ -50,22 +51,22 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
         controller = new AbortController();
         const signal = controller.signal;
         let reading = false;
+        let captureId = item.captureId;
         try {
-          let captureId = item.captureId;
           if (item.phase === "queued") {
             const uploaded = await dependencies.upload(item, signal);
             captureId = uploaded.id;
             // Commit the receipt even if sign-out happened while the response was on its way.
             const saved = await store.update(owner, item.clientId, { captureId, phase: "uploaded", error: null });
             if (!saved) continue;
-            dependencies.changed();
+            dependencies.changed(captureId);
           }
           if (!sameUser(owner, version) || signal.aborted) break;
           if (captureId !== null) {
             reading = true;
             await dependencies.read(captureId, signal, owner);
             await store.remove(owner, item.clientId);
-            dependencies.changed();
+            dependencies.changed(captureId);
           }
         } catch (error) {
           if (!signal.aborted) {
@@ -74,7 +75,7 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
             await store.update(owner, item.clientId, missing
               ? { missing: true, error: "This photo is no longer in the inbox. Remove this saved upload from this device." }
               : { error: problem.message, autoRetry: !reading && RETRYABLE.has(problem.kind) });
-            dependencies.changed();
+            dependencies.changed(captureId);
           }
         } finally { controller = null; }
         await refresh(owner, version);

@@ -1,6 +1,8 @@
 import { cleanup, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { renderApp } from '@/test/render';
+import { captureKeys } from '@/core/api/captures';
 import { serve } from '@/test/server';
 import { captureFixture } from './fixtures';
 import { clearTokens, setTokens } from '@/core/api/client';
@@ -10,7 +12,7 @@ import type { QueuedCapture } from './store';
 const mock = vi.hoisted(() => ({ make: vi.fn(), user: vi.fn().mockResolvedValue(undefined), start: vi.fn(() => vi.fn()), snapshot: { items: [], loading: false, error: null, busy: null } }));
 vi.mock('./store', () => ({ IndexedDbCaptureStore: class {} }));
 vi.mock('./queue', () => ({ createCaptureQueue: (...args: unknown[]) => { mock.make(...args); return { setUser: mock.user, start: mock.start, subscribe: () => () => {}, getSnapshot: () => mock.snapshot, add: vi.fn(), resume: vi.fn(), remove: vi.fn() }; } }));
-type Bridge = { read(id: number, signal: AbortSignal | undefined, owner: number): Promise<unknown>; upload(item: QueuedCapture, signal?: AbortSignal): Promise<unknown> };
+type Bridge = { changed(id: number | null): void; read(id: number, signal: AbortSignal | undefined, owner: number): Promise<unknown>; upload(item: QueuedCapture, signal?: AbortSignal): Promise<unknown> };
 const bridge = () => mock.make.mock.calls.at(-1)?.[1] as Bridge;
 const token = (id: number) => `test.${btoa(JSON.stringify({ user_id: id }))}.test`;
 beforeEach(() => { setTokens(token(1)); mock.make.mockClear(); mock.user.mockClear(); mock.start.mockClear(); });
@@ -105,4 +107,16 @@ it('same-user token rotation still sends the durable receipt once', async () => 
   await expect(pending).resolves.toMatchObject({ id: 12 });
   expect(calls).toHaveLength(1);
   expect((calls[0].data as FormData).get('client_id')).toBe('capture-owned-by-one');
+});
+it('a finished upload or read refreshes capture lists and only its own capture, never an open fill page for another', async () => {
+  let client!: QueryClient;
+  function Grab() { client = useQueryClient(); return null; }
+  renderApp(<><CaptureUploadHost /><Grab /></>);
+  await waitFor(() => expect(bridge()).toBeTruthy());
+  for (const key of [captureKeys.one(12), captureKeys.one(13), captureKeys.list(3, 'waiting')]) client.setQueryData(key, {});
+  bridge().changed(13);
+  const stale = (key: readonly unknown[]) => client.getQueryState(key)?.isInvalidated;
+  expect(stale(captureKeys.one(12))).toBe(false);
+  expect(stale(captureKeys.one(13))).toBe(true);
+  expect(stale(captureKeys.list(3, 'waiting'))).toBe(true);
 });

@@ -12,7 +12,11 @@ function queueFor(client: QueryClient) {
     queue = createCaptureQueue(new IndexedDbCaptureStore(), {
       upload: (item, signal) => uploadCapture({ client_id: item.clientId, files: item.files, business_id: item.businessId, hint: item.hint, note: item.note }, signal, item.userId),
       read: async (id, signal, owner) => { const capture = await getCapture(id, signal, owner); return !capture.read && capture.status === 'reading' ? readCapture(id, signal, owner) : capture; },
-      changed: () => { void client.invalidateQueries({ queryKey: captureKeys.all }); void client.invalidateQueries({ queryKey: ['ai-reads'] }); },
+      changed: (id) => {
+        void client.invalidateQueries({ queryKey: ['captures', 'list'] });
+        if (id !== null) void client.invalidateQueries({ queryKey: captureKeys.one(id) });
+        void client.invalidateQueries({ queryKey: ['ai-reads'] });
+      },
     });
     queues.set(client, queue);
   }

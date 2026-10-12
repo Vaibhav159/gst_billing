@@ -26,12 +26,13 @@ export default function FillCapturePage() {
   const { id } = useParams();
   const captureId = id && /^\d+$/.test(id) && Number.isSafeInteger(Number(id)) && Number(id) > 0 ? Number(id) : null;
   const capture = useCapture(captureId);
-  if (captureId === null || capture.isError && captureProblem(capture.error).kind === 'notfound') return <Unavailable />;
+  const gone = capture.isError && captureProblem(capture.error).kind === 'notfound';
+  if (captureId === null || gone && !capture.data) return <Unavailable />;
   if (!capture.data) return <Page icon={Inbox} title="Fill in a captured bill" breadcrumbs={crumbs} back="/purchases/inbox"><QueryView query={capture} what="this photo">{() => null}</QueryView></Page>;
-  return <Fill key={captureId} capture={capture.data} refreshing={capture.isFetching} refresh={() => { void capture.refetch(); }} refreshError={capture.isError ? captureProblem(capture.error).message : ''} />;
+  return <Fill key={captureId} capture={capture.data} gone={gone} refreshing={capture.isFetching} refresh={() => { void capture.refetch(); }} refreshError={capture.isError && !gone ? captureProblem(capture.error).message : ''} />;
 }
 
-function Fill({ capture, refreshing, refresh, refreshError }: { capture: Capture; refreshing: boolean; refresh(): void; refreshError: string }) {
+function Fill({ capture, gone, refreshing, refresh, refreshError }: { capture: Capture; gone: boolean; refreshing: boolean; refresh(): void; refreshError: string }) {
   const { can, whyNot, me } = useAuth(); const { isPhone } = useView(); const navigate = useNavigate();
   const [accepted, setAccepted] = useState<PurchaseRead | null>(capture.status === 'ready' ? capture.read : null);
   const [revision, setRevision] = useState(0); const [dirty, setDirty] = useState(false); const [saving, setSaving] = useState(false);
@@ -43,7 +44,8 @@ function Fill({ capture, refreshing, refresh, refreshError }: { capture: Capture
   const busy = saving || reader.isPending || discard;
   const allowed = can('purchase.create');
   const removable = can('capture.discard') || can('capture') && capture.captured_by?.id === me?.id;
-  const terminal = capture.status === 'filled' || capture.status === 'discarded';
+  // Filled, discarded or gone on a refresh: nothing more can be saved from this photo.
+  const terminal = gone || capture.status === 'filled' || capture.status === 'discarded';
   useEffect(() => {
     if (readError && (capture.status === 'ready' || terminal)) setReadError('');
   }, [capture.status, terminal, readError]);
@@ -57,8 +59,8 @@ function Fill({ capture, refreshing, refresh, refreshError }: { capture: Capture
   // Remove the editor (and its one leave guard) before leaving after an intentional discard.
   useEffect(() => { if (discarded) void navigate('/purchases/inbox', { replace: true }); }, [discarded, navigate]);
   if (discarded) return null;
-  // A save can refresh this capture to filled before the form publishes onSaved.
-  if (terminal && !saving && !discard) return <Unavailable capture={capture} />;
+  // A save can refresh this capture to filled before the form publishes onSaved. Typed work is never unmounted (X-62).
+  if (terminal && !saving && !discard && !dirty) return <Unavailable capture={capture} />;
 
   const accept = () => {
     if (busy || !allowed || !capture.read || capture.status !== 'ready') return;
@@ -70,7 +72,9 @@ function Fill({ capture, refreshing, refresh, refreshError }: { capture: Capture
   };
   const confirm = (group: ReadGroup) => { if (!busy && allowed) confidence.confirm(group); };
   let banner;
-  if (!allowed) banner = <Banner tone="muted" icon={Lock} title="You can look at this photo, but not fill it in">{whyNot('purchase.create')}</Banner>;
+  if (terminal) banner = <Banner tone="neg" icon={Inbox} title={gone ? "This photo isn't in the inbox any more" : capture.status === 'filled' ? 'Someone has already filled in this bill' : 'Someone discarded this photo'}
+    actions={capture.purchase ? <ButtonLink size="sm" to={`/purchases/${capture.purchase.id}`}>Open the purchase</ButtonLink> : undefined}>What you typed is still here until you leave this page, but it can't be saved from this photo.</Banner>;
+  else if (!allowed) banner = <Banner tone="muted" icon={Lock} title="You can look at this photo, but not fill it in">{whyNot('purchase.create')}</Banner>;
   else if (capture.status === 'reading') banner = <Banner tone="file" title="Reading the bill…">The form fills itself in when it's done, in a few seconds. You can start typing now; nothing you type gets replaced.</Banner>;
   else if (capture.status === 'failed') banner = <Banner tone="neg" icon={ImageOff} title="Couldn't read this photo" actions={can('capture') ? <Button size="sm" icon={RefreshCw} loading={reader.isPending} disabled={busy} onClick={retry}>Try reading again</Button> : undefined}>{capture.problem || "The photo couldn't be read."} The photo stays here: fill the bill in by hand from it, or try reading again.</Banner>;
   else if (arrived) banner = <Banner tone="file" title="The bill has been read" actions={<Button size="sm" variant="primary" disabled={busy} onClick={accept}>Use what was read</Button>}>You had already started typing, so nothing was replaced.</Banner>;
@@ -95,6 +99,6 @@ function Fill({ capture, refreshing, refresh, refreshError }: { capture: Capture
         {removable ? <Button variant="danger-outline" icon={Trash2} full disabled={busy} onClick={() => setDiscard(true)}>Discard photo</Button> : null}
       </div>
     </div>
-    <DiscardCaptureDialog capture={discard ? capture : null} onClose={() => setDiscard(false)} onDone={() => setDiscarded(true)} />
+    <DiscardCaptureDialog capture={discard ? capture : null} typed={dirty} onClose={() => setDiscard(false)} onDone={() => setDiscarded(true)} />
   </Page>;
 }
