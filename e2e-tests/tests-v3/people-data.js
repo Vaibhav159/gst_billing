@@ -59,7 +59,14 @@ async function signInPerson(page, person, password = person.password, { refused 
     await secretField(page, "Password", "");
     return { status: reply.status(), message };
   }
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const [reply] = await Promise.all([
+    page.waitForResponse((r) => new URL(r.url()).pathname === "/api/token/" && r.request().method() === "POST"),
+    page.getByRole("button", { name: "Sign in", exact: true }).click(),
+  ]);
+  if (!reply.ok()) {
+    await secretField(page, "Password", "");
+    throw new Error(`Fixture sign-in answered ${reply.status()}.`);
+  }
   await page.waitForURL((url) => url.pathname !== "/login", { timeout: 30_000 });
 }
 async function choosePassword(page, person) {

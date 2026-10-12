@@ -81,7 +81,8 @@ test("signing out another device refuses its next request and leaves this device
   await expect(confirm).not.toBeVisible();
   await second.goto("/profile");
   await second.waitForURL((url) => url.pathname === "/login" && url.searchParams.get("reason") === "signed_out");
-  await expect(second.getByText("You were signed out on this device. Sign in again.", { exact: true })).toBeVisible();
+  await expect(second.getByText("You were signed out on this device", { exact: true })).toBeVisible();
+  await expect(second.getByText("Sign in again. Nothing you saved is affected.", { exact: true })).toBeVisible();
   await expect(first.getByText("You're signed in on this device only.", { exact: true })).toBeVisible();
   expect((await privateCall(request, "GET", "me/", undefined, await accountToken(first))).username).toBe(person.username);
 });

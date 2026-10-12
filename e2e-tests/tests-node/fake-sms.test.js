@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { outboxVersion, readFakeSms } = require("../tests-v3/fake-sms");
+const childProcess = require("node:child_process");
 
 const scratch = path.resolve(__dirname, "../../.plan-p4d-pf");
 const phone = "9000000123";
@@ -32,6 +33,29 @@ function refuses(fn) {
 test("a missing outbox has no version", (t) => {
   const { file } = fixture(t);
   assert.equal(outboxVersion(file), null);
+});
+
+test("a container outbox is read as app without copying or exposing credentials", (t) => {
+  process.env.SMS_FAKE_OUTBOX_CONTAINER = "gst-sandbox-web-1";
+  t.after(() => { delete process.env.SMS_FAKE_OUTBOX_CONTAINER; });
+  const file = "/tmp/gst-sandbox-sms/outbox.json";
+  t.mock.method(childProcess, "execFileSync", (command, args, options) => {
+    assert.equal(command, "docker");
+    assert.deepEqual(args.slice(0, 6), ["exec", "--user", "app", "gst-sandbox-web-1", "python", "-c"]);
+    assert.equal(args.at(-2), file);
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+    return args.at(-1) === "read" ? JSON.stringify({ phone, code }) : "new-version";
+  });
+  assert.equal(readFakeSms(file, { phone, previous: null }), code);
+});
+
+test("container errors cannot expose SMS content or target another project", (t) => {
+  process.env.SMS_FAKE_OUTBOX_CONTAINER = "gst-sandbox-web-1";
+  t.after(() => { delete process.env.SMS_FAKE_OUTBOX_CONTAINER; });
+  t.mock.method(childProcess, "execFileSync", () => { throw new Error(`${phone}:${code}`); });
+  refuses(() => readFakeSms("/tmp/outbox.json", { phone, previous: null }));
+  process.env.SMS_FAKE_OUTBOX_CONTAINER = "production-web-1";
+  refuses(() => outboxVersion("/tmp/outbox.json"));
 });
 
 test("a regular outbox has an opaque stable version", (t) => {
