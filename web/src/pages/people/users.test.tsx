@@ -18,7 +18,7 @@ function boot() {
   calls = serveWith((c) => {
     const special = override?.(c); if (special) return special;
     if (c.method === "GET" && c.url === "people/") return { status: 200, data: { results: rows } };
-    if (c.url === "businesses/") return { status: 200, data: { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }, { id: 2, name: "MEERA ORNAMENTS" }] } };
+    if (c.url === "firms/") return { status: 200, data: { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }, { id: 2, name: "MEERA ORNAMENTS" }] } };
     if (c.url === "audit/") return { status: 200, data: { count: 1, next: null, previous: null, results: [{ id: 9012, at: "2026-10-07T15:14:00+05:30", by: { id: 1, name: "Kailash Mehta" }, action: "updated", entity: "user", entity_id: 2, kind: "admin", words: { text: "Changed the role of", target: "Rakesh Soni", after: "" }, link: "/users", details: "Counter staff → Accountant", changes: [], can: null }] } };
     if (c.method === "POST" && c.url === "people/") {
       const { password: _password, usual_firm, ...body } = c.data as PersonInput;
