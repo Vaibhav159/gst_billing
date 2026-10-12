@@ -158,8 +158,22 @@ describe("register layouts and editable bill checks", () => {
   it("keeps the milligram fix to 3 decimals so the fix itself passes", () => {
     const bill = withEdits(parsed()[1], { lines: { 0: { qty: "12345678.5", price: "0.002", unit: "g", taxable: 0, cgst: 0, sgst: 0, total: 0 } } });
     const fix = checkBill(bill, context).problems.find(p => p.field === "lines.0.quantity")?.fix;
-    expect(fix?.patch).toMatchObject({ qty: "12345.679", price: "2" });
+    expect(fix?.patch).toMatchObject({ qty: "12345.679", price: "2.00" });
     expect(checkBill(withEdits(bill, addPatch({}, fix?.patch)), context).problems.some(p => p.field === "lines.0.quantity")).toBe(false);
+  });
+  it("keeps the paise of a per-milligram rate and says 'about' only when the fix moves the amount", () => {
+    const exact = withEdits(parsed()[1], { lines: { 0: { qty: "12000000", price: "6.54321", unit: "g", taxable: 0, cgst: 0, sgst: 0, total: 0 } } });
+    const sure = checkBill(exact, context).problems.find(p => p.field === "lines.0.quantity");
+    expect(sure?.fix?.patch).toMatchObject({ qty: "12000", price: "6543.21" });
+    expect(sure?.fix?.label).toBe("Use 12,000.000 g at ₹6,543.21/g");
+    expect(sure?.detail).toContain("is the same ₹");
+    expect(sure?.detail).not.toContain("about");
+    const rounded = withEdits(parsed()[1], { lines: { 0: { qty: "12345678.5", price: "6.54321", unit: "g", taxable: 0, cgst: 0, sgst: 0, total: 0 } } });
+    const near = checkBill(rounded, context).problems.find(p => p.field === "lines.0.quantity");
+    expect(near?.fix?.patch).toMatchObject({ qty: "12345.679", price: "6543.21" });
+    expect(near?.detail).toMatch(/comes to ₹[\d,.]+, about the file's ₹[\d,.]+\./);
+    expect(near?.detail).not.toContain("is the same");
+    expect(checkBill(withEdits(rounded, addPatch({}, near?.fix?.patch)), context).problems.some(p => p.field === "lines.0.quantity")).toBe(false);
   });
 });
 

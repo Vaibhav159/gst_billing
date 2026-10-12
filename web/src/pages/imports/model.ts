@@ -134,12 +134,17 @@ export function checkBill(bill: ParsedBill, context: CheckContext) {
       }
     }
     if (Number(quantity) >= 10000000 || Number(rate) >= 1000000000 || figure && figure.amount >= 100000000000) {
-      // Whole milligrams give grams to 3 decimals; the rate's thousandths give the rate per gram.
-      const mg = scaled(quantity, 0), perGram = scaled(rate, 3);
+      // Whole milligrams give grams to 3 decimals; the rate per milligram, times 1,000 and kept to paise, is the rate per gram.
+      const mg = scaled(quantity, 0), perGram = scaled(rate, 5);
       const milligrams = Number(quantity) >= 10000000 && ["g", "gms"].includes(unit) && Number(quantity) / 1000 < 10000000 && Number(rate) > 0 && mg !== null && perGram !== null;
-      const correctedQuantity = mg === null ? 0 : Number(mg) / 1000, correctedRate = perGram === null ? 0 : Number(perGram);
-      problem(`${prefix}.quantity`, `${line.item}: this is more than a bill can hold.${milligrams ? ` It looks like milligrams in a grams column: ${qty(correctedQuantity, unit)} at ${inr(correctedRate * 100)}/${unit} is the same ${inr(figure?.taxable ?? taxable)}.` : " Check the Qty and Rate columns."}`,
-        milligrams ? { label: `Use ${qty(correctedQuantity, unit)} at ${inr(correctedRate * 100)}/${unit}`, patch: { line: i, qty: String(correctedQuantity), price: String(correctedRate) } } : undefined);
+      const correctedQuantity = mg === null ? 0 : Number(mg) / 1000, correctedRate = perGram === null ? "0" : paiseToDecimal(Number(perGram));
+      // Rounding to whole milligrams or to paise can move the amount a little; then the message says so instead of "the same".
+      const q = scaled(quantity, 3), r = scaled(rate, 6), exact = q !== null && r !== null ? Number((q * r + 5000000n) / 10000000n) : figure?.taxable ?? 0;
+      const was = taxable > 0 ? taxable : exact, now = lineFigures({ quantity: String(correctedQuantity), rate: correctedRate, gst_percent: gst }, Boolean(context.interstate))?.taxable ?? 0;
+      const sameness = Math.abs(now - was) <= 1 ? `is the same ${inr(was)}` : `comes to ${inr(now)}, about the file's ${inr(was)}`;
+      const shown = `${qty(correctedQuantity, unit)} at ${inr(toPaise(correctedRate) ?? 0)}/${unit}`;
+      problem(`${prefix}.quantity`, `${line.item}: this is more than a bill can hold.${milligrams ? ` It looks like milligrams in a grams column: ${shown} ${sameness}.` : " Check the Qty and Rate columns."}`,
+        milligrams ? { label: `Use ${shown}`, patch: { line: i, qty: String(correctedQuantity), price: correctedRate } } : undefined);
     }
     if (!hsn) notes.push(`${line.item} has no HSN code. Add it with Edit now, or later on the bill.`);
   });
