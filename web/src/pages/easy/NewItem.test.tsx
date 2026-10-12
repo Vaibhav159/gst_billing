@@ -90,23 +90,38 @@ test("the sheet waits for its pending add and cannot submit twice or close", asy
   name("Gold coin"); pick("Gold 24K"); category("Coins"); await add();
   const pending = screen.getByRole("button", { name: "Adding…" });
   expect(pending).toHaveAttribute("aria-busy", "true");
-  fireEvent.click(pending); pick("Close"); fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.getByRole("button", { name: "Go back" })).toBeDisabled();
+  fireEvent.click(pending); pick("Go back"); pick("Close"); fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(p.onClose).not.toHaveBeenCalled();
   expect(onAdd).toHaveBeenCalledTimes(1);
   await act(async () => { finish(); });
 });
 
-test("closing a typed item asks and Keep editing retains it", async () => {
+test.each(["Close", "Escape", "Go back"])("%s asks before discarding a typed item and Keep editing retains its answers", async (exit) => {
   const p = await open();
-  await act(async () => { name("Gold kada"); pick("Gold 22K"); pick("Close"); });
+  name("Gold kada"); pick("Gold 22K"); category("Jewellery");
+  fireEvent.click(screen.getByLabelText(/^Also keep it in the item list/));
+  const close = () => exit === "Escape" ? fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" }) : pick(exit);
+  await act(async () => { close(); });
+  expect(p.onClose).not.toHaveBeenCalled();
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByRole("alert")).toHaveTextContent("Discard this item?");
   await act(async () => { pick("Keep editing"); });
   expect(screen.getByLabelText("What is it called?")).toHaveValue("Gold kada");
+  expect(screen.getByRole("radio", { name: /^Jewellery/ })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByText(/On the bill:/)).toHaveTextContent("Gold kada 22K · HSN 7113 · GST 3% · weighed in grams");
+  expect(screen.getByLabelText(/^Also keep it in the item list/)).toBeChecked();
   expect(p.onClose).not.toHaveBeenCalled();
-  await act(async () => { pick("Close"); });
+  await act(async () => { close(); });
   await act(async () => { pick("Discard"); });
   expect(p.onClose).toHaveBeenCalledOnce();
+});
+
+test("Go back closes an untouched item without asking to discard", async () => {
+  const p = await open();
+  pick("Go back");
+  expect(p.onClose).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Discard this item?")).not.toBeInTheDocument();
 });
 
 test("category arrows move the radio selection and Something else uses the imitation slab", async () => {

@@ -76,8 +76,8 @@ export function NewItemSheet({ open, onClose, products, canKeep, onAdd, onUseExi
   return (
     <Dialog open={open} onClose={() => { if (!sending.current) onClose(); }} title="Add an item that isn't in the list"
       confirmClose={!busy && (normalized || materialId || categoryId) ? "Discard this item?" : undefined}
-      footer={<>
-        <Button size="lg" disabled={busy} onClick={onClose}>Go back</Button>
+      footer={(close) => <>
+        <Button size="lg" disabled={busy} onClick={close}>Go back</Button>
         <Button variant="primary" size="xl" icon={Plus} loading={busy} onClick={() => { void add(); }}>{busy ? "Adding…" : error ? "Try adding again" : "Add to the bill"}</Button>
       </>}>
       <div className="flex flex-col gap-5">
