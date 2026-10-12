@@ -16,6 +16,7 @@ for (const theme of ['obsidian', 'pearl']) {
     await sheet.getByRole('button', { name: "Save today's rates" }).click();
     await expect(sheet.getByRole('button', { name: 'Yes, save these rates' })).toBeVisible(); expect(await measure(page)).toEqual([]);
     await page.screenshot({ path: test.info().outputPath(`rates-confirm-${theme}.png`), fullPage: true });
+    await afterDialog(page);
     await sheet.getByRole('button', { name: 'Yes, save these rates' }).click();
     await expect(sheet).not.toBeVisible();
     expect((await client(request).get('rates/')).latest.quoted).toEqual({ ...quoted, 'gold-22K': '90000.00' });

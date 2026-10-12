@@ -36,7 +36,7 @@ function Editor({ initial, query, onClose }: { initial: Rates; query: UseQueryRe
   const [comparedTo, setComparedTo] = useState(initial.latest?.id);
   if (comparedTo !== initial.latest?.id) { setComparedTo(initial.latest?.id); setAsked(false); setMessage(''); }
   const differences = moved(values, initial.latest);
-  const dirty = changed(values, base.latest);
+  const dirty = RATE_ROWS.some(({ key }) => values[key] !== (base.latest?.quoted[key] ?? null) || invalidRaw[key]);
   const unchanged = initial.set_today && !changed(values, initial.latest);
   const close = () => { if (!saving.current) onClose(); };
   const save = async () => {
@@ -44,7 +44,7 @@ function Editor({ initial, query, onClose }: { initial: Rates; query: UseQueryRe
     const invalid = { ...quotedErrors(values), ...Object.fromEntries(RATE_ROWS.filter(r => invalidRaw[r.key]).map(r => [r.key, "That's not an amount."])) };
     if (Object.keys(invalid).length) { setErrors(invalid); setMessage(Object.values(invalid)[0]!); return; }
     if (differences.length && !asked) {
-      setAsked(true); setMessage(`${differences.length} ${differences.length === 1 ? 'rate' : 'rates'} moved more than a fifth since ${dateShort(initial.latest!.on)}. Check them, then save again.`); return;
+      setAsked(true); setMessage(`${differences.length} ${differences.length === 1 ? 'rate' : 'rates'} moved more than a fifth since ${dateShort(initial.latest!.on)}. Check ${differences.length === 1 ? 'it' : 'them'}, then save again.`); return;
     }
     saving.current = true;
     try {
@@ -57,9 +57,9 @@ function Editor({ initial, query, onClose }: { initial: Rates; query: UseQueryRe
         : problem.kind === 'unreachable' || problem.kind === 'server' ? "The rates weren't saved: the app couldn't get through. The last board stays visible; try again in a minute." : problem.message);
     } finally { saving.current = false; }
   };
-  return <Dialog open onClose={close} title="Today's rates" description="Type them as the board reads: gold per 10 g, silver per kg. The board is a reference; type each bill's rate as written."
+  return <Dialog open onClose={close} ghostGuardKey={asked ? 'confirm' : 'edit'} title="Today's rates" description="Type them as the board reads: gold per 10 g, silver per kg. The board is a reference; type each bill's rate as written."
     confirmClose={!mutation.isPending && dirty ? 'Discard the changes to these rates?' : undefined}
-    footer={<><Button onClick={close} disabled={mutation.isPending}>{isEasy ? 'Go back' : 'Cancel'}</Button><Button variant="primary" loading={mutation.isPending} disabled={unchanged} onClick={() => void save()}>{mutation.isPending ? 'Saving…' : asked && differences.length ? 'Yes, save these rates' : "Save today's rates"}</Button></>}>
+    footer={requestClose => <><Button onClick={requestClose} disabled={mutation.isPending}>{isEasy ? 'Go back' : 'Cancel'}</Button><Button variant="primary" loading={mutation.isPending} disabled={unchanged} onClick={() => void save()}>{mutation.isPending ? 'Saving…' : asked && differences.length ? 'Yes, save these rates' : "Save today's rates"}</Button></>}>
     <div className="flex flex-col gap-4">
       <QueryView query={query} what="today's rates">{() => null}</QueryView>
       {message ? <Banner tone="neg" icon={AlertTriangle} title={message} /> : null}

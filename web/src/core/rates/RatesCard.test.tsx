@@ -52,9 +52,9 @@ test('same earlier-day quotes can establish today; success copy does not promise
 });
 test('more than a fifth asks once, an edit resets it, repeated save posts once', async () => {
   const { calls } = await sheet(); type('80000'); fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass();
-  expect(screen.getByText('1 rate moved more than a fifth since 12 Oct. Check them, then save again.')).toBeInTheDocument(); expect(posts(calls)).toHaveLength(0);
+  expect(screen.getByText('1 rate moved more than a fifth since 12 Oct. Check it, then save again.')).toBeInTheDocument(); expect(posts(calls)).toHaveLength(0);
   type('81000'); expect(screen.queryByRole('button', { name: 'Yes, save these rates' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass();
+  await pass(400); fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass(400);
   const confirm = screen.getByRole('button', { name: 'Yes, save these rates' }); fireEvent.click(confirm); fireEvent.click(confirm); await pass();
   expect(posts(calls)).toHaveLength(1); expect(posts(calls)[0].data).toMatchObject({ quoted: { 'gold-22K': '81000.00' } });
 });
@@ -62,6 +62,46 @@ test('two moved rates read in the plural', async () => {
   const { calls } = await sheet(); type('80000'); fireEvent.change(field('Gold 24K (999) per 10 g'), { target: { value: '200000' } });
   fireEvent.click(screen.getByRole('button', { name: "Save today's rates" })); await pass();
   expect(screen.getByText('2 rates moved more than a fifth since 12 Oct. Check them, then save again.')).toBeInTheDocument(); expect(posts(calls)).toHaveLength(0);
+});
+test.each([false, true])('footer dismissal protects typed rates until Discard (Easy: %s)', async easy => {
+  (window as unknown as { __phone: boolean }).__phone = easy;
+  const close = vi.fn(); const calls = serve({ 'GET rates/': wireRates() });
+  renderApp(<RatesSheet open onClose={close} />, { path: easy ? '/e' : '/' }); await pass(); await pass(400);
+  type('65001.25');
+  const cancel = screen.getByRole('button', { name: easy ? 'Go back' : 'Cancel' });
+  fireEvent.click(cancel); await pass();
+  expect(close).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Discard the changes to these rates?');
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); await pass();
+  expect(field()).toHaveValue('65001.25'); expect(close).not.toHaveBeenCalled();
+  fireEvent.click(cancel); fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+  expect(close).toHaveBeenCalledOnce(); expect(posts(calls)).toHaveLength(0);
+});
+test.each([[false, true], [true, true], [false, false], [true, false]])('an untouched rates footer closes without asking (Easy: %s, existing board: %s)', async (easy, existing) => {
+  (window as unknown as { __phone: boolean }).__phone = easy;
+  const close = vi.fn(); serve({ 'GET rates/': wireRates(existing ? {} : { latest: null, previous: null, set_today: false }) });
+  renderApp(<RatesSheet open onClose={close} />, { path: easy ? '/e' : '/' }); await pass(); await pass(400);
+  fireEvent.click(screen.getByRole('button', { name: easy ? 'Go back' : 'Cancel' }));
+  expect(close).toHaveBeenCalledOnce(); expect(screen.queryByText('Discard the changes to these rates?')).not.toBeInTheDocument();
+});
+test('invalid typing on a first board still needs discard confirmation', async () => {
+  const { close } = await sheet(wireRates({ latest: null, previous: null, set_today: false }));
+  type('1.234'); fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(close).not.toHaveBeenCalled(); expect(screen.getByRole('alert')).toHaveTextContent('Discard the changes to these rates?');
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); expect(field()).toHaveValue('1.234');
+});
+test.each([false, true])('movement confirmation rejects the second tap for 350 ms (Easy: %s)', async easy => {
+  (window as unknown as { __phone: boolean }).__phone = easy;
+  const calls = serve({ 'GET rates/': wireRates(), 'POST rates/': () => ({ status: 201, data: wireBoard({ id: 42 }) }) });
+  renderApp(<RatesSheet open onClose={vi.fn()} />, { path: easy ? '/e' : '/' }); await pass(); await pass(400);
+  type('80000'); const save = screen.getByRole('button', { name: "Save today's rates" });
+  fireEvent.click(save); await pass();
+  expect(screen.getByRole('button', { name: 'Yes, save these rates' })).toBe(save);
+  fireEvent.click(save); await pass(50); fireEvent.click(save); await pass();
+  expect(posts(calls)).toHaveLength(0); expect(field()).toHaveValue('80000');
+  await pass(299); fireEvent.click(save); await pass(); expect(posts(calls)).toHaveLength(0);
+  await pass(1); fireEvent.click(save); fireEvent.click(save); await pass();
+  expect(posts(calls)).toHaveLength(1); expect(posts(calls)[0].data).toMatchObject({ quoted: { 'gold-22K': '80000.00' } });
 });
 test('blank, invalid precision and maximum errors remain attached to the field', async () => {
   const { calls } = await sheet();

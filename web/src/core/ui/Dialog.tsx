@@ -38,7 +38,9 @@ export function useScrollRegion(body: RefObject<HTMLElement>, open: boolean): bo
 
 export type DialogSize = "sm" | "md" | "lg" | "xl";
 export type DialogProps = {
-  open: boolean; onClose: () => void; title: string; description?: ReactNode; footer?: ReactNode; size?: DialogSize;
+  open: boolean; onClose: () => void; title: string; description?: ReactNode; size?: DialogSize;
+  /** Footer close controls can reuse the dialog's discard confirmation. */
+  footer?: ReactNode | ((requestClose: () => void) => ReactNode);
   initialFocus?: RefObject<HTMLElement>;
   /** Re-arm the tap guard when an open dialog moves to a fresh step. */
   ghostGuardKey?: string | number;
@@ -63,7 +65,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   const drag = useDragClose(tryClose, isPhone && open);
   const region = useScrollRegion(bodyRef, open);
   const heldChildren = useHeld(open, children);
-  const heldFooter = useHeld(open, footer);
+  const heldFooter = useHeld(open, typeof footer === "function" ? footer(tryClose) : footer);
   const heldTitle = useHeld(open, title);
   const heldDesc = useHeld(open, description);
   if (!mounted) return null;
