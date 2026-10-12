@@ -86,9 +86,9 @@ test.each([[false, true], [true, true], [false, false], [true, false]])('an unto
 });
 test('invalid typing on a first board still needs discard confirmation', async () => {
   const { close } = await sheet(wireRates({ latest: null, previous: null, set_today: false }));
-  type('1.234'); fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  type('1.234'); fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); await pass();
   expect(close).not.toHaveBeenCalled(); expect(screen.getByRole('alert')).toHaveTextContent('Discard the changes to these rates?');
-  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); expect(field()).toHaveValue('1.234');
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); await pass(); expect(field()).toHaveValue('1.234');
 });
 test.each([false, true])('movement confirmation rejects the second tap for 350 ms (Easy: %s)', async easy => {
   (window as unknown as { __phone: boolean }).__phone = easy;
