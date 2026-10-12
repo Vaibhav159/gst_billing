@@ -298,7 +298,7 @@ export function PayChoice({ value, onChange, invalid, describedBy, disabled = {}
   const box = useRef<HTMLDivElement>(null);
   const opts = PAY_GRID.map((v) => PAY_CHOICES.find((o) => o.value === v)!);
   const vals = opts.map((o) => o.value).filter((v) => !disabled[v]);
-  const tabStop = value !== null && !disabled[value] ? value : vals[0];
+  const tabStop = vals.find(v => v === value) ?? vals[0];
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const fwd = e.key === "ArrowRight" || e.key === "ArrowDown";
     if (!fwd && e.key !== "ArrowLeft" && e.key !== "ArrowUp") return;

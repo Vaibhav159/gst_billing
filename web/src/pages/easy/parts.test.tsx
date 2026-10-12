@@ -29,6 +29,22 @@ test("payment order, disabled choices, roving focus and error description", asyn
   await userEvent.keyboard("{ArrowLeft}"); expect(radios[0]).toBeChecked();
 });
 
+test.each([false, true])("an unrecorded payment has an enabled keyboard tab stop (Cash disabled: %s)", async (cashDisabled) => {
+  function Pay() {
+    const [value, setValue] = useState<PaymentMode>("");
+    return <><h2 id="easy-paid-t">How did they pay?</h2><PayChoice value={value} onChange={setValue} disabled={{ cash: cashDisabled }} /></>;
+  }
+  renderApp(<Pay />);
+  const radios = screen.getAllByRole("radio");
+  const first = radios[cashDisabled ? 1 : 0];
+  expect(radios.every(r => r.getAttribute("aria-checked") === "false")).toBe(true);
+  expect(radios.filter(r => r.tabIndex === 0)).toEqual([first]);
+  await userEvent.tab();
+  expect(first).toHaveFocus();
+  await userEvent.keyboard(" ");
+  expect(first).toBeChecked();
+});
+
 test.each([false, true])("disabling the selected payment retains an enabled keyboard tab stop (Cash disabled: %s)", async (cashDisabled) => {
   function Pay() {
     const [value, setValue] = useState<PaymentMode | null>("credit");
