@@ -2,7 +2,8 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import Settings from "./Settings";
 import { messageLength, messageProblem } from "./settingsModel";
 import { mount, VIEWER } from "@/pages/customers/testing";
-import { serve, type Call } from "@/test/server";
+import { serve, type Answer, type Call, type Reply } from "@/test/server";
+import permissions from "@/core/auth/perms.json";
 import { DEFAULT_SHARE_MESSAGE } from "@/core/sales/share";
 import { MORE_NAV } from "@/core/shell/nav";
 import { formServer, mountForm } from "@/pages/sales/form/testing";
@@ -12,13 +13,14 @@ const FIRMS = [
   { id: 4, name: "MEERA ORNAMENTS", short: "Meera", short_name: "Meera", gst_number: "08AAMFR5567K1ZG", state_code: "08", state_name: "RAJASTHAN", invoice_prefix: "MO", city: "Udaipur", paper_full_number_from: "2027-04-01", numbers: { fy: "2026-27", last: null, next: { counter: 9, invoice_number: "MO/2026-27/9" }, full_number: false } },
 ];
 const SETUP = { firms: { count: 2, names: FIRMS.map((firm) => firm.name) }, customers: { count: 1, names: ["Anil"] }, products: { count: 1, names: ["Gold"] }, bills: { count: 1, cancelled: 0 }, people: 1, last_backup_at: null };
-function server({ fail = false, prefs = {} as Record<string, unknown>, last = null as import("@/core/sales/types").BillRef | null } = {}) {
+function server({ fail = false, prefs = {} as Record<string, unknown>, last = null as import("@/core/sales/types").BillRef | null, filed = { months: ["2025-04"], count: 1 } as Answer } = {}) {
   let settings = { copies: "original", show_bank: true, share_message: DEFAULT_SHARE_MESSAGE, updated_at: null, updated_by: null, default_business: 3, default_business_name: FIRMS[0].name, warnings: [] };
   let preferences = { ...prefs };
   return serve({
     "GET firms/": { results: FIRMS.map((firm, i) => i ? firm : { ...firm, numbers: { ...firm.numbers, last } }) }, "GET preferences/": { data: preferences }, "GET setup/": SETUP, "GET shop-settings/": settings,
     "PUT shop-settings/": ({ data }: Call) => { if (fail) return { status: 0 }; settings = { ...settings, ...(data as object) }; return { status: 200, data: settings }; },
     "PATCH preferences/": ({ data }: Call) => { if (fail) return { status: 0 }; preferences = { ...preferences, ...(data as object) }; return { status: 200, data: { data: preferences } }; },
+    "POST gst/months/filed-before/": filed,
   });
 }
 function mountSettings(me = {} as Parameters<typeof mount>[2]) {
@@ -205,4 +207,113 @@ test("a choice the server refused says why and is not kept on the device to be s
   expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   expect(select).toHaveValue("3");
   expect(Object.keys(localStorage).filter((key) => key.startsWith("gst3.pending-settings.")).map((key) => localStorage.getItem(key))).not.toContainEqual(expect.stringContaining("default_business"));
+});
+
+const filedLabel = (firm = FIRMS[0]) => "Filed before the app: up to · " + firm.name;
+async function previewFiled(firm = FIRMS[0], month = "2026-06") {
+  fireEvent.change(await screen.findByLabelText(filedLabel(firm)), { target: { value: month } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview filed months for " + firm.name }));
+  const dialog = await screen.findByRole("dialog", { name: "Mark months filed before the app?" });
+  act(() => vi.setSystemTime(Date.now() + 400));
+  return dialog;
+}
+const filedCalls = (calls: Call[]) => calls.filter((call) => call.url === "gst/months/filed-before/");
+
+test.each([false, true])("filed-before has one owner control per firm and previews the inclusive range without saving (phone %s)", async (phone) => {
+  (window as unknown as { __phone: boolean }).__phone = phone;
+  const calls = server(); mountSettings();
+  for (const firm of FIRMS) {
+    const input = await screen.findByLabelText(filedLabel(firm));
+    expect(input).toHaveAttribute("type", "month");
+    expect(input).toHaveAttribute("min", "2025-04");
+    expect(input).toHaveAttribute("max", "2026-09");
+    expect(input).toHaveValue("");
+  }
+  const dialog = await previewFiled(FIRMS[1]);
+  expect(within(dialog).getByText(FIRMS[1].name)).toBeInTheDocument();
+  expect(within(dialog).getByText("April 2025 to June 2026, inclusive")).toBeInTheDocument();
+  expect(within(dialog).getByText(/Months with filing records, already filed months and months you unlocked stay as they are/)).toBeInTheDocument();
+  expect(filedCalls(calls)).toHaveLength(0);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(filedCalls(calls)).toHaveLength(0);
+  expect(screen.getByLabelText(filedLabel(FIRMS[1]))).toHaveValue("2026-06");
+});
+
+test.each(["accountant", "staff", "viewer"] as const)("%s cannot mark months filed before the app", async (role) => {
+  const calls = server(); mountSettings({ me: { role, permissions: permissions.perms[role] } });
+  await screen.findByLabelText("Copies to print");
+  expect(screen.queryByLabelText(/Filed before the app: up to/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Preview filed months/ })).not.toBeInTheDocument();
+  expect(filedCalls(calls)).toHaveLength(0);
+});
+
+test("filed-before bounds use the completed IST month and invalid choices cannot open a preview", async () => {
+  vi.setSystemTime(new Date("2026-03-31T18:30:00Z")); // April starts in IST while UTC is still in March.
+  const calls = server(); mountSettings();
+  const input = await screen.findByLabelText(filedLabel());
+  const preview = screen.getByRole("button", { name: "Preview filed months for " + FIRMS[0].name });
+  expect(input).toHaveAttribute("max", "2026-03");
+  for (const value of ["", "2025-03", "2026-04"]) {
+    fireEvent.change(input, { target: { value } });
+    expect(preview).toBeDisabled();
+    fireEvent.click(preview);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  }
+  for (const value of ["2025-04", "2026-03"]) {
+    fireEvent.change(input, { target: { value } });
+    expect(preview).toBeEnabled();
+  }
+  expect(filedCalls(calls)).toHaveLength(0);
+});
+
+test.each([0, 1, 3])("filed-before sends the selected firm and month and reports the server's %s newly marked months", async (count) => {
+  const calls = server({ filed: { months: ["2025-04", "2025-05", "2025-06"].slice(0, count), count } });
+  mountSettings();
+  const dialog = await previewFiled(FIRMS[1]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Mark as filed" }));
+  const words = count === 0 ? "No new months were marked for MEERA ORNAMENTS." : `${count} ${count === 1 ? "month" : "months"} marked as filed before the app for MEERA ORNAMENTS.`;
+  expect(await screen.findByText(words)).toBeInTheDocument();
+  expect(filedCalls(calls).map(({ method, data }) => ({ method, data }))).toEqual([{ method: "POST", data: { business: 4, up_to: "2026-06" } }]);
+  expect(screen.queryByRole("button", { name: /Undo/ })).not.toBeInTheDocument();
+  expect(screen.queryByText(/18 months marked/)).not.toBeInTheDocument();
+});
+
+test("filed-before keeps a pending confirmation open and sends duplicate presses only once", async () => {
+  let release: ((reply: Reply) => void) | undefined;
+  const calls = server({ filed: () => new Promise<Reply>((resolve) => { release = resolve; }) });
+  mountSettings();
+  const dialog = await previewFiled();
+  const confirm = within(dialog).getByRole("button", { name: "Mark as filed" });
+  act(() => { fireEvent.click(confirm); fireEvent.click(confirm); });
+  await waitFor(() => expect(release).toBeDefined());
+  expect(within(dialog).getByRole("button", { name: "Saving…" })).toHaveAttribute("aria-busy", "true");
+  expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  expect(dialog).toBeInTheDocument();
+  expect(screen.getByLabelText(filedLabel())).toBeDisabled();
+  expect(filedCalls(calls)).toHaveLength(1);
+  await act(async () => release?.({ status: 200, data: { months: ["2025-04"], count: 1 } }));
+  expect(await screen.findByText("1 month marked as filed before the app for KIRAN GOLD HOUSE.")).toBeInTheDocument();
+});
+
+test.each([
+  { status: 400, data: { up_to: ["Pick a month that is over."] }, words: "Pick a month that is over." },
+  { status: 403, data: { detail: "Your role can't do this." }, words: "Your role can't do this." },
+  { status: 0, words: "Not saved: the app couldn't get through" },
+])("filed-before preserves the firm and month after a $status failure and lets the owner retry", async ({ status, data, words }) => {
+  let failed = true;
+  const calls = server({ filed: () => failed ? { status, data } : { status: 200, data: { months: [], count: 0 } } });
+  mountSettings();
+  const dialog = await previewFiled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Mark as filed" }));
+  expect(await within(dialog).findByText(words)).toBeInTheDocument();
+  expect(screen.getByLabelText(filedLabel())).toHaveValue("2026-06");
+  expect(within(dialog).getByText("April 2025 to June 2026, inclusive")).toBeInTheDocument();
+  expect(screen.queryByText(/months? marked as filed before the app for/)).not.toBeInTheDocument();
+  expect(filedCalls(calls)).toHaveLength(1);
+  failed = false;
+  fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("No new months were marked for KIRAN GOLD HOUSE.")).toBeInTheDocument();
+  expect(filedCalls(calls).map((call) => call.data)).toEqual([{ business: 3, up_to: "2026-06" }, { business: 3, up_to: "2026-06" }]);
 });

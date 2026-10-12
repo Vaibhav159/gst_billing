@@ -6,17 +6,19 @@ import { useAuth } from "@/core/auth/AuthProvider";
 import { useFirmNumbers, type FirmRow } from "@/core/api/firms";
 import { useShopSettings } from "@/core/api/sales";
 import { useSetup } from "@/core/api/setup";
+import { useGstWrite } from "@/core/api/gst";
+import { problemOf, saveFailure } from "@/core/api/errors";
 import { usePrefs, phoneModeOf } from "@/core/prefs";
 import { THEMES, useTheme, type Theme } from "@/core/device";
 import { useView } from "@/core/view";
 import { cn } from "@/core/cn";
-import { date, todayIST } from "@/core/format";
+import { addMonths, date, monthLabel, plural, todayIST } from "@/core/format";
 import { useUnsavedGuard } from "@/core/router/useUnsavedGuard";
 import { dayOf } from "@/core/sales/words";
 import { DEFAULT_SHARE_MESSAGE, fillMessage } from "@/core/sales/share";
 import type { ShopSettings } from "@/core/sales/types";
 import { ShortcutsDialog } from "@/core/shell/ShortcutsDialog";
-import { Badge, Button, ButtonLink, Card, ConfirmDialog, Kbd, Page, QueryView, Select, Switch, Table, Td, Textarea, Th, Tr } from "@/core/ui";
+import { Badge, Button, ButtonLink, Card, ConfirmDialog, FailNote, Input, Kbd, Page, QueryView, Select, Switch, Table, Td, Textarea, Th, Tr } from "@/core/ui";
 import { messageLength, messageProblem, PLACEHOLDERS, useSettingRows } from "./settingsModel";
 
 const SECTIONS = [["set-appearance", "This device"], ["set-you", "You"], ["set-bills", "Bills"], ["set-numbering", "Bill numbers"], ["set-gst", "GST"], ["set-keys", "Keyboard"], ["set-data", "Data and setup"], ["set-about", "About"]] as const;
@@ -26,6 +28,45 @@ function Row({ label, description, htmlFor, children, status, stack = false }: {
     <div className="min-w-0 max-w-[56ch]"><p className="font-medium flex items-center gap-2">{htmlFor ? <label htmlFor={htmlFor}>{label}</label> : label}</p>{description ? <p className="text-sm text-muted mt-0.5">{description}</p> : null}</div>
     <div className={cn("flex items-center gap-3 min-w-0", isPhone || stack ? "flex-wrap" : "shrink-0 justify-end")}>{isPhone || stack ? null : status}{children}{isPhone || stack ? status : null}</div>
   </div>;
+}
+function FiledBeforeRow({ firm }: { firm: FirmRow }) {
+  const { can } = useAuth();
+  const save = useGstWrite();
+  const active = useRef(false);
+  const [upTo, setUpTo] = useState("");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [count, setCount] = useState<number | null>(null);
+  const lastMonth = addMonths(todayIST().slice(0, 7), -1);
+  const valid = /^\d{4}-(0[1-9]|1[0-2])$/.test(upTo) && upTo >= "2025-04" && upTo <= lastMonth;
+  const ask = () => {
+    if (!can("settings.edit") || active.current || !valid) return;
+    save.reset(); setCount(null); setPreview(upTo);
+  };
+  const commit = () => {
+    if (!can("settings.edit") || active.current || !preview) return;
+    active.current = true;
+    save.mutate({ method: "post", path: "months/filed-before/", body: { business: firm.id, up_to: preview } }, {
+      onSuccess: (answer: { count: number }) => { setCount(answer.count); setPreview(null); },
+      onSettled: () => { active.current = false; },
+    });
+  };
+  return <>
+    <Row label="Filed before the app: up to" htmlFor={`set-filed-${firm.id}`} description={firm.name} stack>
+      <Input id={`set-filed-${firm.id}`} aria-label={`Filed before the app: up to · ${firm.name}`} type="month" min="2025-04" max={lastMonth}
+        value={upTo} disabled={save.isPending} invalid={Boolean(upTo) && !valid} onChange={(event) => {
+          if (!active.current) { setUpTo(event.target.value); setCount(null); save.reset(); }
+        }} />
+      <Button disabled={!valid || save.isPending} aria-label={`Preview filed months for ${firm.name}`} onClick={ask}>Preview</Button>
+      <span role="status" className="text-sm">{count === null ? null : count === 0 ? `No new months were marked for ${firm.name}.` : `${plural(count, "month")} marked as filed before the app for ${firm.name}.`}</span>
+    </Row>
+    <ConfirmDialog open={preview !== null} onClose={() => setPreview(null)} onConfirm={commit} title="Mark months filed before the app?"
+      record={preview ? [["Firm", firm.name], ["Months", `April 2025 to ${monthLabel(preview, { long: true })}, inclusive`]] : null}
+      confirmLabel={save.isError ? "Try again" : "Mark as filed"} confirmDisabled={!can("settings.edit")} busy={save.isPending}>
+      <p>This marks eligible months as filed and locks them. Confirm only months already filed on the GST portal.</p>
+      <p>Months with filing records, already filed months and months you unlocked stay as they are.</p>
+      <FailNote error={save.error ? saveFailure(problemOf(save.error)) : null} />
+    </ConfirmDialog>
+  </>;
 }
 function Choice<T extends string>({ label, value, choices, onChange, disabled = false, busy = false }: { label: string; value: T; choices: { value: T; label: string; sub: string }[]; onChange(value: T): void; disabled?: boolean; busy?: boolean }) {
   const { isPhone } = useView();
@@ -158,7 +199,9 @@ function SettingsBody({ settings, firms, person }: { settings: ShopSettings; fir
         <tbody>{firms.map((firm) => <Tr key={firm.id}><Td className="font-medium">{firm.name}</Td><Td>{firm.invoice_prefix || "None (bare numbers)"}</Td><Td>{firm.numbers?.last ? <BillReference bill={firm.numbers.last} /> : "None yet"}</Td><Td className="font-semibold text-brand">{firm.numbers?.next.invoice_number ?? "None yet"}</Td><Td>{firm.paper_full_number_from ? date(firm.paper_full_number_from) : "Not set"}</Td><Td><ButtonLink size="sm" variant="ghost" iconRight={ArrowRight} to={"/firms/" + firm.id + (can("firm.edit") ? "/edit" : "")}>{can("firm.edit") ? "Change in " + firm.short + "'s details" : "View " + firm.short}</ButtonLink></Td></Tr>)}</tbody></Table>}
       <p className="px-5 py-4 text-sm text-muted border-t border-rule">Numbers already saved never change. A number typed by hand is checked against the rest.</p>
     </Card>
-    <Card id="set-gst" title="GST"><Row label="GST: opening credit" description="Each firm's opening credit, copied from the portal's credit ledger."><ButtonLink to={"/gst?tab=credit" + (shopFirm ? "&firm=" + shopFirm.id : "") + "#opening"}>Open GST settings</ButtonLink></Row></Card>
+    <Card id="set-gst" title="GST"><Row label="GST: opening credit" description="Each firm's opening credit, copied from the portal's credit ledger."><ButtonLink to={"/gst?tab=credit" + (shopFirm ? "&firm=" + shopFirm.id : "") + "#opening"}>Open GST settings</ButtonLink></Row>
+      {shop ? firms.map((firm) => <FiledBeforeRow key={firm.id} firm={firm} />) : null}
+    </Card>
     {isDesktop ? <Card id="set-keys" title="Keyboard shortcuts" subtitle="They never fire while you type in a field, except Ctrl K and Ctrl S" actions={<Button size="sm" icon={Keyboard} onClick={() => setKeys(true)}>Show all</Button>}>
       <ul className="grid grid-cols-2 gap-x-8">{[[["Ctrl", "K"], "Search customers, bills and pages"], [["Alt", "N"], "New sales bill"], [["Alt", "P"], "New purchase"], [["/"], "Search the list on screen"], [["Ctrl", "S"], "Save the form or bill you're on"], [["Esc"], "Close a dialog or menu"]].map(([keys, words]) => <li key={String(words)} className="flex items-center justify-between gap-4 py-2 border-t border-rule"><span className="text-fg2">{words}</span><span className="flex gap-1">{(keys as string[]).map((key) => <Kbd key={key}>{key}</Kbd>)}</span></li>)}</ul>
     </Card> : null}
@@ -183,8 +226,7 @@ export default function Settings() {
   const { me } = useAuth();
   const settings = useShopSettings();
   const firms = useFirmNumbers();
-  return <Page icon={SettingsIcon} title="Settings" back="/more" context="Each setting saves as you change it. The theme is just for this device; “You” follows you; Bills are shop-wide." phoneSubtitle="Each setting saves as you change it">
+  return <Page icon={SettingsIcon} title="Settings" back="/more" context="Choices save as you change them. Messages and filed months ask you to save. The theme is just for this device; “You” follows you; Bills are shop-wide." phoneSubtitle="Choices save as you change them; messages and filed months ask you to save">
     <QueryView query={settings} what="settings">{(data) => <QueryView query={firms} what="bill numbers">{(list) => <SettingsBody key={me?.id} person={me?.id ?? 0} settings={data} firms={list} />}</QueryView>}</QueryView>
   </Page>;
 }
-
