@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { useRegistry } from "@/core/api/registry";
 import { date } from "@/core/format";
@@ -7,11 +7,14 @@ import { useDebounced } from "@/core/useDebounced";
 import { Banner, Button } from "@/core/ui";
 
 type Values = { name: string; address: string; city: string };
-export function CustomerRegistry({ gstin, values, onFill, onName }: {
-  gstin: string; values: Values; onFill: (patch: Partial<Values>) => void; onName: (name: string) => void;
+/** X-67: the registry is asked only for a GSTIN the person types, or the stored one when they tap "Check this GSTIN". */
+export function CustomerRegistry({ gstin, stored = "", values, onFill, onName }: {
+  gstin: string; stored?: string; values: Values; onFill: (patch: Partial<Values>) => void; onName: (name: string) => void;
 }) {
+  const [checked, setChecked] = useState<string | null>(null);
+  const wanted = gstin !== stored || checked === gstin;
   const asked = useDebounced(gstin);
-  const lookup = useRegistry(asked);
+  const lookup = useRegistry(asked, wanted);
   const data = asked === gstin && lookup.data?.gstin === gstin ? lookup.data : undefined;
   const reg = data?.registry;
   const applied = useRef<string | null>(null);
@@ -28,6 +31,7 @@ export function CustomerRegistry({ gstin, values, onFill, onName }: {
     if (Object.keys(patch).length) onFill(patch);
   }, [data, reg, gstin, values, onFill]);
   if (checkGstin(gstin).status !== "valid") return null;
+  if (!wanted) return <div><Button size="sm" onClick={() => setChecked(gstin)}>Check this GSTIN</Button></div>;
   if (asked !== gstin || lookup.isPending) return <p role="status" className="text-sm text-muted">Checking the GST registry…</p>;
   if (lookup.isError || data?.lookup === "unreachable") return <p role="status" className="text-sm text-muted">The GST registry didn't answer. The state and PAN come from the number itself.</p>;
   if (!reg) return <p role="status" className="text-sm text-muted flex items-start gap-1.5 anim-rise"><Info size={15} className="mt-0.5 shrink-0" aria-hidden="true" />The GST registry has no details for this GSTIN yet. The number itself checks out.</p>;

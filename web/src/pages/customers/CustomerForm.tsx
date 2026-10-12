@@ -396,7 +396,7 @@ function Form({ existing, firms, home, query, back, onDirty }: FormProps) {
                 onChange={(e) => set("pan")(cleanPan(e.target.value))} onBlur={touch("pan")} inputClassName="tnum tracking-wide uppercase" aria-describedby={desc("pan")} />
             </Field>
           </div>
-          <CustomerRegistry gstin={v.gstin} values={v} onFill={(patch) => setV(old => ({ ...old, ...Object.fromEntries(Object.entries(patch).filter(([key]) => !String(old[key as keyof Values] ?? "").trim())) }))} onName={set("name")} />
+          <CustomerRegistry gstin={v.gstin} stored={existing && !gstinPlaceholder(existing.gst_number) ? existing.gst_number : ""} values={v} onFill={(patch) => setV(old => ({ ...old, ...Object.fromEntries(Object.entries(patch).filter(([key]) => !String(old[key as keyof Values] ?? "").trim())) }))} onName={set("name")} />
           {dupGstin ? (
             <div className="mt-4 anim-rise">
               <Banner tone="brand" icon={AlertTriangle} title={`${dupGstin.name} already has this GSTIN`} actions={<ButtonLink size="sm" to={existing && can("customer.merge") ? `/customers/${existing.id}?merge=${dupGstin.id}` : `/customers/${dupGstin.id}`}>{existing && can("customer.merge") ? "Merge into" : "Open"} {dupGstin.name}</ButtonLink>}>

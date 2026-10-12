@@ -27,6 +27,17 @@ test("the registry fills only empty fields, with an explicit choice for another 
   expect(screen.getByLabelText(/^Name/)).toHaveValue("Kulkarni Jewellers");
 });
 
+test("an edit with a stored GSTIN asks the registry only when the person taps Check this GSTIN, and fills only empty fields (X-67)", async () => {
+  const calls: Call[] = serve({ ...base, "GET customers/7/": { ...ANIL, gst_number: GST, state_name: "MAHARASHTRA", address: "Stored address", city: "" } });
+  mount(routes, ["/customers/7/edit"]); await pass(1000);
+  expect(calls.some(c => c.url.startsWith("registry/"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Check this GSTIN" })); await pass(400);
+  expect(calls.filter(c => c.url === `registry/${GST}/`)).toHaveLength(1);
+  expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("Stored address");
+  expect(screen.getByLabelText("City")).toHaveValue("Mumbai");
+  expect(screen.queryByRole("button", { name: "Check this GSTIN" })).not.toBeInTheDocument();
+});
+
 test("a late registry answer for the previous GSTIN never fills the new form", async () => {
   let finish!: (r: { status: number; data: unknown }) => void;
   serve({ ...base, [`GET registry/${GST}/`]: () => new Promise(r => { finish = r; }) });
