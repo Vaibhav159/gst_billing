@@ -145,3 +145,30 @@ test("a passive observer cannot replace an active reader's query function", asyn
   await waitFor(() => expect(calls).toHaveLength(4));
   expect(active.result.current.due.isError || active.result.current.rates.isError).toBe(false);
 });
+
+test.each([false, true])("a newer plain answer wins over an observed rich answer, refreshing=%s", async refreshing => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30"));
+  let release!: (value: unknown) => void;
+  const { calls } = salesServer([["GET", "due-next/", () => new Promise(resolve => { release = resolve; })]]);
+  const { qc, wrapper } = setup(); const now = Date.now();
+  qc.setQueryData(dueNextKeys.one(3, true), toDueNext(wireDue()), { updatedAt: now - 30_000 });
+  qc.setQueryData(dueNextKeys.one(3, false), { ...toDueNext(wireDue()), items: [] }, { updatedAt: now - 10_000 });
+  const rich = renderHook(() => useDueNext(3, true), { wrapper });
+  if (refreshing) await act(async () => { void rich.result.current.refetch(); });
+  const bell = renderHook(() => useDueNext(3), { wrapper });
+  await act(async () => {});
+  expect(bell.result.current.data?.items).toEqual([]);
+  expect(calls).toHaveLength(refreshing ? 1 : 0);
+  if (refreshing) await act(async () => { release({ ...wireDue(), items: [] }); });
+});
+
+test("an invalidated plain answer cannot displace an older fresh rich answer", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-08T11:00:00+05:30"));
+  const { calls } = salesServer([["GET", "due-next/", wireDue]]); const { qc, wrapper } = setup(); const now = Date.now();
+  qc.setQueryData(dueNextKeys.one(3, true), toDueNext(wireDue()), { updatedAt: now - 30_000 });
+  qc.setQueryData(dueNextKeys.one(3, false), { ...toDueNext(wireDue()), items: [] }, { updatedAt: now - 10_000 });
+  await qc.invalidateQueries({ queryKey: dueNextKeys.one(3, false), exact: true, refetchType: "none" });
+  const bell = renderHook(() => useDueNext(3), { wrapper });
+  expect(bell.result.current.data?.items).toHaveLength(1);
+  expect(calls).toHaveLength(0);
+});

@@ -16,13 +16,16 @@ export function useDashboard(firm: FirmId | null, fy: string) {
 }
 export function useDueNext(firm: FirmId | null, withReturns = false, enabled = true) {
   const qc = useQueryClient();
-  const richQuery = firm === null ? undefined : qc.getQueryCache().find({ queryKey: dueNextKeys.one(firm, true), exact: true });
   const rich = qc.getQueryState<DueData>(dueNextKeys.one(firm, true));
   const slim = qc.getQueryState<DueData>(dueNextKeys.one(firm, false));
-  // Share an active/in-flight rich request, or a newer fresh rich answer. This
-  // also handles an old slim key left behind by an earlier Easy Home visit.
-  const reuseRich = enabled && !withReturns && Boolean(richQuery?.isActive() || rich?.fetchStatus === "fetching" ||
-    (rich?.data !== undefined && !rich.isInvalidated && rich.dataUpdatedAt >= (slim?.dataUpdatedAt ?? 0) && Date.now() - rich.dataUpdatedAt < 60_000));
+  const now = Date.now();
+  const richUsable = rich?.data !== undefined && !rich.isInvalidated && now - rich.dataUpdatedAt < 60_000;
+  const slimUsable = slim?.data !== undefined && !slim.isInvalidated && now - slim.dataUpdatedAt < 60_000;
+  // Prefer the newest usable answer. Without a usable plain answer, join a
+  // pending rich request; merely observing an older answer gives it no priority.
+  const reuseRich = enabled && !withReturns && Boolean(
+    (richUsable && (!slimUsable || rich.dataUpdatedAt >= slim.dataUpdatedAt)) ||
+    (rich?.fetchStatus === "fetching" && !slimUsable));
   const wantsReturns = withReturns || reuseRich;
   return useQuery({ queryKey: dueNextKeys.one(firm, wantsReturns), ...freshness, enabled: enabled && firm !== null,
     initialData: () => !wantsReturns && !rich?.isInvalidated ? rich?.data : undefined,
