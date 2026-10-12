@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderApp } from '@/test/render';
 import { serve, type Call } from '@/test/server';
 import { tick } from '@/test/clock';
@@ -49,7 +49,7 @@ test('a supplier set by the form after typing replaces the typed text', async ()
   function Host() { const [v, setV] = useState<number | null>(null); fill = setV; return <SupplierPicker value={v} onChange={(s: SupplierRef) => setV(s.id)} />; }
   renderApp(<Host />);
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Hira' } });
-  fill(42);
+  act(() => fill(42));
   await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('Read supplier'));
 });
 
