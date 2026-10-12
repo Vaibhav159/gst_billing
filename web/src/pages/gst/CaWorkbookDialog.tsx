@@ -8,7 +8,7 @@ import { WorkbookDialog } from "./WorkbookDialog";
 function Loaded({ data, onClose }: { data: CaWorkbook; onClose: () => void }) {
   const sheets = useMemo(() => workbookSheets(data), [data]);
   return <WorkbookDialog open onClose={onClose} sheets={sheets} file={data.file}
-    description="A summary, each firm month by month with sales and purchases, GSTR-1, GSTR-3B, and amendments when any. Sales and purchases are never added together."
+    description="A summary, each firm month by month with sales and purchases, GSTR-1, GSTR-3B, and amendments when any."
     audit={`CA workbook, ${data.scope}, ${data.period}`} permission="reports.export" />;
 }
 export function CaWorkbookDialog({ open, onClose, ...scope }: WorkbookScope & { open: boolean; onClose: () => void }) {

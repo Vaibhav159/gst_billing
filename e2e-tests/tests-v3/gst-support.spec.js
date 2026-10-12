@@ -242,25 +242,27 @@ for (const theme of ["obsidian", "pearl"]) {
     const workbook = await checked(await response);
     const dialog = page.getByRole("dialog", { name: workbook.file, exact: true });
     await expect(dialog).toBeVisible(); await afterDialog(page);
+    await expect(dialog).toHaveAccessibleDescription("A summary, each firm month by month with sales and purchases, GSTR-1, GSTR-3B, and amendments when any.");
     for (const name of ["Summary", "GSTR-1", "GSTR-3B"]) await expect(dialog.getByRole("tab", { name, exact: true })).toBeVisible();
-    await expect(dialog.getByText("Sales and purchases sit side by side and are never added together.", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(`${workbook.scope} · ${workbook.period}. Net Total is the combined invoice value of sales and purchases.`, { exact: true })).toBeVisible();
     // Firm names are sanitized/deduplicated by the writer, so derive the actual tab names from the UI.
     const fixed = new Set(["Summary", "GSTR-1", "GSTR-3B", "Amendments"]);
     const sheetNames = await dialog.getByRole("tab").allTextContents();
     const firmTabs = sheetNames.filter(name => !fixed.has(name));
-    expect(firmTabs).toHaveLength(workbook.firms.length);
-    const withMonths = workbook.firms.findIndex(firm => firm.months.length > 0);
-    if (withMonths >= 0) {
-      await dialog.getByRole("tab", { name: firmTabs[withMonths], exact: true }).click();
-      const sheet = dialog.getByRole("table", { name: `Sheet ${firmTabs[withMonths]}`, exact: true });
-      for (const label of ["Qty", "Unit", "Rate per unit"]) await expect(sheet.getByRole("cell", { name: label, exact: true }).first()).toBeVisible();
-      await expect(sheet.getByRole("cell", { name: /making charges/i })).toHaveCount(0);
+    const populated = workbook.firms.filter(firm => firm.months.some(month => month.sales.rows.length || month.purchases.rows.length));
+    expect(firmTabs).toHaveLength(populated.length);
+    if (populated.length) {
+      await dialog.getByRole("tab", { name: firmTabs[0], exact: true }).click();
+      const sheet = dialog.getByRole("table", { name: `Sheet ${firmTabs[0]}`, exact: true });
+      const heading = sheet.getByRole("row").filter({ has: page.getByRole("cell", { name: "S.No.", exact: true }) }).first();
+      for (const label of ["Qty (gm)", "Unit", "Rate per unit"]) await expect(heading.getByRole("cell", { name: label, exact: true })).toBeVisible();
+      await expect(heading.getByRole("cell", { name: /making charges/i })).toHaveCount(0);
     }
     expect(await problems(page), "CA workbook preview").toEqual([]);
     const downloaded = XLSX.readFile(await downloadExcel(page, dialog, workbook.file, info));
     expect(downloaded.SheetNames).toEqual(sheetNames);
-    expect(workbook.summary.length).toBeGreaterThan(0);
-    const firm = workbook.summary[0];
+    const firm = workbook.summary.find(firm => (firm.sales.bills ?? 0) + (firm.purchases.bills ?? 0) > 0);
+    expect(firm, "the workbook has an active firm in its summary").toBeTruthy();
     const summary = XLSX.utils.sheet_to_json(downloaded.Sheets.Summary, { header: 1 });
     const row = summary.find(row => row[0] === firm.firm);
     expect(row, `Summary includes ${firm.firm}`).toBeTruthy();
