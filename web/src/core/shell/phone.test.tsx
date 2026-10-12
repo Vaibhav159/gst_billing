@@ -8,6 +8,7 @@ import { api } from "@/core/api/client";
 import { wireDashboard, wireDue } from "@/core/dashboard/fixtures";
 import { FIRM, wireDetail, wirePage } from "@/core/sales/fixtures";
 import { wireRates } from "@/core/rates/testing";
+import { monthFixture } from "@/core/gst/fixtures";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { ToastProvider } from "@/core/ui";
 import { appRoutes } from "@/core/router/routes";
@@ -104,6 +105,7 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
     if (config.url === "dashboard/") return Promise.resolve(answer(wireDashboard()));
     if (config.url === "due-next/") return Promise.resolve(answer(wireDue()));
     if (config.url === "rates/") return Promise.resolve(answer(wireRates()));
+    if (config.url === "gst/month/") return Promise.resolve(answer(monthFixture({ month: config.params.month })));
     if (config.url === "sales/") return Promise.resolve(answer(wirePage([])));
     if (config.url?.match(/^sales\/\d+\/$/)) return Promise.resolve(answer(wireDetail({ id: Number(config.url.split("/")[1]) })));
     if (config.url === "customers/duplicates/") return Promise.resolve(answer({ groups: [] }));
