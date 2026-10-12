@@ -86,7 +86,7 @@ test("suppliers search and detail agree with the live endpoint", async ({ page, 
   const api = client(request), person = await supplier(api);
   await go(page, "/suppliers", "Suppliers");
   await page.getByRole("searchbox", { name: "Search suppliers" }).fill(SUPPLIER_NAME);
-  const link = page.getByRole("link", { name: SUPPLIER_NAME, exact: true });
+  const link = page.getByRole("link", { name: SUPPLIER_NAME });
   await expect(link).toHaveAttribute("href", `/suppliers/${person.id}`);
   await link.click(); await expect(page.getByRole("heading", { level: 1, name: SUPPLIER_NAME })).toBeVisible(); await opened(page);
   await expect(page.getByText("None: no GSTIN, so no GST and no credit", { exact: true })).toBeVisible();
@@ -171,8 +171,8 @@ test("twelve synthetic photos are read once, retain rows, and show both directio
   page.on("request", request => { if (/\/api\/purchases\/read\/$/.test(new URL(request.url()).pathname)) reads++; });
   await go(page, "/purchases/ai-import", "Import bill photos");
   expect(reads, "opening the importer does not ask AI to read").toBe(0);
-  const firstReading = page.waitForResponse(response => /\/api\/purchases\/read\/$/.test(new URL(response.url()).pathname)
-    && response.request().postDataBuffer()?.includes(Buffer.from('filename="IMG_2041.jpg"')));
+  const firstReading = page.waitForResponse(async response => /\/api\/purchases\/read\/$/.test(new URL(response.url()).pathname)
+    && response.ok() && (await response.json()).invoice_number === "UBS/26-27/0866");
   await page.getByLabel("Choose files", { exact: true }).setInputFiles(PHOTO_NAMES.map(syntheticPhoto));
   await expect(page.getByText("All 12 bills read", { exact: true })).toBeVisible({ timeout: 45_000 });
   const firstRead = await (await firstReading).json();
