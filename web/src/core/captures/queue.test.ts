@@ -289,6 +289,18 @@ describe("durable capture queue", () => {
     }
   });
 
+  it("a failure that never reached the network waits for Try now instead of retrying on every online or visible", async () => {
+    const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf()], options); f.online();
+    f.upload.mockRejectedValueOnce(new Error("body could not be built")); await f.queue.resume();
+    const stop = f.queue.start(); await f.queue.idle();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange")); await f.queue.idle();
+    expect(f.upload).toHaveBeenCalledOnce();
+    expect(f.queue.getSnapshot().items[0]).toMatchObject({ phase: "queued", error: "Something went wrong" });
+    await f.queue.resume(f.queue.getSnapshot().items[0].clientId);
+    expect(f.upload).toHaveBeenCalledTimes(2); expect(f.store.rows).toHaveLength(0); stop();
+  });
+
   it("a Try now pressed during an automatic pass runs after it instead of being dropped", async () => {
     const f = fixture(); await f.queue.setUser(7); await f.queue.add([pdf("a.pdf")], options); f.online();
     f.read.mockRejectedValueOnce(new Error("reader unavailable")); await f.queue.resume();

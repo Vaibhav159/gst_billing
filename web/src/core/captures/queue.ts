@@ -1,3 +1,4 @@
+import axios from "axios";
 import { problemOf } from "@/core/api/errors";
 import { prepareFiles } from "./files";
 import { captureFormData } from "./multipart";
@@ -74,7 +75,8 @@ export function createCaptureQueue(store: CaptureStore, dependencies: QueueDepen
             const missing = reading && sameUser(owner, version) && problem.kind === "notfound";
             await store.update(owner, item.clientId, missing
               ? { missing: true, error: "This photo is no longer in the inbox. Remove this saved upload from this device." }
-              : { error: problem.message, autoRetry: !reading && RETRYABLE.has(problem.kind) });
+              // A failure that never reached the network (not from axios) would fail the same way again: it waits for Try now.
+              : { error: problem.message, autoRetry: !reading && axios.isAxiosError(error) && RETRYABLE.has(problem.kind) });
             dependencies.changed(captureId);
           }
         } finally { controller = null; }
