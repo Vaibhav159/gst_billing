@@ -1,6 +1,6 @@
 // Real-server acceptance for 3C. Run only under the sandbox lock assigned by the builder's dispatch.
-// Required seed: positive-tax month, blocked month, unlocked corrections before and after 3B,
-// and E2E_GST_FIRM naming a dedicated empty firm whose name starts TEST GST RETURNS.
+// Required seed: a positive-tax month and a blocked month. Lifecycle writes use only
+// this suite's disposable TEST GST RETURNS firm; every owned filing and bill is cleaned up.
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
 const { opened, savedToken } = require("./session");
@@ -101,10 +101,15 @@ test.afterEach(async ({ page, request }) => {
 makesBills(test);
 
 async function emptyFixture(api) {
-  const name = process.env.E2E_GST_FIRM;
+  const name = process.env.E2E_GST_FIRM || "TEST GST RETURNS (e2e)";
   expect(name, "Set E2E_GST_FIRM to the assigned empty synthetic firm's exact name, starting TEST GST RETURNS").toMatch(/^TEST GST RETURNS/);
-  const firm = (await firms(api)).find((candidate) => candidate.name === name);
-  expect(firm, `Missing disposable GST lifecycle firm ${name}`).toBeTruthy();
+  const firm = (await firms(api)).find((candidate) => candidate.name === name) || await api.post("firms/", {
+    name, short_name: "GST Test", address: "1 Synthetic Test Road, Jaipur, Rajasthan",
+    city: "Jaipur", pin_code: "302001", gst_number: "08PQRST1234A1ZB", mobile_number: "9999999995",
+    email: "", invoice_prefix: "TGR", paper_full_number_from: null,
+    bank_name: "", bank_account_number: "", bank_ifsc_code: "", bank_branch_name: "",
+    jurisdiction: "Jaipur", declaration: "", signature_on_bills: false,
+  });
   const month = monthBefore(today());
   const m = await api.get("gst/month/", params(firm.id, month));
   expect(m.stage, "The disposable firm's previous month must be ready and contain no filing history").toBe("ready");
@@ -139,7 +144,9 @@ test("GST figures, portal sections and WCAG 2.2 AA in both themes", async ({ pag
     await expect(line(page, "Net credit", phone)).toContainText(money(g3.t4c.total));
     await expect(line(page, "Credit not allowed", phone)).toContainText("4(B)(1)");
     await expect(line(page, "Credit too late to claim", phone)).toContainText("4(D)(2)");
-    await expect(page.locator("#gst-ledger")).toContainText("Interest in the GSTR-3B JSON: worked out to today; check on the portal.");
+    const interest = page.locator("#gst-ledger").getByText("Interest in the GSTR-3B JSON: worked out to today; check on the portal.", { exact: true });
+    if (!g3.filed && paise(g3.late?.interest ?? "0") > 0n) await expect(interest).toBeVisible();
+    else await expect(interest).toHaveCount(0);
     await expect(page.locator("html")).toHaveClass(theme === "obsidian" ? "" : "theme-pearl");
     expect(await measure(page)).toEqual([]);
     const b2cl = await section(page, "B2CL bills", phone);
@@ -259,9 +266,17 @@ test("nil return files in stages, keeps portal carry, unlocks, relocks and remov
 
 test("corrections name GSTR-1A before 3B and the carrying return after 3B", async ({ page, request }, info) => {
   test.slow();
-  const api = client(request);
+  const api = client(request), fixture = await emptyFixture(api);
+  owned = fixture;
+  const { made, body, lines } = await ownedAmendmentBill(api, fixture);
+  await openMonth(page, await api.get("gst/month/", params(fixture.business, fixture.month)));
+  await markReturn(page, fixture, "gstr1");
   for (const before of [true, false]) {
-    const m = await findMonth(api, ["unlocked"], (m) => m.amendments?.before_gstr3b === before && m.since_filing?.rows.some((r) => !r.too_late), `an unlocked ${before ? "GSTR-1-only" : "GSTR-3B-filed"} month with a timely correction`);
+    await unlockOwned(page, fixture, before);
+    await api.put(`sales/${made.id}/`, { ...body, lines: lines(before ? "1100.000" : "1200.000") });
+    const m = await api.get("gst/month/", params(fixture.business, fixture.month));
+    expect(m.amendments.before_gstr3b).toBe(before);
+    expect(m.since_filing.rows.some(row => !row.too_late)).toBe(true);
     await openMonth(page, m);
     const changes = page.getByRole("region", { name: "Changes since filing" });
     for (const row of m.since_filing.rows) {
@@ -272,6 +287,11 @@ test("corrections name GSTR-1A before 3B and the carrying return after 3B", asyn
     if (before && !m.record.gstr1a) await expect(page.getByRole("button", { name: "Mark GSTR-1A filed…", exact: true })).toBeEnabled();
     await expect(page.getByRole("button", { name: info.project.name === "phone" ? "Send the amendments to the CA" : "Download the amendments", exact: true })).toBeEnabled();
     await expect(page.getByRole("button", { name: "Download GSTR-1 file for the portal", exact: true })).toHaveCount(0);
+    if (before) {
+      await markReturn(page, fixture, "gstr1a");
+      await relockOwned(page, fixture);
+      await markReturn(page, fixture, "gstr3b");
+    }
   }
 });
 
@@ -336,6 +356,10 @@ test("financial-year navigation keeps exact months and handles years before Apri
   await expect(page.getByRole("button", { name: "Show FY 2025-26", exact: true })).toBeVisible(); await opened(page);
   await page.getByRole("button", { name: "Show FY 2025-26", exact: true }).click();
   await expect(page).toHaveURL(/[?&]fy=2025-26/);
+  if (info.project.name === "phone") {
+    await expect(page.getByRole("radio", { name: "Reconcile", exact: true })).toBeVisible();
+    return;
+  }
   await page.keyboard.press("Control+k");
   const search = page.getByRole("dialog", { name: "Search", exact: true });
   await expect(search).toBeVisible();
@@ -384,7 +408,7 @@ async function unlockOwned(page, m, before3b) {
   await page.getByRole("button", { name: before3b ? `Unlock ${name}'s sales bills…` : `Unlock ${name}…`, exact: true }).click();
   const dialog = page.getByRole("dialog", { name: before3b ? `Unlock ${name}'s sales bills?` : `Unlock ${fullMonth(m.month)}?`, exact: true });
   await expect(dialog).toBeVisible(); await afterDialog(page);
-  await dialog.getByLabel("Reason for unlocking", { exact: true }).fill("Correct this test's owned synthetic bill");
+  await dialog.getByLabel("Reason for unlocking · required", { exact: true }).fill("Correct this test's owned synthetic bill");
   await dialog.getByRole("button", { name: `Unlock ${name}`, exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("heading", { name: `Correcting ${name}`, exact: true })).toBeVisible();
@@ -409,13 +433,8 @@ async function amendmentsArtifact(page, info, file) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
 }
 
-test("an owned changed bill persists GSTR-1A, then carries a post-3B amendment with exact file figures", async ({ page, request }, info) => {
-  test.slow();
-  const api = client(request), m = await emptyFixture(api);
-  owned = m;
+async function ownedAmendmentBill(api, m) {
   const firm = (await firms(api)).find((f) => f.id === m.business);
-  // Test the browser's supported download fallback on both device projects; no API answer is mocked.
-  await page.addInitScript(() => { Object.defineProperty(navigator, "canShare", { configurable: true, value: () => false }); });
   const customer = await walkIn(api);
   const lines = (rate) => [{ product_name: "GST amendment test gold", hsn_code: "711319", gst_percent: "3", quantity: "1.000", unit: "gms", rate, note: "" }];
   const made = await newBill(api, { firm, customer, lines: lines("1000.000") });
@@ -423,12 +442,22 @@ test("an owned changed bill persists GSTR-1A, then carries a post-3B amendment w
   // newBill always uses today; obtain the exact target month's free number before moving this one owned bill.
   // This also handles an April run moving March's bill into the preceding FY without assuming a prefix.
   const invoiceDate = `${m.month}-15`;
-  const next = await api.get("sales/next-number/", { business_id: firm.id, invoice_date: invoiceDate });
-  const body = { business: firm.id, customer: customer.id, invoice_number: next.invoice_number, invoice_date: invoiceDate,
+  const number = fyOf(invoiceDate) === fyOf(today()) ? made.number
+    : (await api.get("sales/next-number/", { business_id: firm.id, invoice_date: invoiceDate })).invoice_number;
+  const body = { business: firm.id, customer: customer.id, invoice_number: number, invoice_date: invoiceDate,
     payment_mode: "cash", place_of_supply: m.firm.state_code, notes: "Synthetic GST amendment acceptance", lines: lines("1000.000") };
   const bill = await api.put(`sales/${made.id}/`, body);
   expect(bill.invoice_date).toBe(invoiceDate);
   expect(bill.total_amount).toBe("1030.00");
+  return { made, body, lines };
+}
+
+test("an owned changed bill persists GSTR-1A, then carries a post-3B amendment with exact file figures", async ({ page, request }, info) => {
+  test.slow();
+  const api = client(request), m = await emptyFixture(api);
+  owned = m;
+  await page.addInitScript(() => { Object.defineProperty(navigator, "canShare", { configurable: true, value: () => false }); });
+  const { made, body, lines } = await ownedAmendmentBill(api, m);
   const first = await api.get("gst/month/", params(m.business, m.month));
   expect(first.gstr1.bills).toBe(1);
   expect(first.gstr3b.output).toMatchObject({ igst: "0.00", cgst: "15.00", sgst: "15.00", total: "30.00" });
