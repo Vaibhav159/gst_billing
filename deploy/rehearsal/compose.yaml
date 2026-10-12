@@ -1,0 +1,69 @@
+# The v3 switch-over rehearsal (deploy/v3-switch-and-rollback.md, Part A): the release images against a Neon
+# branch of the live database, never the live database itself. Run from the repo's top folder:
+#
+#   docker compose -p gst-rehearsal -f deploy/rehearsal/compose.yaml --env-file .env.rehearsal up -d
+#
+# .env.rehearsal is a copy of .env.template with a fresh DJANGO_SECRET_KEY and the Neon branch's DB_* (git-ignored).
+# The images default to the ones built from v3-switch; REHEARSAL_WEB_IMAGE and REHEARSAL_NGINX_IMAGE swap in the
+# v2.0.9 images for the rollback rehearsal. Keep 127.0.0.1:8070; Android uses adb reverse and localhost (runbook
+# A8.7). Share and iPhone checks use the live https site in D2. No migrate on start: the runbook runs it by hand
+# to time it. No Watchtower, no backups, no Sentry, no Gemini keys. Existing production pictures are not in Neon.
+name: gst-rehearsal
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    image: ${REHEARSAL_WEB_IMAGE:-gst-billing:v3-rehearsal}
+    volumes:
+      - static:/app/staticfiles
+      - media:/app/media
+    env_file:
+      - ${REHEARSAL_ENV_FILE:-../../.env.rehearsal}
+    environment:
+      - DJANGO_SETTINGS_MODULE=gst_billing.production_settings
+      - DJANGO_ALLOWED_HOSTS=*
+      - CSRF_TRUSTED_ORIGINS=http://127.0.0.1:${REHEARSAL_PORT:-8070},http://localhost:${REHEARSAL_PORT:-8070}
+      - REDIS_HOST=redis
+      - SENTRY_DSN=
+      - GEMINI_API_KEYS=
+      - GEMINI_API_KEY=
+    command: >
+      bash -c "mkdir -p logs &&
+               python manage.py collectstatic --noinput &&
+               gunicorn gst_billing.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 90 --graceful-timeout 30"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 6
+
+  nginx:
+    image: ${REHEARSAL_NGINX_IMAGE:-gst-billing-nginx:v3-rehearsal}
+    ports:
+      - "${REHEARSAL_HOST:-127.0.0.1}:${REHEARSAL_PORT:-8070}:80"
+    volumes:
+      - static:/var/www/static:ro
+      - media:/var/www/media:ro
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  static: {}
+  media: {}

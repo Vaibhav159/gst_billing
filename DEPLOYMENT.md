@@ -139,6 +139,9 @@ pinned to `v1.9.0` stays put until you switch it back to `:latest`.
 (Remember migrations don't auto-reverse — rolling back past a migration needs
 a manual `manage.py migrate billing <previous>` first.)
 
+**From v3.0.0 on, never reverse a migration to go back to v2.** v2.0.9 runs on the migrated database as it is. Follow
+`deploy/v3-switch-and-rollback.md`, Part F: `prepare_v2_rollback --apply` first, then pin both images to `v2.0.9`.
+
 ### Manual escape hatch
 
 The Release workflow also has a **Run workflow** button (`workflow_dispatch`)
