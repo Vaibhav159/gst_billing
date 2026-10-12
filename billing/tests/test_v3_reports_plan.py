@@ -50,8 +50,10 @@ def test_purchase_credit_follows_return_month_and_explains_gap():
     assert result["bills"] == []
     assert result["totals"]["tax"] == "0.00"
     assert result["credit_by_return"]["tax"] == "902.40"
-    assert result["gap"]["parts"] == ["+₹902.40 from a Feb 2026 bill claimed in October 2026"]
+    assert result["gap"]["parts"] == ["+₹902.40 from a Feb 2026 bill to be claimed in October 2026"]
     assert result["gap"]["difference"] == "902.40"
+    filed = build_report("purchases", [], [early], **{**context, "closed_credit": {(3, "2026-10")}})
+    assert filed["gap"]["parts"] == ["+₹902.40 from a Feb 2026 bill claimed in October 2026"]
 
 @pytest.mark.parametrize("changes,closed,want", [
     ({}, {(3, "2026-09")}, "claimed"), ({}, set(), "to_claim"),

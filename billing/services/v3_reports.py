@@ -202,6 +202,12 @@ def credit_in(purchases, start, end, closed_credit):
     return [bill for bill in purchases if bill["credit_month"] is not None and first <= bill["credit_month"] <= last and credit_state(bill, closed_credit) not in {"not_allowed", "lapsed"}]
 
 
+def _claim_words(bill, closed_credit):
+    """Only a month with its GSTR-3B on record has claimed the credit; otherwise it is still to be claimed."""
+    claim = date.fromisoformat(bill["credit_month"] + "-01").strftime("%B %Y")
+    return f"claimed in {claim}" if credit_state(bill, closed_credit) == "claimed" else f"to be claimed in {claim}"
+
+
 def credit_gap(purchases, start, end, closed_credit):
     dated = _dated(purchases, start, end)
     credited = credit_in(purchases, start, end, closed_credit)
@@ -210,8 +216,7 @@ def credit_gap(purchases, start, end, closed_credit):
     for bill in credited:
         if bill["id"] not in dated_ids:
             sign = "+" + inr(amounts([bill])["tax"])
-            claim = date.fromisoformat(bill["credit_month"] + "-01").strftime("%B %Y")
-            parts.append(f"{sign} from a {bill['date']:%b %Y} bill claimed in {claim}")
+            parts.append(f"{sign} from a {bill['date']:%b %Y} bill {_claim_words(bill, closed_credit)}")
     for bill in dated:
         if bill["id"] not in credited_ids and amounts([bill])["tax"]:
             sign = "−" + inr(amounts([bill])["tax"])
@@ -219,8 +224,7 @@ def credit_gap(purchases, start, end, closed_credit):
             if state in {"not_allowed", "lapsed", "outside"}:
                 parts.append(f"{sign} on 1 bill with no credit")
             else:
-                claim = date.fromisoformat(bill["credit_month"] + "-01").strftime("%B %Y")
-                parts.append(f"{sign} from {bill['number']}, dated {day_text(bill['date'])} and claimed in {claim}")
+                parts.append(f"{sign} from {bill['number']}, dated {day_text(bill['date'])} and {_claim_words(bill, closed_credit)}")
     by_date, by_return = amounts(dated)["tax"], amounts(credited)["tax"]
     return {"by_date": money(by_date), "by_return": money(by_return), "difference": money(by_return - by_date), "parts": parts}
 
@@ -291,6 +295,7 @@ def _tax_rows(firms, start, end, positions, sales, purchases):
         totals["carry_on"] = ledger_rows[-1]["carry_on"] if ledger_rows else None
         result.append({"firm": firm, "rows": rows, "totals": totals})
     return result
+
 
 def build_report(kind, sales, purchases, *, firms, start, end, split=False, positions=None, stages=None, closed_credit=None, today=None, side="sales", product_units=None):
     """Pure report projection; all return-context mappings use (business id, YYYY-MM) keys."""

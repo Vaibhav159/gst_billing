@@ -77,7 +77,6 @@ class SalesRegisterBudgetTest(TransactionTestCase):
         self.assertEqual({row["id"] for row in scoped}, {self.bill.pk, cancelled.pk})
         self.assertEqual(len(load_sales(START, END)), 3)
 
-
     def test_line_paise_agrees_in_portal_reports_and_workbook_on_real_rows(self):
         from decimal import Decimal
 
@@ -135,7 +134,6 @@ class SalesRegisterBudgetTest(TransactionTestCase):
         product_reads = [query["sql"].split(" FROM ", 1)[0] for query in included if '"billing_product"' in query["sql"]]
         self.assertEqual(len(product_reads), 1)
         self.assertNotIn('"description"', product_reads[0])
-
 
     def test_register_reads_only_the_requested_side(self):
         from billing.services.v3_reports import load_register

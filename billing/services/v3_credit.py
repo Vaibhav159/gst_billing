@@ -1,9 +1,26 @@
 """Credit tab projections; filing, opening balances and the ledger belong to 3A."""
 
 from decimal import Decimal
+from types import SimpleNamespace
 
-from billing.fy import fy_label, fy_of
-from billing.tax_rules import has_gstin
+from django.db.models import Count, DateField, Exists, OuterRef, Sum
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, TruncMonth
+from django.utils import timezone
+
+from billing.cache import uncached
+from billing.credit import (
+    LEDGER_START,
+    credit_deadline,
+    credit_lapsed,
+    credit_month_of,
+    last_credit_month,
+    open_credit_months,
+)
+from billing.fy import due_dates, fy_label, fy_of, fy_range
+from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, LineItem
+from billing.services.gst_amounts import paise_expression
+from billing.services.ledger import lapsed_purchase_ids
+from billing.tax_rules import HEADS, clean_gstin, has_gstin, registered
 from billing.text import money
 
 
@@ -50,9 +67,6 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
 
 def on_record_months(business_ids):
     """Batch claim history as {(firm id, YYYY-MM)}, even after unlocking; no snapshots read."""
-    from billing.cache import uncached
-    from billing.models import FiledPeriod, FilingMonth, FilingRecord
-
     keys = ("business_id", "year", "month")
     recorded = (uncached(FilingRecord).filter(business_id__in=business_ids, kind="gstr3b")
                 .order_by().values_list(*keys))
@@ -69,19 +83,6 @@ def credit_data(business, fy, *, opening, today=None):
     ``opening`` is the complete §7 body from 3A's existing opening-credit read. The caller
     supplies it so this service does not own or rebuild any ledger or opening-credit logic.
     """
-    from types import SimpleNamespace
-
-    from django.db.models import Sum
-    from django.utils import timezone
-
-    from billing.cache import uncached
-    from billing.credit import credit_deadline, credit_lapsed, credit_month_of, open_credit_months
-    from billing.fy import due_dates, fy_range
-    from billing.models import Invoice
-    from billing.services.gst_amounts import paise_expression
-    from billing.services.ledger import lapsed_purchase_ids
-    from billing.tax_rules import HEADS, clean_gstin
-
     today = today or timezone.localdate()
     filed = {(business_id, int(month[:4]), int(month[5:])) for business_id, month in on_record_months([business.pk])}
     raw = list(uncached(Invoice).filter(
@@ -133,16 +134,6 @@ def credit_data(business, fy, *, opening, today=None):
 
 def _other_risk(business_id, fy, today):
     """Other firms need counts only, never each firm's purchase headers or stored snapshots."""
-    from django.db.models import Count, DateField, Exists, OuterRef, Sum
-    from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, TruncMonth
-
-    from billing.cache import uncached
-    from billing.credit import LEDGER_START, credit_deadline, last_credit_month
-    from billing.fy import fy_range
-    from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, LineItem
-    from billing.services.gst_amounts import paise_expression
-    from billing.tax_rules import registered
-
     start, end = fy_range(fy - 1)
     if today > credit_deadline(start):
         return []
