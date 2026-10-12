@@ -83,7 +83,7 @@ export function CustomerForm({ Frame, firm, firms, existing = null, initialName 
     for (const key of fields) if (changed(key)) body[wire[key]] = values[wire[key]];
     if (!existing || changed("gstin")) {
       if (!existing) body.state_name = firm.state;
-      if (gst.status === "valid") body.state_name = gst.state;
+      if (gstState) body.state_name = gstState;
       body.customer_type = "";
     }
     if (!existing) body.businesses = [firm.id];
