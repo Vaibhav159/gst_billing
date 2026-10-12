@@ -115,11 +115,13 @@ test("mixed CSV checks both batches before writes and imports only selected bill
   await page.getByRole("checkbox", { name: `Import ${next.invoice_number}`, exact: true }).check();
   await page.getByRole("button", { name: "Next: import 2 bills" }).click();
   await expect(page.getByRole("button", { name: "Import 2 bills", exact: true })).toBeVisible();
+  await expect.poll(() => importedResponses.filter(row => row.request.dry_run).map(row => row.kind).sort()).toEqual(["purchases", "sales"]);
   expect(importedResponses.filter(row => !row.request.dry_run)).toEqual([]);
-  expect(importedResponses.filter(row => row.request.dry_run).map(row => row.kind).sort()).toEqual(["purchases", "sales"]);
   await page.getByRole("button", { name: "Import 2 bills", exact: true }).click();
   await expect(page.getByRole("link", { name: `Open ${buyNumber}`, exact: true })).toBeVisible();
-  await Promise.all([...pendingResponses]);
+  await expect(page.getByRole("link", { name: `Open ${next.invoice_number}`, exact: true })).toBeVisible();
+  // The two batches finish separately, and their response listeners parse JSON asynchronously.
+  await expect.poll(() => importedResponses.filter(row => !row.request.dry_run).map(row => row.kind).sort()).toEqual(["purchases", "sales"]);
   const written = importedResponses.filter(row => !row.request.dry_run);
   expect(written).toHaveLength(2); expect(written.every(row => row.answer.ok && row.answer.bills.every(bill => bill.id))).toBe(true);
   const purchase = written.find(row => row.kind === "purchases").answer.bills[0];
