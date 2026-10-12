@@ -25,7 +25,8 @@ function readMe(): Me | null { try { const s = tabOnly() ? sessionStorage.getIte
 function saveMe(me: Me | null) {
   const value = me ? JSON.stringify(me) : null;
   try {
-    if (tabOnly()) { writeStored(ME_KEY, null); if (value) sessionStorage.setItem(ME_KEY, value); else sessionStorage.removeItem(ME_KEY); }
+    // the remembered copy is another tab's: only an explicit tab-only sign-in clears it (below)
+    if (tabOnly()) { if (value) sessionStorage.setItem(ME_KEY, value); else sessionStorage.removeItem(ME_KEY); }
     else { sessionStorage.removeItem(ME_KEY); writeStored(ME_KEY, value); }
   } catch { /* storage refused */ }
 }
@@ -189,6 +190,8 @@ export function AuthProvider({ children, onSwitchedUser }: { children: ReactNode
       const r = await api.post("token/", { username, password, remember });
       mine = r.data.access as string;
       if (!setTokens(r.data.access, r.data.refresh, remember)) throw new TabStorageRefused("This browser wouldn't keep a sign-in for this tab. Tick Keep me signed in, or allow this site to store data.");
+      // going tab-only now: no older remembered person outlives this tab
+      if (!remember) writeStored(ME_KEY, null);
       const m = await ask();
       if (m) adopt(m, false);
       return { ok: true };

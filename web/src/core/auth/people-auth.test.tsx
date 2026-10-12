@@ -202,6 +202,21 @@ test("a tab-only sign-in keeps who signed in out of shared storage", async () =>
   expect(sessionStorage.getItem("gst3.me")).toContain("owner");
 });
 
+test("a tab-only tab clears an older remembered person when it signs in, but its later saves leave another tab's remembered sign-in alone", async () => {
+  localStorage.setItem("gst3.me", JSON.stringify({ username: "older" }));
+  serve({ "POST token/": { access: "a", refresh: "r" }, "GET me/": me });
+  let auth!: ReturnType<typeof useAuth>;
+  function Capture() { auth = useAuth(); return null; }
+  render(<QueryClientProvider client={testQueryClient()}><AuthProvider><Capture /></AuthProvider></QueryClientProvider>);
+  await act(async () => { await auth.signIn("owner", "synthetic", false); });
+  expect(localStorage.getItem("gst3.me")).toBeNull();
+  const other = JSON.stringify({ username: "another-tab" });
+  localStorage.setItem("gst3.me", other); // another tab signs in with Keep me signed in
+  await act(async () => { await auth.refreshMe(); });
+  expect(localStorage.getItem("gst3.me")).toBe(other);
+  expect(sessionStorage.getItem("gst3.me")).toContain("owner");
+});
+
 test("a server sign-out of this device starts the next person on a plain sign-in page with the reason", async () => {
   setTokens("a", "r");
   serve({ "GET me/": me, "GET people/": () => ({ status: 401, data: { code: "signed_out" } }) });
