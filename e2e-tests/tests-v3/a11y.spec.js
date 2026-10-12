@@ -439,8 +439,16 @@ const FORM_STATES = [
       await expect(page.getByText(`Copied from ${b.number}`)).toBeVisible();
       const { dialog, title } = await openReview(page, project);
       await dialog.getByRole("radio", { name: "Cash", exact: true }).click();
-      // nothing left in its body to focus: at this size it scrolls, so the body itself is a region Tab reaches
-      await expect(dialog.getByRole("region", { name: title })).toBeVisible();
+      // A table supplies its own keyboard target; otherwise the overflowing
+      // dialog body supplies one. Verify that either target lets arrows scroll.
+      const body = dialog.locator("[data-dialog-body]");
+      const target = dialog.getByRole("region", { name: title }).or(body.locator('[tabindex="0"]')).first();
+      await expect(target).toBeVisible();
+      await target.focus();
+      await expect(target).toBeFocused();
+      const before = await body.evaluate(el => el.scrollTop);
+      await page.keyboard.press("ArrowDown");
+      await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(before);
       // the payment is a change, so the copy keeps itself as an unfinished bill (deleted after the test): measured once
       // that has landed, so nothing changes under axe and the cleanup finds it
       await expect(page.getByText(/^Kept as a draft at \d\d:\d\d$/)).toBeVisible({ timeout: 15_000 });
