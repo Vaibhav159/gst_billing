@@ -10,7 +10,6 @@ from django.db.models import (
     DecimalField,
     Exists,
     F,
-    IntegerField,
     Max,
     Min,
     OuterRef,
@@ -20,12 +19,12 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, Lower, Trim, Upper
+from django.db.models.functions import Coalesce, Lower, Trim, Upper
 from django.http import Http404
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
-from billing.credit import LEDGER_START
+from billing.credit import LEDGER_START, with_credit_lapse
 from billing.fy import fy_range
 from billing.gstin import validate
 from billing.models import AuditLog, Customer, Invoice, LineItem, ShopSetting
@@ -91,15 +90,8 @@ def supplier_figures(ids, firm=None, fy=None):
         return {}
     bills = scoped_purchases(firm, fy).filter(customer_id__in=ids)
     newest = scoped_purchases(firm, fy).filter(customer_id=OuterRef("customer_id")).order_by(*NEWEST)
-    bills = bills.annotate(
-        _tax=tax_total(),
-        _limit_year=ExtractYear("invoice_date") + Case(When(invoice_date__month__lt=4, then=Value(0)),
-                                                     default=Value(1), output_field=IntegerField()),
-        _credit_year=ExtractYear(Coalesce("itc_month", "invoice_date")),
-        _credit_month=ExtractMonth(Coalesce("itc_month", "invoice_date")),
-    )
-    in_time = Q(_credit_year__lt=F("_limit_year")) | Q(_credit_year=F("_limit_year"), _credit_month__lte=10)
-    eligible = Q(itc_eligible=True, invoice_date__gte=LEDGER_START) & in_time
+    bills = with_credit_lapse(bills).annotate(_tax=tax_total())
+    eligible = Q(itc_eligible=True, invoice_date__gte=LEDGER_START, lapsed=False)
     added = bills.order_by().values("customer_id").annotate(
         bills=Count("pk"), total=Sum("total_amount"), tax=Sum("_tax"),
         credit=Sum(Case(When(eligible, then=F("_tax")), default=Value(ZERO), output_field=DECIMAL)),

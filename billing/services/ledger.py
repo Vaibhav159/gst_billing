@@ -175,17 +175,18 @@ def _reduction_note(reduction):
     return f"{inr(total)} of an earlier correction is taken off next month's tax." if total else None
 
 
-def _credit_lapse(lines, *, filing_month=None, filing_date=None, today=None):
+def _credit_lapse(lines, *, filing_month=None, filing_date=None, today=None, bill="invoice__"):
     """Annotate Sec 16(4) from the recorded filing day, else the month rule.
 
-    The caller supplies credit_month and credit_eligible. A filing in progress
+    The caller supplies credit_month and credit_eligible; `bill` prefixes the
+    bill's invoice_date and business_id (lines by default, "" for bills). A filing in progress
     supplies its day before its immutable FilingRecord snapshot is created.
     Correlated scalar lookup keeps this within the caller's aggregate query.
     """
-    lines = (lines.annotate(bill_year=ExtractYear("invoice__invoice_date"), bill_month=ExtractMonth("invoice__invoice_date"))
+    lines = (lines.annotate(bill_year=ExtractYear(f"{bill}invoice_date"), bill_month=ExtractMonth(f"{bill}invoice_date"))
              .annotate(bill_fy=F("bill_year") - Case(When(bill_month__lt=4, then=1), default=0, output_field=IntegerField()),
                        credit_year=ExtractYear("credit_month"), credit_month_number=ExtractMonth("credit_month")))
-    recorded = uncached(FilingRecord).filter(business_id=OuterRef("invoice__business_id"), kind="gstr3b",
+    recorded = uncached(FilingRecord).filter(business_id=OuterRef(f"{bill}business_id"), kind="gstr3b",
                                              year=OuterRef("credit_year"), month=OuterRef("credit_month_number"))
     claimed_on = Subquery(recorded.values("filed_on")[:1], output_field=DateField())
     if filing_date is not None:
@@ -198,9 +199,9 @@ def _credit_lapse(lines, *, filing_month=None, filing_date=None, today=None):
     # Legacy months (locked or frozen before the app) count as filed.
     today = today or timezone.localdate()
     closed_fy = today.year - (1 if today > date(today.year, 11, 30) else 2)
-    legacy = (uncached(FiledPeriod).filter(business_id=OuterRef("invoice__business_id"), year=OuterRef("credit_year"),
+    legacy = (uncached(FiledPeriod).filter(business_id=OuterRef(f"{bill}business_id"), year=OuterRef("credit_year"),
                                            month=OuterRef("credit_month_number")))
-    frozen = (uncached(FilingMonth).filter(business_id=OuterRef("invoice__business_id"), year=OuterRef("credit_year"),
+    frozen = (uncached(FilingMonth).filter(business_id=OuterRef(f"{bill}business_id"), year=OuterRef("credit_year"),
                                            month=OuterRef("credit_month_number"), legacy_frozen_at__isnull=False))
     after_month |= Q(bill_fy__lte=closed_fy) & ~Exists(legacy) & ~Exists(frozen)
     after_date = Q(claim_year__gt=F("bill_fy") + 1) | Q(claim_year=F("bill_fy") + 1, claim_month_number__gt=11)

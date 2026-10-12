@@ -1,16 +1,18 @@
-"""Purchase credit periods; part 3 replaces only the two filing-source helpers."""
+"""Purchase credit periods; Sec 16(4) lapse is the 3A ledger's rule (R3A-9)."""
 import re
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import BooleanField, DateField, F, Sum, Value
+from django.db.models.functions import Cast, Coalesce, TruncMonth
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
 from billing.fy import fy_of
-from billing.models import LineItem
+from billing.models import Business, Invoice, LineItem
 from billing.period_lock import assert_purchase_open, closed_credit_months, credit_month_closed
+from billing.services.ledger import _credit_lapse
 from billing.text import day_text
 
 UNSET = object()
@@ -29,15 +31,44 @@ def last_credit_month(bill_date):
     return date(fy_of(bill_date) + 1, 10, 1)
 
 
-def credit_lapsed(invoice):
+def with_credit_lapse(bills, today=None):
+    """Annotate bills with the ledger's `lapsed` and their credit month's GSTR-3B day `claimed_on`."""
+    # Postgres truncates a date to a timestamp; the month stays a date key for callers.
+    return _credit_lapse(bills.annotate(credit_month=Coalesce("itc_month", Cast(TruncMonth("invoice_date"), DateField())),
+                                        credit_eligible=F("itc_eligible")), today=today, bill="")
+
+
+def credit_lapses(invoices, today=None):
+    """One read for a page: {bill id: (lapsed, GSTR-3B filed_on)} from the saved bills."""
+    ids = [bill.pk for bill in invoices if bill.pk]
+    if not ids:
+        return {}
+    rows = with_credit_lapse(uncached(Invoice).filter(pk__in=ids), today).values_list("pk", "lapsed", "claimed_on")
+    return {pk: (lapsed, filed_on) for pk, lapsed, filed_on in rows}
+
+
+def credit_lapse(invoice, today=None):
+    """(lapsed, GSTR-3B filed_on) for one bill's in-memory date, credit month and eligibility."""
     month = credit_month_of(invoice)
-    if month is None or not invoice.itc_eligible or month <= last_credit_month(invoice.invoice_date):
+    if month is None:
+        return False, None
+    one = uncached(Business).filter(pk=invoice.business_id).annotate(
+        bill_invoice_date=Value(invoice.invoice_date, output_field=DateField()), bill_business_id=F("pk"),
+        credit_month=Value(month, output_field=DateField()),
+        credit_eligible=Value(bool(invoice.itc_eligible), output_field=BooleanField()))
+    return _credit_lapse(one, today=today, bill="bill_").values_list("lapsed", "claimed_on").first() or (False, None)
+
+
+def credit_lapsed(invoice, today=None, lapse=None):
+    month = credit_month_of(invoice)
+    if month is None or not invoice.itc_eligible:
         return False
     tax = getattr(invoice, "_purchase_tax", None)
     if tax is None:
         sums = uncached(LineItem).filter(invoice_id=invoice.pk).aggregate(cgst=Sum("cgst"), sgst=Sum("sgst"), igst=Sum("igst"))
         tax = sum((value or Decimal("0") for value in sums.values()), Decimal("0"))
-    return tax > 0
+    # A zero/negative historical subtotal has no credit to lose.
+    return tax > 0 and (lapse or credit_lapse(invoice, today))[0]
 
 
 def next_month(month):

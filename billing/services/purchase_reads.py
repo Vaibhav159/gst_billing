@@ -8,7 +8,6 @@ from django.db.models import (
     Case,
     CharField,
     Count,
-    DateField,
     DecimalField,
     Exists,
     ExpressionWrapper,
@@ -23,10 +22,8 @@ from django.db.models import (
     When,
 )
 from django.db.models.functions import (
-    Cast,
     Coalesce,
     Collate,
-    ExtractMonth,
     ExtractYear,
     Replace,
     Round,
@@ -39,7 +36,15 @@ from django.utils import timezone
 from billing.api.body import UNSTORABLE
 from billing.api.inward_bills_service import inward_number_key, supplier_key
 from billing.cache import uncached
-from billing.credit import LEDGER_START, credit_deadline, credit_lapsed, credit_month_of
+from billing.credit import (
+    LEDGER_START,
+    credit_deadline,
+    credit_lapse,
+    credit_lapsed,
+    credit_lapses,
+    credit_month_of,
+    with_credit_lapse,
+)
 from billing.fy import fy_label, fy_of, fy_range
 from billing.models import AuditLog, Business, Invoice, InwardCapture, LineItem
 from billing.numbering import bill_ref
@@ -161,20 +166,15 @@ def _rounded_tax():
 
 
 def _credit_totals(qs):
-    """One rounded tax subtotal per bill, then the contract's eligibility/deadline predicate."""
+    """One rounded tax subtotal per bill, then the ledger's Sec 16(4) lapse (R3A-9)."""
     tax = (uncached(LineItem).filter(invoice_id=OuterRef("pk")).order_by().values("invoice_id")
            .annotate(tax=Sum(_rounded_tax(), output_field=MONEY_SQL)).values("tax"))
-    qs = qs.annotate(
+    qs = with_credit_lapse(qs).annotate(
         _tax=Coalesce(Subquery(tax), Value(ZERO), output_field=MONEY_SQL),
-        _credit_month=Coalesce("itc_month", Cast(TruncMonth("invoice_date"), DateField())),
-        _limit_year=ExtractYear("invoice_date") + Case(When(invoice_date__month__lt=4, then=Value(0)),
-                                                    default=Value(1), output_field=IntegerField()),
-        _credit_year=ExtractYear(Coalesce("itc_month", "invoice_date")),
-        _credit_number=ExtractMonth(Coalesce("itc_month", "invoice_date")),
+        _credit_month=F("credit_month"),
     )
-    in_time = Q(_credit_year__lt=F("_limit_year")) | Q(_credit_year=F("_limit_year"), _credit_number__lte=10)
     # credit_lapsed is false for a zero/negative historical tax subtotal, even after the deadline.
-    claimable = Q(itc_eligible=True, invoice_date__gte=LEDGER_START) & (in_time | Q(_tax__lte=ZERO))
+    claimable = Q(itc_eligible=True, invoice_date__gte=LEDGER_START) & (Q(lapsed=False) | Q(_tax__lte=ZERO))
     return qs.annotate(_claimed=Case(When(claimable, then=F("_tax")), default=Value(ZERO), output_field=MONEY_SQL))
 
 
@@ -205,19 +205,20 @@ def purchase_ref(invoice):
             "business_name": invoice.business.name}
 
 
-def credit_block(invoice, tax=None, closed=None):
+def credit_block(invoice, tax=None, closed=None, lapse=None):
     if tax is None:
         tax = sums(lines_of([invoice], ("quantity", "rate", *HEADS))[invoice.pk])["tax"]
     month = credit_month_of(invoice)
     closed = closed_credit_months({invoice.business_id}) if closed is None else closed
+    lapse = credit_lapse(invoice) if lapse is None else lapse
     lapsed = credit_lapsed(SimpleNamespace(itc_eligible=invoice.itc_eligible, itc_month=invoice.itc_month,
-                                           invoice_date=invoice.invoice_date, _purchase_tax=tax))
+                                           invoice_date=invoice.invoice_date, _purchase_tax=tax), lapse=lapse)
     return {"month": month.strftime("%Y-%m") if month else None,
             "chosen": invoice.itc_month.strftime("%Y-%m") if month and invoice.itc_month else None,
             "late": bool(month and month > invoice.invoice_date.replace(day=1)), "eligible": invoice.itc_eligible, "lapsed": lapsed,
             "claimed": money(tax if month and invoice.itc_eligible and not lapsed else ZERO),
             "state": "outside" if month is None else "filed" if (invoice.business_id, month.year, month.month) in closed else "open",
-            "filed_on": None, "deadline": credit_deadline(invoice.invoice_date).isoformat()}
+            "filed_on": lapse[1].isoformat() if month and lapse[1] else None, "deadline": credit_deadline(invoice.invoice_date).isoformat()}
 
 
 def line_block(line):
@@ -286,9 +287,9 @@ def has_files(invoice):
     return bool(invoice.source_file or invoice.has_capture)
 
 
-def purchase_row(invoice, lines, closed, duplicated=False, include_lines=False):
+def purchase_row(invoice, lines, closed, duplicated=False, include_lines=False, lapse=None):
     total = sums(lines)
-    credit = credit_block(invoice, total["tax"], closed)
+    credit = credit_block(invoice, total["tax"], closed, lapse)
     weights = defaultdict(lambda: ZERO)
     for li in lines:
         if li.unit in ("gms", "g", "kg", "ct", "tola", "oz") and li.note != "Amount only":
@@ -318,7 +319,8 @@ def purchase_rows(invoices, include_lines=False, lines=None, duplicates=None):
     lines = read_lines(invoices, LINE_FIELDS, lines)
     closed = closed_credit_months({b.business_id for b in invoices})
     duplicated = duplicate_ids(invoices, duplicates, narrow=True)
-    return [purchase_row(b, lines[b.pk], closed, b.pk in duplicated, include_lines) for b in invoices]
+    lapses = credit_lapses(invoices)
+    return [purchase_row(b, lines[b.pk], closed, b.pk in duplicated, include_lines, lapses.get(b.pk)) for b in invoices]
 
 
 def purchase_detail(invoice):
