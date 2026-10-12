@@ -625,12 +625,16 @@ def _restore_locks():
     # Restore against an empty book still needs a shared row: every authenticated request has a User.
     # Only its primary key is read. This serializes two owners restoring a previously unseen firm.
     from django.contrib.auth import get_user_model
-    get_user_model().objects.order_by("pk").select_for_update().values_list("pk", flat=True).first()
-    # Bin restores lock audit -> firm -> bin (4A), and firm edits hold the firm before its bin rows.
+    # No-key, so audit rows that point at this user (a purchase restore's, say) aren't blocked behind it.
+    get_user_model().objects.order_by("pk").select_for_update(no_key=True).values_list("pk", flat=True).first()
+    # Purchase restores lock audit -> inward bin row -> firm (2A); sale bin restores lock audit -> firm -> bin (4A),
+    # and firm edits hold the firm before its bin rows. So: audit, inward bin rows, firms, then outward bin rows.
     ids = BinnedInvoice.objects.live().exclude(audit_log_id=None).values_list("audit_log_id", flat=True)
     list(AuditLog.objects.select_for_update().filter(pk__in=ids).order_by("pk").values_list("pk", flat=True))
+    live = BinnedInvoice.objects.live().select_for_update().order_by("pk")
+    list(live.filter(type_of_invoice="inward").values_list("pk", flat=True))
     lock_firms(*uncached(Business).values_list("pk", flat=True))
-    list(BinnedInvoice.objects.live().select_for_update().order_by("pk").values_list("pk", flat=True))
+    list(live.exclude(type_of_invoice="inward").values_list("pk", flat=True))
     for model in (Customer, Product):
         list(uncached(model).select_for_update().order_by("pk").values_list("pk", flat=True))
 
