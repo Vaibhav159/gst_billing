@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+from itertools import batched
 
 from django.db import connection
 from django.db.models import (
@@ -177,55 +178,57 @@ def gstr1_blockers(business_ids, months, *, include_text=True):
     for month in months:
         day = date.fromisoformat(month + "-01")
         years[fy_of(day)].append(day)
-    queries, parameters = [], []
-    for days in years.values():
-        first, last = min(days), max(days)
-        stop = date(last.year + last.month // 12, last.month % 12 + 1, 1)
-        bills = checked_bills(business_ids, first.year, first.month, stop=stop).filter(
-            invoice_date__month__in=[day.month for day in days])
-        text_fields = {f"text_{kind}": _message(kind) for kind in KINDS} if include_text else {}
-        bills = bills.annotate(month_key=TruncMonth("invoice_date"), **text_fields).order_by().values(
-            "id", "business_id", "invoice_number", "month_key", *(f"check_{kind}" for kind in KINDS), *text_fields)
-        sql, params = bills.query.sql_with_params()
-        queries.append(sql)
-        parameters.extend(params)
-    kinds = " UNION ALL ".join(f"SELECT {i} AS kind" for i in range(len(KINDS)))
-    flags = "CASE kinds.kind " + " ".join(f'WHEN {i} THEN "check_{kind}"' for i, kind in enumerate(KINDS)) + " END"
-    words = ("CASE kinds.kind " + " ".join(f'WHEN {i} THEN "text_{kind}"' for i, kind in enumerate(KINDS)) + " END") if include_text else "''"
-    # Both supported databases implement materialized CTEs and window functions.
-    sql = f"""SELECT * FROM (
-        WITH checked AS MATERIALIZED ({' UNION ALL '.join(queries)}),
-        hits AS MATERIALIZED (
-            SELECT business_id, month_key, id, LOWER(invoice_number) AS number_key,
-                   kinds.kind, {words} AS words
-            FROM checked CROSS JOIN ({kinds}) kinds WHERE {flags}
-        ), totals AS (
-            SELECT business_id, month_key, COUNT(DISTINCT id) AS bills
-            FROM hits GROUP BY business_id, month_key
-        ), counts AS (
-            SELECT business_id, month_key, kind,
-                   COUNT(DISTINCT CASE WHEN kind = 0 THEN number_key ELSE CAST(id AS TEXT) END) AS n
-            FROM hits GROUP BY business_id, month_key, kind
-        ), witnesses AS (
-            SELECT business_id, month_key, kind, words,
-                   ROW_NUMBER() OVER (PARTITION BY business_id, month_key, kind ORDER BY words) AS place
-            FROM (SELECT DISTINCT business_id, month_key, kind, words FROM hits) distinct_words
-        )
-        SELECT c.business_id, c.month_key, c.kind, c.n, t.bills,
-               MAX(CASE WHEN w.place = 1 THEN w.words END), MAX(CASE WHEN w.place = 2 THEN w.words END)
-        FROM counts c JOIN totals t ON t.business_id = c.business_id AND t.month_key = c.month_key
-        JOIN witnesses w ON w.business_id = c.business_id AND w.month_key = c.month_key AND w.kind = c.kind AND w.place <= 2
-        GROUP BY c.business_id, c.month_key, c.kind, c.n, t.bills
-        ORDER BY c.business_id, c.month_key, c.kind
-    ) grouped_checks"""
-    with connection.cursor() as cursor:
-        cursor.execute(sql, parameters)
-        for bid, month, _kind, count, bills, first, second in cursor.fetchall():
-            label = month.strftime("%Y-%m") if hasattr(month, "strftime") else str(month)[:7]
-            result = out[bid, label]
-            result["count"] += count
-            result["bills"] = bills
-            result["first_two"] = (result["first_two"] + [text for text in (first, second) if text])[:2]
+    # Keep long CA ranges bounded while two FYs still share the due-next query.
+    for batch in batched(years.values(), 2):
+        queries, parameters = [], []
+        for days in batch:
+            first, last = min(days), max(days)
+            stop = date(last.year + last.month // 12, last.month % 12 + 1, 1)
+            bills = checked_bills(business_ids, first.year, first.month, stop=stop).filter(
+                invoice_date__month__in=[day.month for day in days])
+            text_fields = {f"text_{kind}": _message(kind) for kind in KINDS} if include_text else {}
+            bills = bills.annotate(month_key=TruncMonth("invoice_date"), **text_fields).order_by().values(
+                "id", "business_id", "invoice_number", "month_key", *(f"check_{kind}" for kind in KINDS), *text_fields)
+            sql, params = bills.query.sql_with_params()
+            queries.append(sql)
+            parameters.extend(params)
+        kinds = " UNION ALL ".join(f"SELECT {i} AS kind" for i in range(len(KINDS)))
+        flags = "CASE kinds.kind " + " ".join(f'WHEN {i} THEN "check_{kind}"' for i, kind in enumerate(KINDS)) + " END"
+        words = ("CASE kinds.kind " + " ".join(f'WHEN {i} THEN "text_{kind}"' for i, kind in enumerate(KINDS)) + " END") if include_text else "''"
+        # Both supported databases implement materialized CTEs and window functions.
+        sql = f"""SELECT * FROM (
+            WITH checked AS MATERIALIZED ({' UNION ALL '.join(queries)}),
+            hits AS MATERIALIZED (
+                SELECT business_id, month_key, id, LOWER(invoice_number) AS number_key,
+                       kinds.kind, {words} AS words
+                FROM checked CROSS JOIN ({kinds}) kinds WHERE {flags}
+            ), totals AS (
+                SELECT business_id, month_key, COUNT(DISTINCT id) AS bills
+                FROM hits GROUP BY business_id, month_key
+            ), counts AS (
+                SELECT business_id, month_key, kind,
+                       COUNT(DISTINCT CASE WHEN kind = 0 THEN number_key ELSE CAST(id AS TEXT) END) AS n
+                FROM hits GROUP BY business_id, month_key, kind
+            ), witnesses AS (
+                SELECT business_id, month_key, kind, words,
+                       ROW_NUMBER() OVER (PARTITION BY business_id, month_key, kind ORDER BY words) AS place
+                FROM (SELECT DISTINCT business_id, month_key, kind, words FROM hits) distinct_words
+            )
+            SELECT c.business_id, c.month_key, c.kind, c.n, t.bills,
+                   MAX(CASE WHEN w.place = 1 THEN w.words END), MAX(CASE WHEN w.place = 2 THEN w.words END)
+            FROM counts c JOIN totals t ON t.business_id = c.business_id AND t.month_key = c.month_key
+            JOIN witnesses w ON w.business_id = c.business_id AND w.month_key = c.month_key AND w.kind = c.kind AND w.place <= 2
+            GROUP BY c.business_id, c.month_key, c.kind, c.n, t.bills
+            ORDER BY c.business_id, c.month_key, c.kind
+        ) grouped_checks"""
+        with connection.cursor() as cursor:
+            cursor.execute(sql, parameters)
+            for bid, month, _kind, count, bills, first, second in cursor.fetchall():
+                label = month.strftime("%Y-%m") if hasattr(month, "strftime") else str(month)[:7]
+                result = out[bid, label]
+                result["count"] += count
+                result["bills"] = bills
+                result["first_two"] = (result["first_two"] + [text for text in (first, second) if text])[:2]
     return out
 
 

@@ -107,3 +107,41 @@ def test_bulk_first_two_includes_two_bills_failing_the_same_check():
     sale(b, c, "2", date(2026, 9, 2), line(hsn=""))
     summary = gstr1_blockers([b.pk], ["2026-09"])[b.pk, "2026-09"]
     assert summary["first_two"] == ["1: a line has no HSN code", "2: a line has no HSN code"]
+
+
+def test_many_months_bound_statement_size_and_keep_each_firms_witnesses():
+    """A CA range must not multiply the large checker into one unbounded SQL statement."""
+    first, second, customer = firm("FIRST"), firm("SECOND"), buyer()
+    months = [f"2025-{m:02d}" for m in range(4, 13)] + [f"2026-{m:02d}" for m in range(1, 5)]
+    sale(first, customer, "MISSING", date(2025, 4, 1), line(hsn=""))
+    sale(first, customer, "SECOND", date(2025, 4, 2), line(hsn=""))
+    sale(second, customer, "OK", date(2026, 4, 1))
+    sale(second, customer, "CANCELLED", date(2026, 4, 2), line(hsn=""), status="cancelled")
+    sizes = []
+
+    def measure(execute, sql, params, many, context):
+        sizes.append(len(sql))
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(measure):
+        gstr1_blockers([first.pk, second.pk], [months[0]])
+    one_month_size = max(sizes)
+
+    def bounded(execute, sql, params, many, context):
+        assert len(sql) <= 4 * one_month_size, "Checker SQL must stay bounded as the report range grows"
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(bounded), CaptureQueriesContext(connection) as queries:
+        result = gstr1_blockers([first.pk, second.pk], months)
+    assert len(queries) == 1  # Two FYs share a bounded statement; never one query per firm/month.
+    assert len(result) == 2 * len(months)
+    assert result.pop((first.pk, "2025-04")) == {
+        "count": 2, "bills": 2, "first_two": ["MISSING: a line has no HSN code", "SECOND: a line has no HSN code"],
+    }
+    assert all(row == {"count": 0, "bills": 0, "first_two": []} for row in result.values())
+    long_range = months + [f"{year}-04" for year in (2027, 2028, 2029)]
+    with connection.execute_wrapper(bounded), CaptureQueriesContext(connection) as queries:
+        extended = gstr1_blockers([first.pk, second.pk], long_range)
+    assert len(queries) == 3  # Five FYs remain bounded to two per statement.
+    assert len(extended) == 2 * len(long_range)
+    assert extended[first.pk, "2025-04"]["count"] == 2

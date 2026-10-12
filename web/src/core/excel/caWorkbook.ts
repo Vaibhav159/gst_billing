@@ -11,7 +11,7 @@ export interface CaWorkbook {
     firm: { id: number; name: string; gst_number: string };
     months: { month: string; sales: WorkbookSection; purchases: WorkbookSection }[];
     gstr1: { month: string; stage: string; sections: WorkbookRecord }[];
-    gstr3b: { month: string; stage: string; tables: WorkbookRecord; filing: WorkbookRecord | null }[];
+    gstr3b: { month: string; stage: string; tables: WorkbookRecord | null; filing: WorkbookRecord | null }[];
     amendments: WorkbookRecord[];
   }[];
 }
@@ -59,6 +59,10 @@ function gstr1Rows(rows: Row[], firm: string, value: CaWorkbook["firms"][number]
 
 function gstr3bRows(rows: Row[], firm: string, value: CaWorkbook["firms"][number]["gstr3b"][number]) {
   const data = value.tables;
+  if (data === null) {
+    rows.push(band(`${firm} · ${value.month}`, 12), { kind: "sub", cells: [{ v: "Before the app's credit ledger (it starts April 2025).", span: 12 }] });
+    return;
+  }
   rows.push(band(`${firm} · ${value.month} · ${value.stage === "filed" ? "Filed" : "To file"}`, 12));
   if (value.filing) table(rows, "Filing record", [value.filing], [["Filed on", "filed_on"], ["ARN", "arn"], ["Recorded by", "marked_by.name"], ["Recorded at", "marked_at"], ["Cash paid", "cash.total", true], ["Cash worked out", "cash_worked_out.total", true], ["Late fee", "late_fee", true], ["Interest", "interest", true]]);
   // These four rows are fixed zero by design 3-D7; every other figure is supplied by the server.

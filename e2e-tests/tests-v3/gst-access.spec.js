@@ -43,7 +43,15 @@ async function discover(api) {
   return { ready, filed, unlocked };
 }
 async function open(page, m) {
+  const loaded = Promise.all(["gst/year/", "gst/month/", "gst/month/gstr3b/"].map(path =>
+    page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === `/api/${path}` && response.request().method() === "GET"
+        && url.searchParams.get("business_id") === String(m.business)
+        && (path === "gst/year/" ? url.searchParams.get("fy") === m.fy : url.searchParams.get("month") === m.month);
+    })));
   await page.goto(`/gst?${new URLSearchParams({ firm: String(m.business), month: m.month, fy: m.fy })}`);
+  for (const response of await loaded) expect(response.status(), new URL(response.url()).pathname).toBe(200);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.locator("#gst-ledger")).toBeVisible();
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
@@ -61,6 +69,13 @@ for (const role of ["owner", "accountant", "staff", "viewer"]) {
     const api = await liveApi(page);
     expect((await api.get("me/")).role).toBe(role);
     const data = await discover(api), filer = ["owner", "accountant"].includes(role);
+    // Every role can read the GST support screens and export reports, including the CA workbook.
+    for (const path of ["gst/credit/", "gst/reconciliation/"]) {
+      await api.get(path, { business_id: data.ready.business, fy: data.ready.fy });
+    }
+    for (const kind of ["sales", "purchases", "tax", "hsn", "customers", "products", "months", "ca-workbook"]) {
+      await api.get(`reports/${kind}/`, { from: "2022-04-01", to: today() });
+    }
     await open(page, data.ready);
     const mark = page.getByRole("button", { name: "Mark GSTR-1 filed…", exact: true });
     const file = page.getByRole("button", { name: "GSTR-3B file", exact: true });

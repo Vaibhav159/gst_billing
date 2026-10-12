@@ -587,3 +587,33 @@ test.describe("signed out", () => {
     expect(await problems(page)).toEqual([]);
   });
 });
+
+
+for (const theme of ["obsidian", "pearl"]) {
+  for (const screen of ["reports", "credit", "reconciliation"]) {
+    test(`no WCAG 2.2 AA problems: GST support ${screen} in ${theme} (desktop and phone)`, async ({ page, request }) => {
+      test.slow();
+      const api = client(request);
+      const businesses = await api.get("businesses/", { page_size: 100 });
+      const firm = (Array.isArray(businesses) ? businesses : businesses.results)[0];
+      expect(firm, "GST support needs a seeded firm").toBeTruthy();
+      const [year, month] = today().split("-").map(Number), start = year - (month < 4 ? 1 : 0);
+      const fy = `${start}-${String(start + 1).slice(-2)}`;
+      const path = screen === "reports" ? "/reports/sales" : `/gst?tab=${screen === "credit" ? "credit" : "recon"}&firm=${firm.id}&fy=${fy}`;
+      const endpoint = screen === "reports" ? "/api/reports/sales/" : `/api/gst/${screen}/`;
+      const response = page.waitForResponse(r => new URL(r.url()).pathname === endpoint && r.request().method() === "GET");
+      await openIn(page, theme, path, screen === "reports" ? "/reports/sales" : "/gst");
+      const reply = await response;
+      expect(reply.status()).toBe(200);
+      if (screen === "reports") await expect(page.getByRole("region", { name: "Download this report" })).toBeVisible();
+      else if (screen === "credit") await expect(page.getByRole("region", { name: "Credit carried into FY 2025-26", exact: true })).toBeVisible();
+      else {
+        const data = await reply.json();
+        if (data.filed.some(m => m.books.bills > 0 || (m.gstr1?.bills ?? 0) > 0)) {
+          await expect(page.getByRole("radiogroup", { name: "Figure to compare" })).toBeVisible();
+        } else await expect(page.getByText(`No sales for ${firm.name} in FY ${fy}`)).toBeVisible();
+      }
+      expect(await measure(page)).toEqual([]);
+    });
+  }
+}

@@ -64,10 +64,25 @@ test("an empty period still produces Summary and both return sheets", () => {
   expect(workbookSheets(data).map(sheet => sheet.name)).toEqual(["Summary", "GSTR-1", "GSTR-3B"]);
 });
 
+test("historical months without a credit ledger stay explicit in the preview and workbook", async () => {
+  const data = caFixture();
+  data.firms[0].gstr3b.unshift({ month: "2025-03", stage: "before_ledger", tables: null, filing: null });
+  const sheet = workbookSheets(data)[3];
+  const rows = sheet.rows.map(row => row.cells.map(cell => cell.v));
+  expect(rows.slice(0, 2)).toEqual([
+    ["Summary · 2025-03"],
+    ["Before the app's credit ledger (it starts April 2025)."],
+  ]);
+  expect(rows[2]).toEqual(["Summary · 2026-09 · Filed"]);
+  const back = XLSX.read(await bytesOf(await workbookBlob(data)), { type: "array" });
+  const downloaded = XLSX.utils.sheet_to_json<(string | number)[]>(back.Sheets["GSTR-3B"], { header: 1 });
+  expect(downloaded.slice(0, 2).map(row => row[0])).toEqual(rows.slice(0, 2).map(row => row[0]));
+});
+
 test("late estimates use the nested contract shape and unlocked books are marked To file", () => {
   const data = caFixture();
   const month = data.firms[0].gstr3b[0]; month.stage = "unlocked";
-  month.tables.late = { gstr1: { days: 3, per_day: "50.00", fee: "150.00", cap: "5000.00", capped: false }, gstr3b: { days: 0, per_day: "50.00", fee: "0.00", cap: "5000.00", capped: false }, interest: "0.00", interest_on: "1509.50", interest_from: "2026-10-21", total: "150.00" };
+  month.tables!.late = { gstr1: { days: 3, per_day: "50.00", fee: "150.00", cap: "5000.00", capped: false }, gstr3b: { days: 0, per_day: "50.00", fee: "0.00", cap: "5000.00", capped: false }, interest: "0.00", interest_on: "1509.50", interest_from: "2026-10-21", total: "150.00" };
   const values = workbookSheets(data)[3].rows.flatMap(row => row.cells.map(cell => cell.v));
   expect(values).toEqual(expect.arrayContaining(["Summary · 2026-09 · To file", "150.00", "5000.00", "2026-10-21", "Owner"]));
 });
@@ -75,17 +90,17 @@ test("late estimates use the nested contract shape and unlocked books are marked
 test("3A's notes reach the GSTR-3B sheet and recorded charges are not called an estimate", () => {
   const data = caFixture();
   const month = data.firms[0].gstr3b[0];
-  month.tables.t5_note = "Includes purchases from unregistered suppliers with no GST charged.";
-  month.tables.reduction_note = "₹0.60 of an earlier correction is taken off next month's tax.";
-  month.tables.late = { gstr1: { days: 0, per_day: "50.00", fee: "0.00", cap: "5000.00", capped: false }, gstr3b: { days: 0, per_day: "50.00", fee: "400.00", cap: "5000.00", capped: false }, interest: "12.50", interest_on: "1509.50", interest_from: "2026-10-21", total: "412.50", recorded: true };
+  month.tables!.t5_note = "Includes purchases from unregistered suppliers with no GST charged.";
+  month.tables!.reduction_note = "₹0.60 of an earlier correction is taken off next month's tax.";
+  month.tables!.late = { gstr1: { days: 0, per_day: "50.00", fee: "0.00", cap: "5000.00", capped: false }, gstr3b: { days: 0, per_day: "50.00", fee: "400.00", cap: "5000.00", capped: false }, interest: "12.50", interest_on: "1509.50", interest_from: "2026-10-21", total: "412.50", recorded: true };
   const values = workbookSheets(data)[3].rows.flatMap(row => row.cells.map(cell => cell.v));
-  expect(values).toEqual(expect.arrayContaining([month.tables.t5_note, month.tables.reduction_note, "Late fee · as recorded", "Late fee and interest · as recorded", "412.50"]));
+  expect(values).toEqual(expect.arrayContaining([month.tables!.t5_note, month.tables!.reduction_note, "Late fee · as recorded", "Late fee and interest · as recorded", "412.50"]));
   expect(values).not.toContain("Late fee · estimate");
 });
 
 test("GSTR-3B has statutory zero tables and preserves cash paid as a total with unknown heads", () => {
   const data = caFixture();
-  data.firms[0].gstr3b[0].tables.cash_paid = { igst: null, cgst: null, sgst: null, total: "1510.00" };
+  data.firms[0].gstr3b[0].tables!.cash_paid = { igst: null, cgst: null, sgst: null, total: "1510.00" };
   const sheet = workbookSheets(data)[3];
   const rows = sheet.rows.map(row => row.cells.map(cell => cell.v));
   for (const label of ["3.1(b) · Zero-rated", "3.1(d) · Reverse charge", "3.1(e) · Non-GST", "3.1.1 · E-commerce supplies"]) {
@@ -142,8 +157,8 @@ test("P3-15 labels live interest beside its figure while keeping recorded filing
   const data = caFixture();
   const month = data.firms[0].gstr3b[0]; month.stage = "unlocked";
   month.filing = { ...month.filing, interest: "9.99" };
-  month.tables.interest_note = "worked out to today; check on the portal";
-  month.tables.late = { gstr1: { days: 0, fee: "0.00" }, gstr3b: { days: 1, fee: "50.00" }, interest: "12.34", interest_on: "1509.50", interest_from: "2026-10-21", total: "62.34" };
+  month.tables!.interest_note = "worked out to today; check on the portal";
+  month.tables!.late = { gstr1: { days: 0, fee: "0.00" }, gstr3b: { days: 1, fee: "50.00" }, interest: "12.34", interest_on: "1509.50", interest_from: "2026-10-21", total: "62.34" };
   const sheet = workbookSheets(data)[3];
   const rows = sheet.rows.map(row => row.cells.map(cell => cell.v));
   const filingHeader = rows.findIndex(row => row[0] === "Filed on");
