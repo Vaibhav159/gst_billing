@@ -11,6 +11,7 @@ import { AuthContext } from "@/core/auth/AuthProvider";
 import { salesServer, wireDetail } from "@/core/sales/fixtures";
 import { Button, Dialog, Page, ToastProvider } from "@/core/ui";
 import Placeholder from "@/pages/core/Placeholder";
+import DashboardPage from "@/pages/core/DashboardPage";
 import CustomerPage from "@/pages/customers/CustomerPage";
 import BillPage from "@/pages/sales/BillPage";
 import PurchaseList from "@/pages/purchases/PurchaseList";
@@ -30,9 +31,9 @@ const all = (routes: RouteObject[]): RouteObject[] => routes.flatMap((r) => [r, 
 const isLazy = (el: unknown) => isValidElement(el) && (el.type as { $$typeof?: symbol }).$$typeof === Symbol.for("react.lazy");
 const route = (path: string) => all(appRoutes).find((r) => r.path === path);
 
-test("home keeps loading up front, so the shell's shown effect cannot mistake its skeleton for home", () => {
+test("the dashboard loads on demand inside the shell's existing page boundary", () => {
   expect(isValidElement(route("/")?.element)).toBe(true);
-  expect(isLazy(route("/")?.element)).toBe(false);
+  expect(isLazy(route("/")?.element)).toBe(true);
 });
 
 /** The whole app at `path` (or `routes` in place of the app's own), signed in as the owner, as App renders it. */
@@ -67,7 +68,8 @@ test("a route still says which screen it opens: a lazy page's loaded component, 
   expect(await loadedPage(route("/sales/:id")?.element)).toBe(BillPage);
   expect(await loadedPage(route("/purchases")?.element)).toBe(PurchaseList);
   expect(await loadedPage(route("/suppliers")?.element)).toBe(SupplierList);
-  expect(await loadedPage(route("/")?.element)).toBe(Placeholder);
+  expect(await loadedPage(route("/")?.element)).toBe(DashboardPage);
+  expect(await loadedPage(<Placeholder area="Easy" part={6} />)).toBe(Placeholder);
   expect(await loadedPage(undefined)).toBeUndefined();
 });
 

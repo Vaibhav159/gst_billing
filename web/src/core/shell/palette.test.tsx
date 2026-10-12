@@ -6,6 +6,8 @@ import { Sun } from "lucide-react";
 import { createMemoryRouter, Route, RouterProvider, Routes, type DataRouter, type RouteObject } from "react-router";
 import { api } from "@/core/api/client";
 import { __setNetState } from "@/core/api/network";
+import { wireDashboard, wireDue } from "@/core/dashboard/fixtures";
+import { wireRates } from "@/core/rates/testing";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { appRoutes } from "@/core/router/routes";
 import { IconButton, Page, ToastProvider } from "@/core/ui";
@@ -22,7 +24,7 @@ const MEENA = {
   invoices: [], products: [],
 };
 // Each test can start cold: compile the records before its clock, without relying on an earlier test opening Search.
-beforeAll(async () => { await paletteCode.load(); });
+beforeAll(async () => { await Promise.all([paletteCode.load(), import("@/pages/core/DashboardPage")]); });
 beforeEach(() => {
   localStorage.clear(); calls.length = 0;
   api.defaults.adapter = ((config) => {
@@ -409,6 +411,7 @@ function serve() {
     : config.url === "setup/" ? { firms: { count: 1, names: ["KIRAN GOLD HOUSE (SANDBOX)"] }, customers: { count: 0, names: [] }, products: { count: 0, names: [] }, bills: { count: 0, cancelled: 0 }, people: 1, last_backup_at: null }
     : config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE (SANDBOX)", gst_number: "08AAAAA0000A1Z5", state_name: "RAJASTHAN" }] }
       : config.url?.startsWith("search/quick/") ? MEENA
+      : config.url === "dashboard/" ? wireDashboard() : config.url === "due-next/" ? wireDue() : config.url === "rates/" ? wireRates()
       : config.url === "customers/duplicates/" ? { groups: [] } : { results: [] })) as AxiosAdapter;
 }
 function inApp(router: DataRouter) {
@@ -528,7 +531,7 @@ test("on a phone only Today carries Search: not Bills, Customers or More, and no
   (window as unknown as { __phone?: boolean }).__phone = true;
   serve();
   const router = inApp(createMemoryRouter(appRoutes, { initialEntries: ["/"] }));
-  let header = (await screen.findByRole("heading", { level: 1, name: "Dashboard" })).closest("header")!;
+  let header = (await screen.findByRole("heading", { level: 1, name: "Today" })).closest("header")!;
   expect(within(header).getByRole("button", { name: "Search customers and bills" })).toBeInTheDocument();
   for (const [path, title] of [["/sales", "Bills"], ["/customers", "Customers"], ["/more", "More"]]) {
     await act(async () => { await router.navigate(path); });

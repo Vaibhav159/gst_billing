@@ -5,6 +5,8 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@/core/api/client";
+import { wireDashboard, wireDue } from "@/core/dashboard/fixtures";
+import { wireRates } from "@/core/rates/testing";
 import { AuthContext } from "@/core/auth/AuthProvider";
 import { ToastProvider } from "@/core/ui";
 import { appRoutes } from "@/core/router/routes";
@@ -29,6 +31,8 @@ import { useKeyboardInset } from "./keyboard";
 import { tabOf } from "./nav";
 
 const auth = stubAuth();
+// These tests hold preferences/network reads, not the dashboard's code download.
+beforeAll(async () => { await import("@/pages/core/DashboardPage"); });
 const SETUP = { firms:{count:0,names:[]}, customers:{count:0,names:[]}, products:{count:0,names:[]}, bills:{count:0,cancelled:0}, people:1, last_backup_at:null };
 
 function mount(path: string, prefs: Record<string, unknown> = {}) {
@@ -97,6 +101,9 @@ function server({ prefs = {}, prefsFail = false, patchFail = false, hold }: { pr
     const answer = (data: unknown) => ({ status: 200, statusText: "", headers: {}, config, data });
     const down = () => Promise.reject(new AxiosError("Network Error", "ERR_NETWORK", config));
     if (config.url === "setup/") return Promise.resolve(answer(SETUP));
+    if (config.url === "dashboard/") return Promise.resolve(answer(wireDashboard()));
+    if (config.url === "due-next/") return Promise.resolve(answer(wireDue()));
+    if (config.url === "rates/") return Promise.resolve(answer(wireRates()));
     if (!config.url?.startsWith("preferences/")) return Promise.resolve(answer(config.url?.startsWith("firms/") ? { results: [{ id: 3, name: "KIRAN GOLD HOUSE", short: "Kiran", gst_number: "", state_name: "" }] } : {}));
     if (config.method === "patch") {
       if (patchFail) return down();
@@ -251,7 +258,7 @@ test("an Expert person's phone isn't sent to Easy while their setting is on its 
   expect(screen.getByRole("status")).toHaveTextContent("Loading the app");
   expect(screen.queryByRole("navigation", { name: /tabs/i })).not.toBeInTheDocument();
   await s.release();
-  expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
   await wait(50);
   expect(router.state.location.pathname).toBe("/");
   expect(screen.queryByRole("link", { name: /back to easy/i })).not.toBeInTheDocument();
@@ -273,14 +280,15 @@ test("offline on a first visit, with no setting kept, a phone shows its Expert h
   act(() => __setNetState("offline"));
   const s = server({ hold: "get" }); // the setting can't come until the internet is back
   const router = open("/");
-  expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: /tabs/i })).toBeInTheDocument();
   expect(router.state.location.pathname).toBe("/");
   expect(s.pending()).toBe(1);
   // back online, the page that stood in stays until the setting arrives and moves the phone on
   act(() => __setNetState("online"));
-  expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
-  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
+  // The page may load its figures; the shell must not replace it with its initial wait.
+  expect(screen.queryByText("Loading the app…")).not.toBeInTheDocument();
   await s.release();
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
 });
@@ -343,7 +351,7 @@ test("when the setting can't be loaded, a phone opens on what today's app chose 
   localStorage.setItem("mobile-mode", "expert");
   const s = server({ prefsFail: true });
   const again = open("/");
-  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+  await screen.findByRole("heading", { level: 1, name: "Today" });
   await waitFor(() => expect(s.calls.some((c) => c.url === "preferences/")).toBe(true));
   await wait(50);
   expect(again.state.location.pathname).toBe("/");
@@ -412,7 +420,7 @@ test("a first sign-in on a phone, its setting slow to come, greets only the home
       expect(heard.said).toEqual([]);
       await s.release();
       await pass(); // deliver React Query's notification before starting the page's clock
-      const name = mode === "easy" ? "Easy" : "Dashboard";
+      const name = mode === "easy" ? "Easy" : "Today";
       const h1 = screen.getByRole("heading", { level: 1, name });
       await pass(89);
       expect(h1, mode).not.toHaveFocus();
@@ -481,7 +489,7 @@ test("Switch to Expert keeps the choice for this person and opens the Expert hom
   afterADoubleTap();
   await userEvent.click(button);
   await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+  await screen.findByRole("heading", { level: 1, name: "Today" });
   expect(s.calls).toContainEqual({ method: "patch", url: "preferences/", body: { phoneMode: "expert" } });
   const tabs = screen.getByRole("navigation", { name: /tabs/i });
   expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
@@ -703,7 +711,7 @@ test("while a phone waits for its setting, the banner still says what's wrong, a
   try {
     act(() => { window.dispatchEvent(new Event("offline")); });
     await screen.findByRole("navigation", { name: /tabs/i });
-    expect(screen.queryByRole("heading", { level: 1, name: "Dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: "Today" })).not.toBeInTheDocument();
     expect(document.querySelectorAll("[role=status][data-offline]")).toHaveLength(1);
     expect(document.querySelector("[data-offline]")!.parentElement).toContainElement(screen.getByRole("navigation", { name: /tabs/i }));
     expect(document.querySelectorAll("#app-main")).toHaveLength(1);

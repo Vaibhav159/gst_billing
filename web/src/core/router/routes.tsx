@@ -43,8 +43,9 @@ const PurchaseFormPage = lazyPage(() => import('@/pages/purchases/form/PurchaseF
 const Reports = lazyPage(() => import("@/pages/reports/Reports"));
 const Audit = lazyPage(() => import("@/pages/records/Audit"));
 const Backup = lazyPage(() => import("@/pages/records/Backup"));
+const DashboardPage = lazyPage(() => import("@/pages/core/DashboardPage"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, paletteCode]);
+const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, DashboardPage, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -59,7 +60,6 @@ export const PARTS: Record<string, { part: number; area: string }> = {
 
 /** Every page in the prototype (PROTO/pages/<area>/index.js) that a later part builds, by area. Sign-in and More are already built (below). */
 const PAGES: Record<string, string[]> = {
-  dashboard: ["/"],
   purchases: [
     "/purchases", "/purchases/new", "/purchases/capture", "/purchases/inbox", "/purchases/inbox/:id", "/purchases/ai-import", "/purchases/:id", "/purchases/:id/edit",
     "/capture", "/import", "/suppliers", "/suppliers/:id",
@@ -123,6 +123,7 @@ export const appRoutes: RouteObject[] = [{
     {
       element: <RequireAuth><AppLayout onShown={warmPages} /></RequireAuth>,
       children: [
+        { path: "/", element: <DashboardPage /> },
         // The screens arrive in 6C–6E; their routes and shared form live here from 6B.
         { path: "/e/new", element: <EasyBillFlow />, handle: { hideNav: true }, children: [
           { index: true, element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },

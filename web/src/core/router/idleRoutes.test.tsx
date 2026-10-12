@@ -7,7 +7,7 @@ import { AuthContext } from "@/core/auth/AuthProvider";
 import { salesServer } from "@/core/sales/fixtures";
 import { paletteCode } from "@/core/shell/Palette";
 import { capturePages } from "@/pages/purchases/capture/routes";
-import { ToastProvider } from "@/core/ui";
+import { Page, ToastProvider } from "@/core/ui";
 import { stubAuth, testQueryClient } from "@/test/render";
 import { appRoutes } from "./routes";
 import { part2dRoutes } from "@/pages/imports/routes";
@@ -23,6 +23,8 @@ vi.mock("./lazyPage", async (real) => {
   return { ...actual, idlePages: (pages: Code[]) => { queues.push(pages); return actual.idlePages(pages); } };
 });
 vi.mock("@react-pdf/renderer", () => { rendererLoaded(); return {}; });
+// This check measures code warm-up only; the real dashboard's reads have their own route test.
+vi.mock("@/pages/core/DashboardPage", () => ({ default: () => <Page title="Today" /> }));
 vi.mock("@/pages/people/ChoosePassword", async () => {
   await passwordCode.pending;
   return { default: () => <h1>Choose your own password</h1> };
@@ -67,10 +69,9 @@ test("the real routes warm every other lazy screen (GST returns, reports, audit 
     expect(rendererLoaded).not.toHaveBeenCalled();
     expect(requestIdle).not.toHaveBeenCalled();
     const tree = () => <QueryClientProvider client={client}><AuthContext.Provider value={stubAuth()}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>;
-    view = render(tree());
-    await act(async () => { await import("./NewShopGate"); });
+    await act(async () => { view = render(tree()); await import("@/pages/core/DashboardPage"); await import("./NewShopGate"); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
     expect(requestIdle).toHaveBeenCalledTimes(1);
     for (const load of loads) expect(load).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
@@ -81,7 +82,7 @@ test("the real routes warm every other lazy screen (GST returns, reports, audit 
     expect(rendererLoaded).not.toHaveBeenCalled();
     expect(calls).toHaveLength(before);
     for (const load of onDemandLoads) expect(load).not.toHaveBeenCalled();
-    view.unmount();
+    view?.unmount();
     view = render(tree());
     expect(requestIdle).toHaveBeenCalledTimes(1);
     for (const load of loads) expect(load).toHaveBeenCalledTimes(1);
