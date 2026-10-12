@@ -2,7 +2,7 @@
 import csv
 from io import StringIO
 
-from django.db.models import CharField, Count, Exists, OuterRef, Q
+from django.db.models import CharField, Count, Q
 from django.db.models.functions import Cast
 from django.http import StreamingHttpResponse
 from django.utils import timezone
@@ -10,10 +10,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.cache import uncached
-from billing.models import AuditLog, BinnedInvoice, Invoice
+from billing.models import AuditLog
 from billing.params import date_param, id_param, text_param
-from billing.services.audit import GROUPS, KIND_ENTITIES, act, entry_row, entry_rows, read_entries
+from billing.services.audit import GROUPS, act, entry_row, entry_rows, kind_filter, read_entries
 from billing.text import person
 
 from .permissions import V3Permission
@@ -22,23 +21,8 @@ from .sales import Pages
 KINDS = ("sales", "purchases", "records", "filing", "admin", "backup")
 
 
-def kind_filter(kind):
-    purchases = Q(entity__in=[entity for entity, match in KIND_ENTITIES.items() if match == "purchases"]) | Q(entity="invoice") & (
-        Q(is_purchase=True) | Q(was_purchase=True) | Q(entity_name__startswith="Purchase ") | Q(action__in=("checked", "credit_set")))
-    if kind == "purchases":
-        return purchases
-    if kind == "sales":
-        return Q(entity="invoice") & ~purchases
-    if kind == "records":
-        return ~Q(entity__in=["invoice", *(entity for entity, match in KIND_ENTITIES.items() if match != "records")])
-    return Q(entity__in=[entity for entity, match in KIND_ENTITIES.items() if match == kind])
-
-
 def filtered(params, with_kind=True):
-    rows = read_entries().annotate(
-        is_purchase=Exists(uncached(Invoice).filter(pk=OuterRef("entity_id"), type_of_invoice="inward")),
-        was_purchase=Exists(BinnedInvoice.objects.filter(original_id=OuterRef("entity_id"), type_of_invoice="inward")),
-    )
+    rows = read_entries()
     kind, group = text_param(params, "kind"), text_param(params, "group")
     if kind and kind not in KINDS:
         raise ValidationError({"kind": ["Pick a kind of change from the list."]})

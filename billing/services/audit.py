@@ -2,7 +2,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, F, OuterRef, Subquery
+from django.db.models import Count, Exists, F, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import NotFound, ValidationError
 
@@ -125,10 +125,24 @@ def _resolve_fk(field, raw_value):
 
 def read_entries():
     used = AuditLog.objects.filter(pk=OuterRef("pk"), snapshot__has_key="_undo")
+    bills = uncached(Invoice).filter(pk=OuterRef("entity_id"))
+    bins = BinnedInvoice.objects.filter(original_id=OuterRef("entity_id"))
+    capture_state = AuditLog.objects.filter(
+        entity="capture", entity_id=OuterRef("entity_id"), action__in=("discarded", "restored"),
+    ).order_by("-timestamp", "-pk").values("action")[:1]
     return AuditLog.objects.select_related("user").only(
         "id", "timestamp", "user_id", "action", "entity", "entity_id", "entity_name", "details", "changes",
         "user__id", "user__username", "user__first_name", "user__last_name",
-    ).annotate(used=Exists(used)).order_by("-timestamp", "-pk")
+    ).annotate(
+        used=Exists(used), has_invoice=Exists(bills),
+        is_purchase=Exists(bills.filter(type_of_invoice="inward")),
+        was_purchase=Exists(bins.filter(type_of_invoice="inward")), in_bin=Exists(bins.live()),
+        has_customer=Exists(uncached(Customer).filter(pk=OuterRef("entity_id"))),
+        has_product=Exists(uncached(Product).filter(pk=OuterRef("entity_id"))),
+        has_business=Exists(uncached(Business).filter(pk=OuterRef("entity_id"))),
+        has_capture=Exists(uncached(InwardCapture).filter(pk=OuterRef("entity_id"))),
+        capture_last_action=Subquery(capture_state),
+    ).order_by("-timestamp", "-pk")
 
 
 def record_for(entry, lock=False):
@@ -158,10 +172,22 @@ def binned_for(entry, full=False):
 def kind_for(entry, obj=None, binned=None):
     if entry.entity == "invoice":
         inward = getattr(obj, "type_of_invoice", None) == "inward" or getattr(binned, "type_of_invoice", None) == "inward"
-        return "purchases" if (inward or entry.action in {"checked", "credit_set"}
-                               or getattr(entry, "is_purchase", False) or getattr(entry, "was_purchase", False)
-                               or entry.entity_name.startswith("Purchase ")) else "sales"
+        return "purchases" if (inward or getattr(entry, "is_purchase", False)
+                               or getattr(entry, "was_purchase", False) or entry.action in {"credit_set", "checked"}) else "sales"
     return KIND_ENTITIES.get(entry.entity, "records")
+
+
+def kind_filter(kind):
+    """The SQL twin of kind_for over read_entries(): live/bin direction decides an invoice, never its name."""
+    purchases = Q(entity__in=[entity for entity, match in KIND_ENTITIES.items() if match == "purchases"]) | Q(entity="invoice") & (
+        Q(is_purchase=True) | Q(was_purchase=True) | Q(action__in=("checked", "credit_set")))
+    if kind == "purchases":
+        return purchases
+    if kind == "sales":
+        return Q(entity="invoice") & ~purchases
+    if kind == "records":
+        return ~Q(entity__in=["invoice", *(entity for entity, match in KIND_ENTITIES.items() if match != "records")])
+    return Q(entity__in=[entity for entity, match in KIND_ENTITIES.items() if match == kind])
 
 
 def event_words(entry, kind, target_present):
@@ -189,6 +215,8 @@ def event_words(entry, kind, target_present):
 
 
 def capture_present(entry):
+    if hasattr(entry, "has_capture"):
+        return entry.has_capture and entry.capture_last_action != "discarded"
     return uncached(InwardCapture).filter(pk=entry.entity_id, discarded_at__isnull=True).exists()
 
 
@@ -463,12 +491,17 @@ def entry_row(entry, actions=True, page=None):
     obj = (page.records.get((entry.entity, entry.entity_id)) if page else record_for(entry)) if actions else None
     binned = (page.bins.get(entry.pk) if page else binned_for(entry)) if actions and entry.entity == "invoice" and obj is None else None
     kind = kind_for(entry, obj, binned)
-    present = (entry.entity_id in page.captures if page else capture_present(entry)) if actions and entry.entity == "capture" else obj is not None
+    if entry.entity == "capture":
+        # actions-free rows read only the annotated current state; a bare entry stays query-free and unlinked
+        present = (entry.entity_id in page.captures if page else capture_present(entry)) if actions else hasattr(entry, "has_capture") and capture_present(entry)
+    else:
+        present = obj is not None or getattr(entry, f"has_{entry.entity}", False)
     words, link = event_words(entry, kind, present)
+    in_bin = entry.entity == "invoice" and not present and (binned is not None or getattr(entry, "in_bin", False))
     result = ("restored" if entry.action == "deleted" else "reverted" if entry.action in {"updated", "reverted"} else "undone") if entry.used else None
     return {"id": entry.pk, "at": stamp(entry.timestamp), "by": person(entry.user), "action": entry.action, "entity": entry.entity,
             "entity_id": entry.entity_id, "kind": kind, "group": GROUPS.get(entry.action, "change"),
-            "words": words, "link": link, "note": "In the bin" if binned else "",
+            "words": words, "link": link, "note": "In the bin" if in_bin else "",
             "details": entry.details, "changes": change_rows(MODEL_MAP.get(entry.entity), entry.changes), "result": result,
             "can": available(entry, obj, binned, page) if actions else None}
 
