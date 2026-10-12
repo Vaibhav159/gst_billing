@@ -78,10 +78,11 @@ it("shows phone cards, includes split only when requested and opens the permitte
   fireEvent.click(screen.getByRole("button", { name: "Excel with the working" }));
   expect(screen.getByText("Preview · gst.download")).toBeInTheDocument();
 });
-it("does not grant reconciliation downloads to a viewer who can export reports", async () => {
+it.each([false, true])("hides reconciliation downloads from a viewer on phone=%s", async (phone) => {
+  Object.assign(window, { __phone: phone });
   serve({ "GET gst/reconciliation/": wire }); renderApp(<ReconView businessId={3} fy="2026-27" />, { me: { role: "viewer", permissions: ["view", "reports.export"] } });
   await screen.findByText("1 month differs from the return as filed");
-  expect(screen.getByRole("button", { name: "Excel with the working" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Excel with the working" })).not.toBeInTheDocument();
 });
 it("shows no-sales words only after a successful empty reply", async () => {
   serve({ "GET gst/reconciliation/": { ...wire, filed: [], periods: [], sections: [], split: [], checks: [], differs: [], failing: 0, roundings: 0 } }); renderApp(<ReconView businessId={3} fy="2026-27" />);
@@ -123,4 +124,12 @@ it("shows the phone notes under each month rather than pairing them with a Bills
   await screen.findByText("1 month differs from the return as filed");
   expect(screen.queryAllByText("Bills", { selector: "dt" })).toHaveLength(0);
   expect(screen.getByRole("link", { name: "Open Sep" })).toBeInTheDocument();
+});
+
+it("keeps the staff download control disabled with its reason", async () => {
+  serve({ "GET gst/reconciliation/": wire });
+  renderApp(<ReconView businessId={3} fy="2026-27" />, { me: { role: "staff", permissions: ["view", "reports.export"] } });
+  const button = await screen.findByRole("button", { name: "Excel with the working" });
+  expect(button).toBeDisabled();
+  expect(button.getAttribute("title")).toBeTruthy();
 });
