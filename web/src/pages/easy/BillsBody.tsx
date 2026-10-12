@@ -31,7 +31,7 @@ export function BillsBody({ firmId, renderRows, useBills }: BillsBodyProps) {
   const [withLast, setWithLast] = useState(params.get("last") === "1" || (!params.has("last") && ["04", "05"].includes(today.slice(5, 7))));
   const term = useDebounced(q.trim(), 300);
   const bills = useBills(firmId, { when, q: term, lastYear: withLast }, today);
-  const first = bills.data?.pages[0];
+  const first = bills.isPlaceholderData ? undefined : bills.data?.pages[0];
   const change = (key: string, value: string) => setParams((old) => { const next = new URLSearchParams(old); if (value) next.set(key, value); else next.delete(key); return next; }, { replace: true });
   const label = term ? `Bills for “${term}”` : when === "today" ? "Today" : when === "month" ? `${monthLabel(ym, { long: true, year: false })} so far` : "This year";
   const sub = term ? `${withLast ? `FY ${fy} and ${lastFy}` : `FY ${fy}`}, newest first` : when === "today" ? dateLong(today) : when === "month" ? rangeLabel(`${ym}-01`, today) : `${rangeLabel(start, today)} · FY ${fy}`;
@@ -50,6 +50,7 @@ export function BillsBody({ firmId, renderRows, useBills }: BillsBodyProps) {
       </div>
       <QueryView query={bills} what="the bill list" skeleton={<div className="flex flex-col gap-3"><Skeleton w="70%" h={26} /><ListSkeleton rows={4} what="sales bills" /></div>}>
         {(data) => {
+          if (bills.isPlaceholderData) return <ListSkeleton rows={4} what="sales bills" />;
           const page = data.pages[0];
           const rows = rowsOf(data).slice(0, 40);
           return <>

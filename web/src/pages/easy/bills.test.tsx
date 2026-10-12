@@ -52,6 +52,34 @@ test("month and FY filters use today's IST year and never the full view's year",
   await waitFor(() => expect(calls.at(-1)?.params).toEqual({ business_id: 3, fy: "2026-27", ordering: "-date", page: 1, page_size: 40 }));
 });
 
+test.each([
+  ["This month", "October so far", { month: "2026-10" }],
+  ["This year", "This year", { fy: "2026-27" }],
+] as const)("%s withholds the previous period's money and rows until its answer arrives", async (period, heading, filter) => {
+  const todayRow = wireRow({ total_amount: "100.00" });
+  const olderRow = wireRow({ id: 413, total_amount: "200.50", invoice_date: "2026-10-01", customer: { id: 8, name: "Rekha Jain", type: "person", mobile_number: "9829041123", gst_number: "" } });
+  let finish!: (page: ReturnType<typeof wirePage>) => void;
+  const pending = new Promise<ReturnType<typeof wirePage>>((resolve) => { finish = resolve; });
+  const { calls } = salesServer([["GET", "sales/", ({ params }) => params.month || params.fy ? pending : wirePage([todayRow])]]);
+  renderApp(<BillsBody useBills={useTestBills} firmId={3} renderRows={rows} />, { path: "/e/bills" });
+  expect(await screen.findByRole("heading", { name: /Today: 1 bill/ })).toHaveTextContent("₹100.00");
+  expect(screen.getByRole("link", { name: "Anil Gupta" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("radio", { name: period }));
+  await waitFor(() => expect(calls.at(-1)?.params).toMatchObject(filter));
+  expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+  expect(screen.queryByText("₹100.00")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Anil Gupta" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Rekha Jain" })).not.toBeInTheDocument();
+  expect(screen.getByText("Loading sales bills…")).toBeInTheDocument();
+
+  await act(async () => { finish(wirePage([todayRow, olderRow])); });
+  expect(await screen.findByRole("heading", { name: new RegExp(`${heading}: 2 bills`) })).toHaveTextContent("₹300.50");
+  expect(screen.getByRole("link", { name: "Anil Gupta" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Rekha Jain" })).toBeInTheDocument();
+  expect(screen.queryByText("Loading sales bills…")).not.toBeInTheDocument();
+});
+
 test("numeric search stays as typed for server ranking and includes last FY only when ticked", async () => {
   const { calls } = salesServer([["GET", "sales/", () => wirePage([])]]);
   renderApp(<BillsBody useBills={useTestBills} firmId={3} renderRows={rows} />, { path: "/e/bills?q=031" });
