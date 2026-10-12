@@ -15,7 +15,8 @@ function toEffect(e: OpeningEffectValue<string>): OpeningEffect {
 function toCredit(c: CreditValue<string>): Credit {
   return { ...c, at_risk: { ...c.at_risk, tax: toPaise(c.at_risk.tax)!, bills: c.at_risk.bills.map(b => ({ ...b, tax: toPaise(b.tax)! })) },
     buckets: { ...c.buckets, claimed: { ...c.buckets.claimed, tax: toPaise(c.buckets.claimed.tax)! },
-      open: { ...c.buckets.open, tax: toPaise(c.buckets.open.tax)! }, lapsed: { ...c.buckets.lapsed, tax: toPaise(c.buckets.lapsed.tax)! } },
+      open: { ...c.buckets.open, tax: toPaise(c.buckets.open.tax)! }, lapsed: { ...c.buckets.lapsed, tax: toPaise(c.buckets.lapsed.tax)! },
+      before_ledger: { ...c.buckets.before_ledger, tax: toPaise(c.buckets.before_ledger.tax)! } },
     opening: toOpeningCredit(c.opening) };
 }
 function openingBody(input: OpeningInput) {

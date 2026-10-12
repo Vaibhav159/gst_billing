@@ -15,7 +15,9 @@ function setup() {
 describe("GST credit wire boundary", () => {
   it.each(["2025-06", null])("preserves first_filed_3b=%s, requests the picked firm and FY, and converts money once", async first_filed_3b => {
     const opening = { ...openingWire, first_filed_3b };
-    const calls = serve({ "GET gst/credit/": { ...creditWire, opening }, "GET gst/opening-credit/": opening });
+    const calls = serve({ "GET gst/credit/": { ...creditWire, opening,
+      buckets: { ...creditWire.buckets, before_ledger: { count: 2, tax: "1234.56" } },
+    }, "GET gst/opening-credit/": opening });
     const { wrapper } = setup();
     const { result } = renderHook(() => ({ credit: useGstCredit(3, "2026-27"), opening: useOpeningCredit(3) }), { wrapper });
     await waitFor(() => expect(result.current.credit.isSuccess && result.current.opening.isSuccess).toBe(true));
@@ -25,6 +27,7 @@ describe("GST credit wire boundary", () => {
     expect(d.buckets.claimed.tax).toBe(12567890);
     expect(d.buckets.open.tax).toBe(90240);
     expect(d.buckets.lapsed.tax).toBe(0);
+    expect(d.buckets.before_ledger).toEqual({ count: 2, tax: 123456 });
     expect(d.opening.total).toBe(1900000);
     expect(d.opening.carried_out_of_first_month.heads).toEqual({ igst: 0, cgst: 800000, sgst: 800000 });
     expect(result.current.opening.data?.cgst).toBe(950000);

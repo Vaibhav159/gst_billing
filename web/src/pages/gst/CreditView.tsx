@@ -107,6 +107,7 @@ function BucketsCard({ data, firmName }: { data: Credit; firmName: string }) {
       <Money value={b[c.key].tax} size="xl" className={b[c.key].bills ? "" : "text-muted"} />
       <span className="text-sm text-muted">{plural(b[c.key].bills, "purchase bill")}{c.sub ? ` · ${c.sub}` : ""}</span>
     </div>)}</div>
+    {b.before_ledger.count ? <p className="text-sm text-muted mt-4">Before the app's ledger (April 2025): {inr(b.before_ledger.tax)}. This credit is in your opening balance, or it has lapsed. · {plural(b.before_ledger.count, "purchase bill")}</p> : null}
     {b.none.length ? <p className="text-sm text-muted mt-4">No credit on {plural(b.none.length, "bill")}: {b.none.map(p => `${p.supplier_name} (${p.bill_no}, ${{ no_gstin: "no GSTIN", no_gst: "no GST charged", not_allowed: "credit not allowed" }[p.why]})`).join("; ")}.</p> : null}
   </Card>;
 }

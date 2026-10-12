@@ -12,6 +12,23 @@ function Location() { const l = useLocation(); return <output aria-label="Locati
 afterEach(() => { cleanup(); vi.restoreAllMocks(); (window as unknown as { __phone: boolean }).__phone = false; });
 
 describe("Credit and deadlines", () => {
+  it.each([false, true])("shows credit before the ledger on its own line with its count (phone=%s)", async phone => {
+    (window as unknown as { __phone: boolean }).__phone = phone;
+    serve({ "GET businesses/": firms, "GET gst/credit/": { ...creditWire, fy: "2024-25",
+      at_risk: { deadline: null, days_left: null, tax: "0.00", count: 0, bills: [] }, others_at_risk: [],
+      buckets: { ...creditWire.buckets, fy: "2024-25", deadline: "2025-11-30", days_left: -312,
+        claimed: { bills: 0, tax: "0.00" }, open: { bills: 0, tax: "0.00" }, lapsed: { bills: 0, tax: "0.00" },
+        before_ledger: { count: 2, tax: "1234.56" }, none: [],
+      },
+    } });
+    renderApp(<CreditView businessId={3} fy="2024-25" />);
+    const card = await screen.findByRole("region", { name: "Credit on FY 2024-25 purchase bills" });
+    const line = within(card).getByText(/Before the app's ledger/);
+    expect(line).toHaveTextContent("Before the app's ledger (April 2025): ₹1,234.56. This credit is in your opening balance, or it has lapsed.");
+    expect(line).toHaveTextContent("2 purchase bills");
+    expect(within(card).getByText(/nothing lapsed/)).toBeVisible();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
   it("ports the server's deadline, bill and bucket figures and opening anchor", async () => {
     serve({ "GET businesses/": firms, "GET gst/credit/": creditWire });
     renderApp(<CreditView businessId={3} fy="2026-27" />);

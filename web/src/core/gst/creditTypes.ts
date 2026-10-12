@@ -22,6 +22,7 @@ export type CreditValue<M> = {
   buckets: {
     fy: string; deadline: string; days_left: number;
     claimed: { bills: number; tax: M }; open: { bills: number; tax: M }; lapsed: { bills: number; tax: M };
+    before_ledger: { count: number; tax: M };
     none: { id: number; bill_no: string; supplier_name: string; why: "no_gstin" | "no_gst" | "not_allowed" }[];
   };
   opening: OpeningCreditValue<M>;

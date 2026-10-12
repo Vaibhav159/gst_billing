@@ -24,6 +24,7 @@ export const creditWire = {
   others_at_risk: [{ business: 1, short: "Meera", count: 1 }],
   buckets: { fy: "2026-27", deadline: "2027-11-30", days_left: 418,
     claimed: { bills: 140, tax: "125678.90" }, open: { bills: 1, tax: "902.40" }, lapsed: { bills: 0, tax: "0.00" },
+    before_ledger: { count: 0, tax: "0.00" },
     none: [{ id: 88, bill_no: "XYZ/18", supplier_name: "Local Supplier", why: "not_allowed" as const }],
   },
   opening: openingWire,
