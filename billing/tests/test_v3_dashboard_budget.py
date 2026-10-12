@@ -35,7 +35,8 @@ def wire_bytes():
         def __getattr__(self, name):
             return getattr(self.raw, name)
         def execute(self, sql, params=None):
-            self.read = sql.lstrip().upper().startswith(("SELECT", "WITH"))
+            # Postgres wraps each side of a UNION in parentheses, so "(SELECT" is a read too.
+            self.read = sql.lstrip().lstrip("(").upper().startswith(("SELECT", "WITH"))
             if self.read:
                 seen["queries"] += 1
                 seen["sql"].append(sql)
