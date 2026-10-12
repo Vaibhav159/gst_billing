@@ -110,7 +110,7 @@ case "$cmd" in
         # existing users keep their passwords, and the logins file is the only copy.
         # Every part's sample data (pre-flight P2-6/P6-8): add each new part flag here.
         tmp="$(mktemp "$ENV_DIR/logins.XXXXXX")"
-        if dc exec -T web python manage.py seed_sandbox "${flag[@]}" --purchases-v3 --gst --easy --print-credentials > "$tmp"; then
+        if dc exec -T --user app web python manage.py seed_sandbox "${flag[@]}" --purchases-v3 --gst --easy --print-credentials > "$tmp"; then
             mv "$tmp" "$LOGINS_FILE"
             echo "Sandbox logins written to $LOGINS_FILE (0600)."
         else
@@ -121,7 +121,7 @@ case "$cmd" in
         ;;
     manage)
         need_env
-        dc exec web python manage.py "$@"
+        dc exec --user app web python manage.py "$@"
         ;;
     ps)      need_env; dc --profile dev ps ;;
     logs)    need_env; dc --profile dev logs --tail=200 "$@" ;;
