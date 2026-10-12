@@ -147,6 +147,10 @@ def test_session_audit_keeps_user_id_and_only_the_affected_session_uuids(mode):
             expected = "Signed out on this device · legacy sign-in (no session)"
             affected = []
     assert response.status_code in {200, 204}
+    if mode == "zero":
+        assert not AuditLog.objects.filter(entity="session", action="signedout").exists()
+        assert SignInSession.objects.get(pk=current).signed_out_at is None
+        return
     entry = AuditLog.objects.get(entity="session", action="signedout")
     assert entry.entity_id == user.pk and isinstance(entry.entity_id, int)
     assert entry.entity_name == "maya"

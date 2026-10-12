@@ -80,6 +80,25 @@ class PeopleTest(TestCase):
                 "role": "staff", "usual_firm": self.firm.pk, "password": "Indigo83724"}
         return self.client.post("/api/people/", {**body, **changes}, format="json")
 
+    def test_v2_create_requires_the_shared_password_rules(self):
+        Group.objects.get_or_create(name="viewer")
+        response = self.client.post("/api/users/", {"username": "maya", "password": "UnusualPhrase", "role": "viewer"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("letters and at least one number", str(response.data))
+        self.assertFalse(User.objects.filter(username="maya").exists())
+
+    def test_v2_create_refuses_case_insensitive_username_collision(self):
+        person("maya", "viewer")
+        response = self.client.post("/api/users/", {"username": "Maya", "password": "Indigo83724", "role": "viewer"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(User.objects.filter(username__iexact="maya").count(), 1)
+
+    def test_v2_created_person_must_choose_their_password(self):
+        Group.objects.get_or_create(name="viewer")
+        response = self.client.post("/api/users/", {"username": "maya", "password": "Indigo83724", "role": "viewer"}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(User.objects.get(pk=response.data["id"]).security.must_change_password)
+
     def test_owner_set_password_must_differ_from_the_existing_password(self):
         self.staff.set_password("Indigo83724")
         self.staff.save(update_fields=["password"])

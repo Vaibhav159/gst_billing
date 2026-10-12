@@ -3302,6 +3302,8 @@ class UserManagementView(APIView):
     def post(self, request):
         """Create a new user with a role."""
         from django.contrib.auth.models import Group, User
+
+        from billing.services.accounts import security_for, validate_password
         username = request.data.get("username", "").strip()
         password = request.data.get("password", "")
         email = request.data.get("email", "")
@@ -3312,17 +3314,17 @@ class UserManagementView(APIView):
         if not username or not password:
             return Response({"error": "Username and password required"}, status=400)
 
-        if User.objects.filter(username=username).exists():
+        if User.objects.filter(username__iexact=username).exists():
             return Response({"error": f"User '{username}' already exists"}, status=400)
 
         if role not in ("admin", "editor", "viewer"):
             return Response({"error": "Role must be admin, editor, or viewer"}, status=400)
 
-        problem = _password_problem(
-            password, User(username=username, email=email, first_name=first_name, last_name=last_name)
-        )
+        candidate = User(username=username, email=email, first_name=first_name, last_name=last_name)
+        problem = _password_problem(password, candidate)
         if problem:
             return Response({"error": problem}, status=400)
+        validate_password(password, candidate)
 
         user = User.objects.create_user(
             username=username, password=password, email=email,
@@ -3330,6 +3332,9 @@ class UserManagementView(APIView):
         )
         group = Group.objects.get(name=role)
         user.groups.add(group)
+        security = security_for(user)
+        security.must_change_password = True
+        security.save(update_fields=["must_change_password"])
 
         return Response({
             "id": user.id,

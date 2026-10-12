@@ -7,12 +7,12 @@ import { usePrivateMutation, type TokenPair, type Detail } from "./auth";
 export type AccountProfile = { id: number; username: string; first_name: string; last_name: string; email: string; role: Role; role_label: string; usual_firm: {id:number; name:string; short:string} | null; phone: string | null; phone_allowed: boolean; sms_reset: boolean; must_change_password: boolean };
 export type Profile = AccountProfile;
 export type Session = { id: string; device: string; created_at: string; last_used_at: string; current: boolean };
-export type ProfileInput = Pick<AccountProfile, "first_name" | "last_name" | "email"> & { phone?: string };
+export type ProfileInput = Pick<AccountProfile, "first_name" | "last_name" | "email"> & { phone?: string; current?: string };
 export type PasswordAnswer = TokenPair & Detail & { changed_at: string; requestAccess: string | null };
 export function useProfile() { return useQuery({ queryKey: ["account"], queryFn: async ({ signal }) => (await api.get<AccountProfile>("account/", { signal })).data }); }
 export function useSaveProfile() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (input: ProfileInput) => {
+  return usePrivateMutation(async (input: ProfileInput) => {
     const before = getTokens().access;
     const response = await api.patch<AccountProfile>("account/", input, before ? { headers: { Authorization: `Bearer ${before}` } } : undefined);
     // The successful retry may carry a refreshed legacy token with no sid.
@@ -20,10 +20,10 @@ export function useSaveProfile() {
     const current = getTokens().access;
     if (sent === current || sameTokenSession(sent, current)) {
       qc.setQueryData(["account"], response.data);
-      await Promise.all([qc.invalidateQueries({ queryKey: ["people"] }), qc.invalidateQueries({ queryKey: ["audit"] })]);
+      await Promise.all([qc.invalidateQueries({ queryKey: ["people"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["account", "sessions"] })]);
     }
     return response.data;
-  } });
+  });
 }
 export function useChangePassword() {
   const qc = useQueryClient();

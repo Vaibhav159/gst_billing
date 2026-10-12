@@ -8,9 +8,10 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import UntypedToken
 
-from billing.cache import uncached
+from billing.cache import invalidate, uncached
 from billing.models import PasswordResetCode, SignInSession
 from billing.services.accounts import security_for
 
@@ -47,6 +48,9 @@ class SessionTokenObtainSerializer(CustomTokenObtainPairSerializer):
             raise AuthenticationFailed({"detail": f"The owner has stopped @{user.username} signing in. Ask the owner.", "code": "stopped"})
         security_for(user)
         now = timezone.now()
+        if uncached(SignInSession).filter(signed_out_at__isnull=True,
+                last_used_at__lt=now - jwt_settings.REFRESH_TOKEN_LIFETIME).update(signed_out_at=now, ended_how="expired"):
+            invalidate(SignInSession)
         cutoff = now - timedelta(days=90)
         uncached(SignInSession).filter(signed_out_at__lt=cutoff).delete()
         uncached(PasswordResetCode).filter(Q(used_at__lt=cutoff) | Q(expires_at__lt=cutoff)).delete()
@@ -71,7 +75,6 @@ class SessionTokenRefreshSerializer(TokenRefreshSerializer):
                 device=device_name(self.context["request"].META.get("HTTP_USER_AGENT", "")))
             token["sid"] = str(session.pk)
             token["issued"] = micros(timezone.now())
-        from rest_framework_simplejwt.settings import api_settings as jwt_settings
         result = {"access": str(token.access_token)}
         if jwt_settings.ROTATE_REFRESH_TOKENS:
             if jwt_settings.BLACKLIST_AFTER_ROTATION:

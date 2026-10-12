@@ -28,17 +28,20 @@ function ProfileBody({ person }: { person: AccountProfile }) {
   const [last, setLast] = useState(person.last_name);
   const [email, setEmail] = useState(person.email);
   const [phone, setPhone] = useState(person.phone ?? "");
+  const [current, setCurrent] = useState("");
   const [tried, setTried] = useState(false);
   const [problem, setProblem] = useState<ApiProblem | null>(null);
   const [saved, setSaved] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [passwordDirty, setPasswordDirty] = useState(false);
-  const changed = first.trim() !== person.first_name || last.trim() !== person.last_name || email.trim() !== person.email || (person.phone_allowed && mobileDigits(phone) !== (person.phone ?? ""));
+  const phoneChanged = person.phone_allowed && mobileDigits(phone) !== (person.phone ?? "");
+  const changed = first.trim() !== person.first_name || last.trim() !== person.last_name || email.trim() !== person.email || phoneChanged;
   const guard = useUnsavedGuard(changed || passwordDirty, "Your password or details aren't saved. Leave and lose them?");
   const errors = {
     first_name: !first.trim() ? "Enter your first name. It shows in the Audit log next to your changes." : "",
     email: emailProblem(email), phone: person.phone_allowed ? mobileProblem(phone) : "",
+    current: phoneChanged && !current ? "Enter your current password." : "",
   };
   const err = (key: keyof typeof errors) => problem?.fields?.[key] || (tried ? errors[key] : "");
   const edited = () => { setProblem(null); setSaved(false); setRefreshFailed(false); };
@@ -49,7 +52,8 @@ function ProfileBody({ person }: { person: AccountProfile }) {
     if (bad) { document.getElementById(`pf-${bad}`)?.focus(); return; }
     setBusy(true);
     try {
-      await save.mutateAsync({ first_name: first.trim(), last_name: last.trim(), email: email.trim(), ...(person.phone_allowed ? { phone: mobileDigits(phone) } : {}) });
+      await save.mutateAsync({ first_name: first.trim(), last_name: last.trim(), email: email.trim(), ...(person.phone_allowed ? { phone: mobileDigits(phone) } : {}), ...(phoneChanged ? { current } : {}) });
+      setCurrent("");
       setSaved(true); setTried(false);
       try { await refreshMe(); } catch { setRefreshFailed(true); }
     } catch (error) {
@@ -80,6 +84,9 @@ function ProfileBody({ person }: { person: AccountProfile }) {
           </Field>
           {person.phone_allowed ? <Field label="Mobile number" htmlFor="pf-phone" hint={person.sms_reset ? "Password codes are sent to this number." : "Codes are sent once SMS is switched on"} error={err("phone")} className={isPhone ? "" : "col-span-2"}>
             <Input id="pf-phone" type="tel" inputMode="tel" value={phone} onChange={(event) => { setPhone(event.target.value); edited(); }} autoComplete="tel-national" readOnly={busy} />
+          </Field> : null}
+          {phoneChanged ? <Field label="Current password" htmlFor="pf-current" error={err("current")} hint="Changing your mobile number signs out your other devices." className={isPhone ? "" : "col-span-2"}>
+            <Input id="pf-current" type="password" value={current} onChange={(event) => { setCurrent(event.target.value); edited(); }} autoComplete="current-password" readOnly={busy} />
           </Field> : null}
         </div>
         <FailNote error={problem && !problem.fields ? saveFailure(problem) : null} onRetry={() => { void saveDetails(); }} busy={busy} />

@@ -20,6 +20,7 @@ from .sms import send_code
 # R4B-1: one answer for every wrong, expired or used code, whoever the username is.
 EXPIRED = "That code isn't right or has run out. Ask for a new code."
 FAILED = {"detail": "The SMS couldn't be sent. Try again in a few minutes, or ask the person who looks after the app.", "code": "sms_failed"}
+_DUMMY_CODE_HASH = make_password(secrets.token_hex(16))
 
 
 def username_from(data):
@@ -67,10 +68,12 @@ def finish_reset(data):
         return {"code": ["The code has 6 digits. Check the SMS."]}, 400
     user = uncached(User).select_for_update().filter(username=username).first()
     if user is None or not user.is_active or role_of(user) != "owner":
+        check_password(code, _DUMMY_CODE_HASH)
         return {"code": [EXPIRED]}, 400
     record = uncached(PasswordResetCode).filter(user_id=user.pk).order_by("-created_at", "-pk").first()
     now = timezone.now()
     if record is None or record.used_at or record.expires_at <= now or record.tries >= 5:
+        check_password(code, _DUMMY_CODE_HASH)
         return {"code": [EXPIRED]}, 400
     if not check_password(code, record.code_hash):
         record.tries += 1

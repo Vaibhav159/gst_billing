@@ -6,7 +6,7 @@ from billing.refusals import Refusal
 from billing.services.password_reset import finish_reset, start_reset
 from billing.services.sms import sms_enabled
 
-from .auth import DynamicScopedRateThrottle
+from .auth import LoginRateThrottle
 
 
 class AuthOptionsView(APIView):
@@ -28,14 +28,14 @@ class PasswordRulesView(APIView):
 class ResetView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
-    throttle_classes = [DynamicScopedRateThrottle]
+    throttle_classes = [LoginRateThrottle]
     throttle_scope = "reset"
 
     def post(self, request, step):
         if not sms_enabled():
             raise Refusal("Password codes by SMS aren't switched on yet. Ask the owner to set a new password for you. If you are the owner, ask the person who looks after the app.", "sms_off")
         if step == "start":
-            answer, status = start_reset(request.data, DynamicScopedRateThrottle().get_ident(request))
+            answer, status = start_reset(request.data, LoginRateThrottle().get_ident(request))
         else:
             answer, status = finish_reset(request.data)
         return Response(answer, status=status)

@@ -119,7 +119,8 @@ class SessionEndView(APIView):
             ended_ids = list(sessions.values_list("pk", flat=True))
         count = sessions.update(signed_out_at=timezone.now(), signed_out_by=user, ended_how="signed_out")
         invalidate(SignInSession)
-        session_audit(user, words or f"Signed out on {count} other devices", ended_ids, current)
+        if count:
+            session_audit(user, words or f"Signed out on {count} other devices", ended_ids, current)
         return Response(status=204) if pk is not None else Response({"signed_out": count})
 
 

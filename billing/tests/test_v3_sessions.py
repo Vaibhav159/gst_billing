@@ -134,6 +134,21 @@ def test_old_sessions_and_codes_cleaned_only_on_sign_in():
     assert not PasswordResetCode.objects.exists()
 
 
+def test_sign_in_ends_expired_devices_and_keeps_recently_used_devices():
+    from rest_framework_simplejwt.settings import api_settings as jwt_settings
+
+    user = person("maya", "admin")
+    before = timezone.now() - jwt_settings.REFRESH_TOKEN_LIFETIME - timedelta(days=1)
+    expired = SignInSession.objects.create(user=user, device="Old device", created_at=before, last_used_at=before)
+    renewed = SignInSession.objects.create(user=user, device="Renewed device", created_at=before)
+    client, _ = login(user)
+    expired.refresh_from_db()
+    renewed.refresh_from_db()
+    assert expired.signed_out_at is not None and expired.ended_how == "expired"
+    assert renewed.signed_out_at is None
+    assert {row["device"] for row in client.get("/api/account/sessions/").data["results"]} == {"Renewed device", "Chrome on Windows"}
+
+
 def test_refresh_never_reads_full_user_rows():
     from django.db import connection
     from django.test.utils import CaptureQueriesContext

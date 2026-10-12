@@ -8,6 +8,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
@@ -155,6 +156,35 @@ def test_reset_scope_ten_per_address():
     client = APIClient()
     statuses = [client.post("/api/auth/reset/start/", {"username": "absent"}).status_code for _ in range(11)]
     assert statuses == [200] * 10 + [429]
+
+
+@pytest.mark.parametrize("state", ["live", "unknown", "staff", "stopped", "missing", "used", "expired", "exhausted"])
+def test_reset_finish_does_one_password_check_for_every_username(state):
+    from billing.services.password_reset import EXPIRED, finish_reset
+
+    if state != "unknown":
+        user = person("maya", "editor" if state == "staff" else "admin")
+        if state == "stopped":
+            user.is_active = False
+            user.save(update_fields=["is_active"])
+        if state in {"live", "used", "expired", "exhausted"}:
+            PasswordResetCode.objects.create(user=user, code_hash=make_password("123456"), ip_hash="synthetic",
+                expires_at=timezone.now() + timedelta(minutes=-1 if state == "expired" else 10),
+                used_at=timezone.now() if state == "used" else None, tries=5 if state == "exhausted" else 0)
+    with patch("billing.services.password_reset.check_password", wraps=check_password) as checked:
+        assert finish_reset({"username": "maya", "code": "654321"}) == ({"code": [EXPIRED]}, 400)
+    assert checked.call_count == 1
+    assert checked.call_args.args[0] == "654321"
+
+
+@override_settings(SMS_RESET_ENABLED=True, SMS_PROVIDER="fake")
+def test_reset_throttle_falls_back_to_username_when_proxy_hops_are_missing():
+    with override_settings(REST_FRAMEWORK={**settings.REST_FRAMEWORK, "NUM_PROXIES": 2}):
+        client = APIClient()
+        for _ in range(10):
+            assert client.post("/api/auth/reset/start/", {"username": "first"}).status_code == 200
+        assert client.post("/api/auth/reset/start/", {"username": "FIRST"}).status_code == 429
+        assert client.post("/api/auth/reset/start/", {"username": "second"}).status_code == 200
 
 
 @pytest.mark.parametrize("body", [[], {"username": {}}, {"username": "a" * 151}])

@@ -199,7 +199,7 @@ function rejectRequest(error: unknown, original?: InternalAxiosRequestConfig): P
     if (!config) continue;
     const path = config.url?.replace(/^\/+/, "") ?? "";
     if (config.headers) delete config.headers.Authorization;
-    if (path === "token/" || path.includes("password/") || path.startsWith("auth/reset/") || path === "auth/sign-out/" || (path === "people/" && config.method === "post")) config.data = undefined;
+    if (path === "token/" || path.includes("password/") || path.startsWith("auth/reset/") || path === "auth/sign-out/" || (path === "people/" && config.method === "post") || (path === "account/" && config.method === "patch")) config.data = undefined;
   }
   return Promise.reject(error);
 }

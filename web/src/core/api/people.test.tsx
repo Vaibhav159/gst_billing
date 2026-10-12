@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { testQueryClient } from "@/test/render";
 import { serve } from "@/test/server";
 import { usePeople, useChangePerson, usePersonHistory } from "./people";
-import { useChangePassword, useSessions, useSignOutSession } from "./account";
+import { useChangePassword, useSaveProfile, useSessions, useSignOutSession } from "./account";
 import { startReset, finishReset } from "./auth";
 
 function wrapper() { const client = testQueryClient(); return ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>; }
@@ -35,6 +35,19 @@ test("password mutations never retain typed secrets in the query mutation cache"
   const wrap = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   const { result } = renderHook(() => useChangePassword(), { wrapper: wrap });
   await act(async () => { await result.current.mutateAsync({ current: "old-synthetic", password: "new-synthetic" }); });
+  await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
+});
+test.each([200, 400, 0])("profile password is absent from mutation cache and final errors after status %s", async (status) => {
+  serve({ "PATCH account/": () => ({ status, data: { current: ["Check your password."] } }) });
+  const client = testQueryClient();
+  const wrap = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useSaveProfile(), { wrapper: wrap });
+  let error: unknown;
+  await act(async () => {
+    try { await result.current.mutateAsync({ first_name: "Owner", last_name: "", email: "", phone: "9829017211", current: "profile-secret8" }); }
+    catch (failure) { error = failure; }
+  });
+  expect(JSON.stringify(error) ?? "").not.toContain("profile-secret8");
   await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
 });
 test("sessions use the contract envelope", async () => {

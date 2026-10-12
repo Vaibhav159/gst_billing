@@ -51,12 +51,30 @@ describe("profile and signed-in devices", () => {
     const { calls, auth } = mount({ "PATCH account/": ({ data }: Call) => ({ status: 200, data: { ...profile, ...(data as object) } }) });
     await screen.findByLabelText(/First name/);
     set(/First name/, "  Kailash Kumar  "); set("Email", "owner@example.com"); set("Mobile number", "98290 17211");
+    fireEvent.change(within(screen.getByLabelText("Mobile number").closest("form")!).getByLabelText("Current password"), { target: { value: "Old8!phrase" } });
     screen.getByLabelText("Email").focus();
     fireEvent.click(screen.getByRole("button", { name: "Save details" }));
     expect(await screen.findByText("Saved")).toBeInTheDocument();
-    expect(calls.find((c) => c.method === "PATCH")?.data).toEqual({ first_name: "Kailash Kumar", last_name: "Mehta", email: "owner@example.com", phone: "9829017211" });
+    expect(calls.find((c) => c.method === "PATCH")?.data).toEqual({ first_name: "Kailash Kumar", last_name: "Mehta", email: "owner@example.com", phone: "9829017211", current: "Old8!phrase" });
     expect(auth.refreshMe).toHaveBeenCalledOnce();
     expect(screen.getByLabelText("Email")).toHaveFocus();
+  });
+  it("requires the current password only for a changed phone and shows its server error beside the field", async () => {
+    const words = "That isn't your current password. Check Caps Lock and try again.";
+    const { calls } = mount({ "PATCH account/": () => ({ status: 400, data: { current: [words] } }) });
+    const phone = await screen.findByLabelText("Mobile number");
+    const form = within(phone.closest("form")!);
+    expect(form.queryByLabelText("Current password")).not.toBeInTheDocument();
+    set("Mobile number", "9829017211");
+    fireEvent.click(form.getByRole("button", { name: "Save details" }));
+    expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(0);
+    expect(form.getByText("Enter your current password.")).toBeInTheDocument();
+    fireEvent.change(form.getByLabelText("Current password"), { target: { value: "wrong" } });
+    fireEvent.click(form.getByRole("button", { name: "Save details" }));
+    expect(await form.findByText(words)).toBeInTheDocument();
+    expect(form.getByLabelText("Current password")).toHaveFocus();
+    set("Mobile number", profile.phone);
+    expect(form.queryByLabelText("Current password")).not.toBeInTheDocument();
   });
   it("does not call a completed detail save a failure when refreshing the header loses its connection", async () => {
     const { auth } = mount({ "PATCH account/": ({ data }: Call) => ({ status: 200, data: { ...profile, ...(data as object) } }) });
