@@ -47,7 +47,7 @@ CASES += [
     ("gst_file", "downloaded", "filing", "send", "Downloaded", "", "/gst"),
     ("gst_file", "sent", "filing", "send", "Sent", "", "/gst"),
     ("report", "exported", "backup", "send", "Exported", "", "/reports"),
-    ("rates", "set", "admin", "change", "Set", "", "/"),
+    ("rates", "set", "admin", "change", "Set today's rates", "", "/"),
     ("settings", "updated", "admin", "change", "Changed shop settings", "", "/settings"),
     ("user", "created", "admin", "add", "Added", "", "/users"),
     ("user", "updated", "admin", "change", "Edited", "", "/users"),
@@ -74,7 +74,7 @@ def test_documented_words_table(entity, action, kind, group, text, after, link):
     words, actual_link = event_words(entry, actual_kind, target_present=True)
     assert actual_kind == kind
     assert GROUPS[action] == group
-    assert words == {"text": text, "target": "" if entity == "settings" else "Record", "after": after}
+    assert words == {"text": text, "target": "" if entity in {"settings", "rates"} else "Record", "after": after}
     assert actual_link == link
     with patch("billing.services.audit.record_for") as record, patch("billing.services.audit.capture_present") as capture:
         row = entry_row(entry, actions=False)

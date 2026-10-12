@@ -1,23 +1,17 @@
-"""X-40: run these without skips once parts 2A, 3A and 4A land."""
+"""X-40: the dashboard against the real 2A, 3A and 4A services."""
 import json
 from datetime import date, datetime
 from datetime import timezone as dt_timezone
-from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from billing.models import AuditLog, Invoice, InwardCapture
+from billing.models import AuditLog, InwardCapture
 from billing.tests.v3_helpers import buyer, client_for, firm, line, person, sale
-
-PART2 = hasattr(Invoice, "needs_review") and hasattr(InwardCapture, "discarded_at")
-PART3 = find_spec("billing.services.filing") is not None
-PART4 = find_spec("billing.services.audit") is not None
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(not PART2, reason="X-40: 2A additive fields")
 def test_purchase_counts_capture_scope_and_no_double_count():
     f, g, c = firm(), firm("OTHER"), buyer()
     sale(f, c, "P1", date(2026, 9, 1), kind="inward", needs_review=True, itc_month=date(2026, 10, 1))
@@ -34,7 +28,6 @@ def test_purchase_counts_capture_scope_and_no_double_count():
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(not (PART2 and PART3), reason="X-40: 2A and 3A filing services")
 def test_recorded_returns_past_cash_and_legacy():
     from billing.models import FiledPeriod
     f, c = firm(), buyer(address="Street")
@@ -74,7 +67,6 @@ def test_recorded_returns_past_cash_and_legacy():
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(not PART4, reason="X-40: corrected 4A/4E shared audit mapping")
 def test_audit_fixture_words_shop_scope_and_narrow_details():
     from billing.services.audit import entry_row, read_entries
     from billing.services.dashboard import latest_changes
@@ -94,7 +86,6 @@ def test_audit_fixture_words_shop_scope_and_narrow_details():
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(find_spec("billing.services.catalog") is None, reason="X-40: 4A product kind inference")
 def test_rate_key_uses_catalog_inference_without_reading_a_later_board():
     from billing.models import Product, RateBoard
     from billing.rates import rate_for, rate_key

@@ -47,7 +47,7 @@ EVENT_WORDS = {
     ("gst_file", "downloaded"): ("Downloaded", ""),
     ("gst_file", "sent"): ("Sent", ""),
     ("report", "exported"): ("Exported", ""),
-    ("rates", "set"): ("Set", ""),
+    ("rates", "set"): ("Set today's rates", ""),
     ("settings", "updated"): ("Changed shop settings", ""),
     ("user", "created"): ("Added", ""),
     ("user", "updated"): ("Edited", ""),
@@ -175,7 +175,7 @@ def event_words(entry, kind, target_present):
     text, after = EVENT_WORDS.get((entity, action), (text, after))
     if entity == "user" and action == "updated" and "role" in (entry.changes or {}):
         text = "Changed the role of"
-    if entity == "settings" and action == "updated":
+    if (entity, action) in {("settings", "updated"), ("rates", "set")}:
         target = ""
     if entity == "backup" and action in {"exported", "downloaded"} and target == "Full backup":
         target = "the full backup"

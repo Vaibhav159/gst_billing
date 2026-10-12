@@ -10,7 +10,9 @@ from billing.cache import uncached
 from billing.fy import fy_label, fy_of, fy_range
 from billing.models import BinnedInvoice, Business, Invoice, LineItem
 from billing.roles import can
+from billing.services.audit import entry_row, read_entries
 from billing.services.bill_reads import CHECK_FIELDS, ITAX_FIELDS, bill_rows
+from billing.services.filing import year_filings
 from billing.text import money
 
 ROW_FIELDS = tuple(set((*CHECK_FIELDS, *ITAX_FIELDS, "invoice_number", "created_at", "cancel_reason",
@@ -19,10 +21,7 @@ ZERO = Decimal("0")
 
 
 def firms_in_scope(business_id):
-    fields = ["id", "name", "gst_number"]
-    if any(f.name == "short_name" for f in Business._meta.fields):
-        fields.append("short_name")
-    firms = uncached(Business).only(*fields).order_by("name", "id")
+    firms = uncached(Business).only("id", "name", "gst_number", "short_name").order_by("name", "id")
     return list(firms.filter(pk=business_id) if business_id is not None else firms)
 
 
@@ -34,10 +33,6 @@ def month_keys(start, end):
 
 
 def latest_changes():
-    try:
-        from billing.services.audit import entry_row, read_entries
-    except ImportError:  # X-40 / design §4.4 item 6: empty until part 4's shared mapper lands.
-        return []
     rows = read_entries().exclude(entity__in=["backup", "report", "gst_file"]).exclude(action__in=["printed", "exported", "downloaded"])
     rows = rows.defer("details", "changes").annotate(
         short_details=Left("details", 160),
@@ -55,13 +50,8 @@ def latest_changes():
     return answer
 
 
-def filing_totals(ids, year):
-    from billing.services.filing import year_filings
-    return year_filings(ids, year)
-
-
 def past_returns(firms, year):
-    values = filing_totals([f.pk for f in firms], year)
+    values = year_filings([f.pk for f in firms], year)
     rows = []
     for firm in firms:
         row = values.get(firm.pk, {})

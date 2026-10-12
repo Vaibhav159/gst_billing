@@ -75,8 +75,8 @@ def read_quotes(body):
 
 
 def firm_short(business):
-    """Mirror scope.tsx shortName, with part 4's explicit short name taking priority."""
-    explicit = getattr(business, "short_name", "")
+    """Mirror scope.tsx shortName, with the firm's explicit short name taking priority."""
+    explicit = business.short_name
     first = business.name.strip().split()
     return explicit or (first[0][:1].upper() + first[0][1:].lower() if first else business.name)
 

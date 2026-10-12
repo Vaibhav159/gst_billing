@@ -1,18 +1,18 @@
 """Due items: role gates precede reads; wording is shared by every surface."""
 from collections import defaultdict
 from datetime import timedelta
-from importlib.util import find_spec
 
 from django.db.models import Count, Exists, OuterRef, Q, Window
 
 from billing.cache import uncached
 from billing.fy import due_dates, fy_of, fy_range
-from billing.models import BinnedInvoice, FiledPeriod, Invoice, InwardCapture, SaleDraft, SavedDraft
+from billing.models import BinnedInvoice, FiledPeriod, FilingRecord, Invoice, InwardCapture, SaleDraft, SavedDraft
 from billing.numbering import Numbered, missing_numbers
 from billing.rates import firm_short
 from billing.roles import can
 from billing.services.bill_reads import itax_summary
 from billing.services.sales import mobile_of
+from billing.text import possessive
 
 ORDER = ("blocker", "file_gstr1", "pay_3b", "gaps", "open_blocker", "credit", "itax", "captures", "unsent", "drafts", "review")
 KEYS = {"blocker": "gst.file", "file_gstr1": "gst.file", "pay_3b": "gst.file", "gaps": "bill.create",
@@ -25,10 +25,6 @@ def item(kind, count, title, detail, due=None, firm=None, month=None, **more):
             "firm": firm, "month": month, "draft_id": None, "from": None, "to": None, "badge": None, **more}
 
 
-def possessive(name):
-    return name + ("'" if name.lower().endswith("s") else "'s")
-
-
 def operational_items(user, firms, business_id, today, stages=None):
     out, ids = [], [f.pk for f in firms]
     ended = today.replace(day=1) - timedelta(days=1)
@@ -39,10 +35,8 @@ def operational_items(user, firms, business_id, today, stages=None):
         if stages is None:
             # Filing presence, not whether sales are currently editable: unlocking keeps the record.
             recorded = uncached(FiledPeriod).filter(business_id__in=ids, year=ended.year, month=ended.month).order_by().values_list("business_id", flat=True)
-            if find_spec("billing.services.filing") is not None:
-                from billing.models import FilingRecord
-                recorded = recorded.union(uncached(FilingRecord).filter(business_id__in=ids,
-                    year=ended.year, month=ended.month, kind="gstr1").order_by().values_list("business_id", flat=True))
+            recorded = recorded.union(uncached(FilingRecord).filter(business_id__in=ids,
+                year=ended.year, month=ended.month, kind="gstr1").order_by().values_list("business_id", flat=True))
             closed = {(pk, ended.year, ended.month) for pk in recorded}
         eligible = [f for f in firms if (stages.get((f.pk, month), "") not in {"gstr1", "filed", "unlocked"}
                     if stages is not None else (f.pk, ended.year, ended.month) not in closed)]
@@ -71,7 +65,7 @@ def operational_items(user, firms, business_id, today, stages=None):
                      (kinds.get("b2c_address", 0), "of ₹50,000 or more without the buyer's address (Rule 46(f))")]
             out.append(item("itax", count, f"{count} {'bill needs' if count == 1 else 'bills need'} an {label} check",
                        " · ".join(f"{n} {text.replace('cash bills', 'cash bill') if n == 1 else text}" for n, text in parts if n), **{"from": first.isoformat(), "to": today.isoformat()}))
-    if can(user, "purchase.create") and hasattr(InwardCapture, "discarded_at"):
+    if can(user, "purchase.create"):
         captures = uncached(InwardCapture).filter(status="new", discarded_at__isnull=True)
         if business_id is not None:
             captures = captures.filter(Q(business_id=business_id) | Q(business_id__isnull=True))
@@ -84,7 +78,8 @@ def operational_items(user, firms, business_id, today, stages=None):
         if names:
             count = len(names)
             detail = ", ".join(names[:5]) + (f" and {count - 5} more" if count > 5 else "")
-            out.append(item("unsent", count, f"{count} of today's bills {'hasn’t' if count == 1 else 'haven’t'} been sent".replace("’", "'"), detail))
+            verb = "hasn't" if count == 1 else "haven't"
+            out.append(item("unsent", count, f"{count} of today's bills {verb} been sent", detail))
     if can(user, "bill.create"):
         drafts = uncached(SaleDraft).exclude(Exists(uncached(SavedDraft).filter(pk=OuterRef("pk"))))
         if business_id is not None:
@@ -92,7 +87,7 @@ def operational_items(user, firms, business_id, today, stages=None):
         row = drafts.order_by("-updated_at", "-id").annotate(total=Window(Count("pk"))).values("pk", "total").first()
         if row:
             out.append(item("drafts", row["total"], f"{row['total']} unfinished {'bill' if row['total'] == 1 else 'bills'}", "Saved as you typed; open to finish or discard", draft_id=str(row["pk"])))
-    if can(user, "purchase.edit") and hasattr(Invoice, "needs_review"):
+    if can(user, "purchase.edit"):
         count = uncached(Invoice).counted().filter(type_of_invoice="inward", business_id__in=ids, needs_review=True).count()
         if count:
             out.append(item("review", count, f"{count} purchase {'bill needs' if count == 1 else 'bills need'} a check", "Read from a photo; confirm the GST rate"))
@@ -100,11 +95,9 @@ def operational_items(user, firms, business_id, today, stages=None):
 
 
 def due_next(user, firms, business_id, today, returns=False):
-
     from billing.services.due_gst import collect_gst, gst_items, returns_card
     keys = {key for key in KEYS.values() if can(user, key)}
-    ready = find_spec("billing.services.filing") is not None
-    facts = collect_gst(firms, today, keys, returns) if ready and (returns or keys & {"gst.file", "bill.edit"}) else None
+    facts = collect_gst(firms, today, keys, returns) if (returns or keys & {"gst.file", "bill.edit"}) else None
     items = operational_items(user, firms, business_id, today, facts["stages"] if facts else None) if keys else []
     if facts:
         items.extend(gst_items(keys, firms, today, facts))

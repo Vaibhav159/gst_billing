@@ -1,6 +1,5 @@
 from datetime import date
 from decimal import Decimal
-from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -65,9 +64,7 @@ def test_single_blocker_open_month_and_all_credit_words():
 
 
 def test_collect_gst_reads_month_stages_dict_once_and_reuses_its_stages():
-    """P5-1/P5-2/P5-3: 3A's dict envelope; one stage call for every scanned month; blocker text only where needed."""
-    import sys
-    from types import ModuleType
+    """P5-1/P5-2/P5-3: 3A's dict envelope; one stage call for every scanned month; its blocker counts reused."""
     from unittest.mock import MagicMock
 
     from billing.services.dashboard import month_keys
@@ -76,20 +73,18 @@ def test_collect_gst_reads_month_stages_dict_once_and_reuses_its_stages():
     zero = {"igst": Decimal("0"), "cgst": Decimal("0"), "sgst": Decimal("0")}
     # August is a v2 whole-month lock with a failing check; September is blocked.
     stages = {(1, "2026-08"): "filed", (1, "2026-09"): "blocked"}
-    fakes = {"billing.services.filing": ModuleType("filing"), "billing.services.gst_checks": ModuleType("gst_checks"),
-             "billing.services.ledger": ModuleType("ledger")}
-    fakes["billing.services.filing"].month_stages = MagicMock(return_value={"stages": stages, "latest_gstr1": {1: "2026-07"}})
-    fakes["billing.services.filing"].credit_at_risk_summary = MagicMock(return_value={"count": 0})
-    fakes["billing.services.gst_checks"].gstr1_blockers = MagicMock(return_value={
-        (1, "2026-09"): {"count": 1, "bills": 2, "first_two": ["Two bills use number 31"]},
-        (1, "2026-10"): {"count": 0, "bills": 0, "first_two": []}})
-    fakes["billing.services.ledger"].month_position = MagicMock(return_value={"output": zero, "cash": zero, "carry_on": zero})
-    with patch.dict(sys.modules, fakes), patch("billing.models.FilingRecord", create=True):
+    stage_call = MagicMock(return_value={"stages": stages, "latest_gstr1": {1: "2026-07"},
+                                         "blockers": {(1, "2026-09"): {"count": 1, "bills": 2, "first_two": ["Two bills use number 31"]}}})
+    blockers = MagicMock(return_value={(1, "2026-10"): {"count": 0, "bills": 0, "first_two": []}})
+    with (patch("billing.services.due_gst.month_stages", stage_call), patch("billing.services.due_gst.gstr1_blockers", blockers),
+          patch("billing.services.due_gst.credit_at_risk_summary", MagicMock(return_value={"count": 0})),
+          patch("billing.services.due_gst.month_positions", MagicMock(return_value={1: {"output": zero, "cash": zero, "carry_on": zero}}))):
         facts = collect_gst([f], date(2026, 10, 8), {"gst.file", "bill.edit"}, False)
-    fakes["billing.services.filing"].month_stages.assert_called_once_with(
-        [1], list(month_keys(date(2025, 4, 1), date(2026, 9, 30))), today=date(2026, 10, 8))
-    fakes["billing.services.gst_checks"].gstr1_blockers.assert_called_once_with([1], ["2026-09", "2026-10"])
+    stage_call.assert_called_once_with([1], list(month_keys(date(2025, 4, 1), date(2026, 9, 30))), today=date(2026, 10, 8))
+    # Only this month's open bills are read again; September's count comes from month_stages.
+    blockers.assert_called_once_with([1], ["2026-10"])
     assert facts["stages"] == stages and facts["latest"] == {1: "2026-07"}
+    assert facts["blocks"][(1, "2026-09")]["count"] == 1
     # A v2-locked month that would fail a check is never a blocker item.
     facts["blocks"][(1, "2026-08")] = {"count": 3, "bills": 3, "first_two": ["x"]}
     items = gst_items({"gst.file"}, [f], date(2026, 10, 8), facts)
@@ -97,14 +92,14 @@ def test_collect_gst_reads_month_stages_dict_once_and_reuses_its_stages():
 
 
 @pytest.mark.django_db
-@pytest.mark.skipif(find_spec("billing.services.filing") is None, reason="X-40: 3A's month_stages and gstr1_blockers")
 def test_v2_locked_month_with_a_failing_check_is_not_a_blocker():
     """P5-2 / 5-D6: a month v2 locked whole is filed even with no 3A record, so its old faults stay quiet."""
     from billing.models import FiledPeriod
-    from billing.tests.v3_helpers import buyer, client_for, firm, person, sale
+    from billing.services.gst_checks import gstr1_blockers
+    from billing.tests.v3_helpers import buyer, client_for, firm, line, person, sale
     f, c = firm(), buyer(address="Street")
-    sale(f, c, "31", date(2026, 8, 5))
-    sale(f, c, "31", date(2026, 8, 6))
+    sale(f, c, "31", date(2026, 8, 5), line(hsn=""))
+    assert gstr1_blockers([f.pk], ["2026-08"])[f.pk, "2026-08"]["count"] == 1
     FiledPeriod.objects.create(business=f, year=2026, month=8)
     owner = client_for(person("p5-v2-lock-owner", "admin"))
     with patch("billing.api.dashboard.timezone.localdate", return_value=date(2026, 10, 8)):

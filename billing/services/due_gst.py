@@ -6,11 +6,16 @@ from django.db.models import Count
 
 from billing.cache import uncached
 from billing.fy import due_dates, fy_label, fy_of
-from billing.models import Invoice
+from billing.models import FilingRecord, Invoice
 from billing.rates import firm_short
 from billing.services.dashboard import month_keys
-from billing.services.due import item, possessive
-from billing.text import day_text, inr, money, person
+from billing.services.due import item
+from billing.services.filing import credit_at_risk_summary, month_stages
+from billing.services.gst_checks import gstr1_blockers
+from billing.services.ledger import month_positions
+from billing.text import day_text, inr, money, person, possessive
+
+EMPTY = {"output": {}, "cash": {}, "carry_on": {}}
 
 
 def total(heads):
@@ -36,9 +41,10 @@ def gst_items(keys, firms, today, facts):
                 day = date.fromisoformat(key + "-01")
                 due = due_dates(day.year, day.month)["gstr1"]
                 count = block["count"]
+                they = "it's" if count == 1 else "they're"
                 title = block["first_two"][0] if count == 1 else f"{count} problems stop {possessive(firm_short(f))} {day.strftime('%B')} GSTR-1"
                 out.append(item("blocker", count, title,
-                    f"{f.name} · {day.strftime('%B %Y')} GSTR-1 can't be filed until {'it’s' if count == 1 else 'they’re'} fixed".replace("’", "'"),
+                    f"{f.name} · {day.strftime('%B %Y')} GSTR-1 can't be filed until {they} fixed",
                     due, f.pk, key, badge="home_dot" if (due - today).days <= 3 else None))
         ready = [f for f in firms if stages.get((f.pk, month)) == "ready"]
         if ready and (dates["gstr1"] - today).days <= 15:
@@ -97,10 +103,6 @@ def returns_card(firms, today, facts):
 
 
 def collect_gst(firms, today, keys, with_returns):
-    from billing.models import FilingRecord
-    from billing.services.filing import credit_at_risk_summary, month_stages
-    from billing.services.gst_checks import gstr1_blockers
-    from billing.services.ledger import month_position
     ids = [f.pk for f in firms]
     ended = today.replace(day=1) - timedelta(days=1)
     month = ended.strftime("%Y-%m")
@@ -109,16 +111,15 @@ def collect_gst(firms, today, keys, with_returns):
     scan = list(month_keys(date(fy_of(today) - 1, 4, 1), ended)) if "gst.file" in keys else [month]
     found = month_stages(ids, scan, today=today)
     stages, latest = found["stages"], found["latest_gstr1"]
-    # Blocker text is read only for months month_stages found blocked, plus this month's open bills.
-    months = set()
-    for firm in firms:
-        floor = max(latest.get(firm.pk) or "0000-00", f"{fy_of(today) - 1}-03") if "gst.file" in keys else "0000-00"
-        months.update(m for m in scan if m > floor and stages.get((firm.pk, m)) == "blocked")
+    # month_stages already read the blocker counts of every month it checked; only this month's open bills
+    # are read again, and only for someone who can fix them (P5-3).
+    blocks = dict(found["blockers"])
     if "bill.edit" in keys:
-        months.add(today.strftime("%Y-%m"))
-    blocks = gstr1_blockers(ids, sorted(months)) if months and (with_returns or keys & {"gst.file", "bill.edit"}) else {}
+        blocks.update(gstr1_blockers(ids, [today.strftime("%Y-%m")]))
     need_positions = with_returns or ("gst.file" in keys and (due_dates(ended.year, ended.month)["gstr3b"] - today).days <= 15)
-    positions = {f.pk: month_position(f, ended.year, ended.month) for f in firms} if need_positions else {}
+    # A month the ledger doesn't cover (before its start) has no position: nothing owed, nothing carried.
+    found_positions = month_positions(firms, ended.year, ended.month, today=today) if need_positions else {}
+    positions = {pk: position or EMPTY for pk, position in found_positions.items()}
     risk = credit_at_risk_summary(ids, today=today) if "gst.file" in keys else {"count": 0}
     records, reviews = {}, {}
     if with_returns:
