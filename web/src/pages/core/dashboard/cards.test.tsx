@@ -69,11 +69,12 @@ test("recent bills stay hidden when today has bills, even while a past FY is sel
   expect(screen.queryByText("OLD")).not.toBeInTheDocument();
 });
 
-test("no bills at all retains the quiet recent state and All bills link", () => {
+test.each([false, true])("no bills at all omits the recent-bills sentence and keeps the sales link (phone=%s)", (phone) => {
   const data = dashboard(); data.today = { ...data.today, count: 0, total: 0, bills: [], recent: [], by_payment: [] };
-  renderApp(<TodayCard data={data} scope="All firms" allFirms phone />);
-  expect(screen.getByText("No bills yet today. The last 0 bills:")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "All bills" })).toHaveAttribute("href", "/sales");
+  renderApp(<TodayCard data={data} scope="All firms" allFirms phone={phone} />);
+  expect(screen.getByText(/No bills yet today/)).toHaveTextContent(/^No bills yet today\.$/);
+  expect(screen.queryByText(/The last/)).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: phone ? "All bills" : "All sales bills" })).toHaveAttribute("href", "/sales");
 });
 
 test("month toggle uses the supplied windows without any request", () => {

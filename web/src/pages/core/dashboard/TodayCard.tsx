@@ -41,7 +41,7 @@ export function TodayCard({ data, scope, allFirms, phone = false }: { data: Dash
         {b.line_count ? <SendCell bill={b} compact /> : <ButtonLink to={`/sales/${b.id}`} size="sm" variant="ghost">Fix it</ButtonLink>}
       </li>)}
     </ul> : <>
-      <p className="px-4 pb-2 text-sm text-fg2">No bills yet today. The last {recent.length === 1 ? "bill" : `${recent.length} bills`}:</p>
+      <p className="px-4 pb-2 text-sm text-fg2">No bills yet today.{recent.length ? ` The last ${recent.length === 1 ? "bill" : `${recent.length} bills`}:` : ""}</p>
       <ul>{recent.map(b => <li key={b.id} data-row={b.id} className="flex items-center gap-2 pl-4 pr-2 border-t border-rule min-h-16">
         <Link to={`/sales/${b.id}`} className="flex-1 min-w-0 py-3">
           <span className="block font-medium line-clamp-2">{b.customer.name}</span>
@@ -57,7 +57,7 @@ export function TodayCard({ data, scope, allFirms, phone = false }: { data: Dash
     </Link></div>
   </Card>;
   if (!hasToday) return <Card title="Today's sales" subtitle={`${scope} · ${dateShort(today.date)} · no bills yet`} pad={false}>
-    <p className="px-5 pt-1 pb-3 text-fg2">No bills yet today{allFirms ? "" : ` for ${scope}`}. The last {recent.length === 1 ? "bill" : `${recent.length} bills`}:</p>
+    <p className="px-5 pt-1 pb-3 text-fg2">No bills yet today{allFirms ? "" : ` for ${scope}`}.{recent.length ? ` The last ${recent.length === 1 ? "bill" : `${recent.length} bills`}:` : ""}</p>
     {recent.length ? <Table label="The last five sales bills">
       <thead><tr><Th>Date</Th><Th>Bill</Th><Th>Customer</Th><Th>Paid by</Th><Th align="right">Total</Th><Th align="right"><span className="sr-only">Print</span></Th></tr></thead>
       <tbody>{recent.map(b => <Tr key={b.id} onClick={() => navigate(`/sales/${b.id}`)}>
