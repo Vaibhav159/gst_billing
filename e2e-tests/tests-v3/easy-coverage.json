@@ -1,0 +1,1705 @@
+[
+  {
+    "sourceLine": 79,
+    "sourceWords": "first visit: the welcome shows",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 79,
+    "label": "first visit: the welcome shows"
+  },
+  {
+    "sourceLine": 80,
+    "sourceWords": "header: labelled Full view and the bright-screen switch",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 80,
+    "label": "header: labelled Full view and the bright-screen switch"
+  },
+  {
+    "sourceLine": 82,
+    "sourceWords": "`five tabs on one row: ${tabsY.join(\",\")}`",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 82,
+    "label": "`five tabs on one row: ${tabsY.join(\",\")}`"
+  },
+  {
+    "sourceLine": 83,
+    "sourceWords": "Sales today ₹1,42,960.00 · 3 bills",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 83,
+    "label": "Sales today ₹1,42,960.00 · 3 bills"
+  },
+  {
+    "sourceLine": 85,
+    "sourceWords": "`rows start with the bill number: ${rowsText[0].slice(0, 60)}`",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 85,
+    "label": "`rows start with the bill number: ${rowsText[0].slice(0, 60)}`"
+  },
+  {
+    "sourceLine": 86,
+    "sourceWords": "E24: Sent in the list is a label, not a button",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 86,
+    "label": "E24: Sent in the list is a label, not a button"
+  },
+  {
+    "sourceLine": 87,
+    "sourceWords": "the walk-in's row says Not sent; no Print link to a page Easy doesn't have",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 87,
+    "label": "the walk-in's row says Not sent; no Print link to a page Easy doesn't have"
+  },
+  {
+    "sourceLine": 88,
+    "sourceWords": "E-B1: today's rates on Home, with who set them",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 88,
+    "label": "E-B1: today's rates on Home, with who set them"
+  },
+  {
+    "sourceLine": 90,
+    "sourceWords": "GST card: ₹10,378.76 and, for the owner, the hold-up in red with Fix it",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 90,
+    "label": "GST card: ₹10,378.76 and, for the owner, the hold-up in red with Fix it"
+  },
+  {
+    "sourceLine": 94,
+    "sourceWords": "Got it folds the welcome away",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 94,
+    "label": "Got it folds the welcome away"
+  },
+  {
+    "sourceLine": 95,
+    "sourceWords": "E25/E11: the welcome is remembered for this person on this phone",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 95,
+    "label": "E25/E11: the welcome is remembered for this person on this phone"
+  },
+  {
+    "sourceLine": 97,
+    "sourceWords": "the bright-screen switch turns this phone to Pearl",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 97,
+    "label": "the bright-screen switch turns this phone to Pearl"
+  },
+  {
+    "sourceLine": 99,
+    "sourceWords": "and back to the dark look",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 99,
+    "label": "and back to the dark look"
+  },
+  {
+    "sourceLine": 104,
+    "sourceWords": "E11: step 1 names the firm as a pill and the next number, Bill No. 34",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 104,
+    "label": "E11: step 1 names the firm as a pill and the next number, Bill No. 34"
+  },
+  {
+    "sourceLine": 106,
+    "sourceWords": "E34: recent customers show masked phones and no amounts",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 106,
+    "label": "E34: recent customers show masked phones and no amounts"
+  },
+  {
+    "sourceLine": 111,
+    "sourceWords": "A23: “What is it?” is an h2 under the page title",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 111,
+    "label": "A23: “What is it?” is an h2 under the page title"
+  },
+  {
+    "sourceLine": 112,
+    "sourceWords": "E13: with nothing on the bill, the bar says Pick what they're buying",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 112,
+    "label": "E13: with nothing on the bill, the bar says Pick what they're buying"
+  },
+  {
+    "sourceLine": 113,
+    "sourceWords": "E43: chips name the metal (Gold chain, Gold ring)",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 113,
+    "label": "E43: chips name the metal (Gold chain, Gold ring)",
+    "amendment": "6-D26: six most billed products from products/?page_size=1000&ordering=name, sorted usage_count descending then name; seed-independent names"
+  },
+  {
+    "sourceLine": 117,
+    "sourceWords": "the weight field is focused after choosing the item",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 117,
+    "label": "the weight field is focused after choosing the item"
+  },
+  {
+    "sourceLine": 118,
+    "sourceWords": "E-B1: the rate comes from today's board: ₹6,512.50, set at 10:05",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 118,
+    "label": "E-B1: the rate comes from today's board: ₹6,512.50, set at 10:05",
+    "amendment": "6-D3: empty rate as on the paper bill, never filled from board"
+  },
+  {
+    "sourceLine": 119,
+    "sourceWords": "the bar now says Type the weight",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 119,
+    "label": "the bar now says Type the weight"
+  },
+  {
+    "sourceLine": 122,
+    "sourceWords": "with today's rate, Enter on the weight goes to making charges",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 122,
+    "label": "with today's rate, Enter on the weight goes to making charges",
+    "amendment": "6-D3: Enter moves to rate, no making field"
+  },
+  {
+    "sourceLine": 124,
+    "sourceWords": "`live line: ${live}`",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 124,
+    "label": "`live line: ${live}`"
+  },
+  {
+    "sourceLine": 125,
+    "sourceWords": "E13: total ₹82,808.71 and the bar says Next: how they paid",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 125,
+    "label": "E13: total ₹82,808.71 and the bar says Next: how they paid"
+  },
+  {
+    "sourceLine": 127,
+    "sourceWords": "how they paid: nothing picked for a new bill",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 127,
+    "label": "how they paid: nothing picked for a new bill"
+  },
+  {
+    "sourceLine": 129,
+    "sourceWords": "Next: how they paid takes you to the payment choice (no error)",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 129,
+    "label": "Next: how they paid takes you to the payment choice (no error)"
+  },
+  {
+    "sourceLine": 130,
+    "sourceWords": "and the check sheet doesn't open yet",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 130,
+    "label": "and the check sheet doesn't open yet"
+  },
+  {
+    "sourceLine": 133,
+    "sourceWords": "E03: a rate per 10 g is caught in red under the field",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 133,
+    "label": "E03: a rate per 10 g is caught in red under the field",
+    "amendment": "X-1: only recognizable slip bands against in-force board"
+  },
+  {
+    "sourceLine": 135,
+    "sourceWords": "Use ₹6,512.50 puts today's rate back",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 135,
+    "label": "Use ₹6,512.50 puts today's rate back",
+    "amendment": "X-1: divide typed rate by ten, do not substitute board"
+  },
+  {
+    "sourceLine": 137,
+    "sourceWords": "E03: a weight without its decimal point is caught",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 137,
+    "label": "E03: a weight without its decimal point is caught"
+  },
+  {
+    "sourceLine": 140,
+    "sourceWords": "Use 12.345 g fixes it; the total is back to ₹82,808.71",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 140,
+    "label": "Use 12.345 g fixes it; the total is back to ₹82,808.71"
+  },
+  {
+    "sourceLine": 142,
+    "sourceWords": "after Cash, the bar says Check and save",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 142,
+    "label": "after Cash, the bar says Check and save"
+  },
+  {
+    "sourceLine": 151,
+    "sourceWords": "A1: a double tap on Check and save leaves the check sheet open, nothing saved",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 151,
+    "label": "A1: a double tap on Check and save leaves the check sheet open, nothing saved"
+  },
+  {
+    "sourceLine": 154,
+    "sourceWords": "A1: Save bill 34 sits above Change something, never under the finger",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 154,
+    "label": "A1: Save bill 34 sits above Change something, never under the finger"
+  },
+  {
+    "sourceLine": 156,
+    "sourceWords": "`E11: the sentence names the firm: ${sentence}`",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 156,
+    "label": "`E11: the sentence names the firm: ${sentence}`",
+    "amendment": "6-D4: sentence ends Bill number N, as on the paper bill."
+  },
+  {
+    "sourceLine": 157,
+    "sourceWords": "E04: the check sheet shows the weight and the rate",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 157,
+    "label": "E04: the check sheet shows the weight and the rate"
+  },
+  {
+    "sourceLine": 161,
+    "sourceWords": "the offline strip shows at the top",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 161,
+    "label": "the offline strip shows at the top"
+  },
+  {
+    "sourceLine": 164,
+    "sourceWords": "offline save: Not saved yet, the bill is safe on this phone, Save bill 34 again",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 164,
+    "label": "offline save: Not saved yet, the bill is safe on this phone, Save bill 34 again",
+    "amendment": "6-D11: offline Save disabled; retained bill message"
+  },
+  {
+    "sourceLine": 165,
+    "sourceWords": "E15: no second message in a toast",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 165,
+    "label": "E15: no second message in a toast"
+  },
+  {
+    "sourceLine": 174,
+    "sourceWords": "E09: leaving asks: keep it for later, or throw it away",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 174,
+    "label": "E09: leaving asks: keep it for later, or throw it away"
+  },
+  {
+    "sourceLine": 178,
+    "sourceWords": "E09: Home shows Anil Gupta's unfinished bill, not saved yet (offline)",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 178,
+    "label": "E09: Home shows Anil Gupta's unfinished bill, not saved yet (offline)"
+  },
+  {
+    "sourceLine": 183,
+    "sourceWords": "Finish opens it with the weight and Cash kept",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 183,
+    "label": "Finish opens it with the weight and Cash kept"
+  },
+  {
+    "sourceLine": 190,
+    "sourceWords": "saved: Anil Gupta · ₹82,808.71 · paid in cash",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 190,
+    "label": "saved: Anil Gupta · ₹82,808.71 · paid in cash"
+  },
+  {
+    "sourceLine": 192,
+    "sourceWords": "paper copy: KGH/2026-27/34, 12.345 g × 6,512.50, GST 2,411.90",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 192,
+    "label": "paper copy: KGH/2026-27/34, 12.345 g × 6,512.50, GST 2,411.90"
+  },
+  {
+    "sourceLine": 195,
+    "sourceWords": "Goes to shows Anil Gupta's number before sending",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 195,
+    "label": "Goes to shows Anil Gupta's number before sending"
+  },
+  {
+    "sourceLine": 199,
+    "sourceWords": "Change details opens with the saved number",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 199,
+    "label": "Change details opens with the saved number"
+  },
+  {
+    "sourceLine": 202,
+    "sourceWords": "a 9-digit number is explained under the field",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 202,
+    "label": "a 9-digit number is explained under the field"
+  },
+  {
+    "sourceLine": 206,
+    "sourceWords": "E14: back on the bill with the fixed number, no toast repeating it",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 206,
+    "label": "E14: back on the bill with the fixed number, no toast repeating it"
+  },
+  {
+    "sourceLine": 209,
+    "sourceWords": "E08: one way to send, no second Share PDF button",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 209,
+    "label": "E08: one way to send, no second Share PDF button"
+  },
+  {
+    "sourceLine": 212,
+    "sourceWords": "a quiet 'Sent at …' line with a plain Send again",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 212,
+    "label": "a quiet 'Sent at …' line with a plain Send again"
+  },
+  {
+    "sourceLine": 213,
+    "sourceWords": "no toast repeats Sent: the page already says it",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 213,
+    "label": "no toast repeats Sent: the page already says it"
+  },
+  {
+    "sourceLine": 215,
+    "sourceWords": "`E23: the tick and Sent sit on one line (${Math.round(sentBox.height)} px)`",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 215,
+    "label": "`E23: the tick and Sent sit on one line (${Math.round(sentBox.height)} px)`"
+  },
+  {
+    "sourceLine": 216,
+    "sourceWords": "after sending, Make another bill is the main button",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 216,
+    "label": "after sending, Make another bill is the main button"
+  },
+  {
+    "sourceLine": 223,
+    "sourceWords": "the new bill is first on Home and flashes",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 223,
+    "label": "the new bill is first on Home and flashes"
+  },
+  {
+    "sourceLine": 224,
+    "sourceWords": "Sales today ₹2,25,768.71 · 4 bills",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 224,
+    "label": "Sales today ₹2,25,768.71 · 4 bills"
+  },
+  {
+    "sourceLine": 225,
+    "sourceWords": "GST card ₹12,790.66 (₹10,378.76 + ₹2,411.90)",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 225,
+    "label": "GST card ₹12,790.66 (₹10,378.76 + ₹2,411.90)"
+  },
+  {
+    "sourceLine": 226,
+    "sourceWords": "saving removed the unfinished bill",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 226,
+    "label": "saving removed the unfinished bill"
+  },
+  {
+    "sourceLine": 230,
+    "sourceWords": "Bills today: 4 bills · ₹2,25,768.71",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 230,
+    "label": "Bills today: 4 bills · ₹2,25,768.71"
+  },
+  {
+    "sourceLine": 233,
+    "sourceWords": "E37: a bill number finds the bill",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 233,
+    "label": "E37: a bill number finds the bill"
+  },
+  {
+    "sourceLine": 237,
+    "sourceWords": "`This year with count and total: ${yh}`",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 237,
+    "label": "`This year with count and total: ${yh}`"
+  },
+  {
+    "sourceLine": 240,
+    "sourceWords": "Anil this year: 2 bills; last year left out in October",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 240,
+    "label": "Anil this year: 2 bills; last year left out in October",
+    "amendment": "6-D19: last FY is checked by default only in April and May (IST)"
+  },
+  {
+    "sourceLine": 242,
+    "sourceWords": "ticking it reaches FY 2025-26 too (5 bills, full dates)",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 242,
+    "label": "ticking it reaches FY 2025-26 too (5 bills, full dates)"
+  },
+  {
+    "sourceLine": 247,
+    "sourceWords": "the GST page opens on the same ₹12,790.66",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 247,
+    "label": "the GST page opens on the same ₹12,790.66"
+  },
+  {
+    "sourceLine": 248,
+    "sourceWords": "E20: the owner reads what's blocked and gets Fix it in the full view",
+    "title": "Easy acceptance: Home, bill brain, offline keeping, saved paper and one send",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 248,
+    "label": "E20: the owner reads what's blocked and gets Fix it in the full view"
+  },
+  {
+    "sourceLine": 254,
+    "sourceWords": "E21: a walk-in can't be put on udhaar, and it says why",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 254,
+    "label": "E21: a walk-in can't be put on udhaar, and it says why"
+  },
+  {
+    "sourceLine": 260,
+    "sourceWords": "new item: missing answers explained",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 260,
+    "label": "new item: missing answers explained"
+  },
+  {
+    "sourceLine": 264,
+    "sourceWords": "once something is typed, closing the item sheet asks Discard this item?",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 264,
+    "label": "once something is typed, closing the item sheet asks Discard this item?"
+  },
+  {
+    "sourceLine": 266,
+    "sourceWords": "Keep editing keeps what was typed",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 266,
+    "label": "Keep editing keeps what was typed"
+  },
+  {
+    "sourceLine": 269,
+    "sourceWords": "`E02: gold offers only the three kinds that fit, no loose diamonds (${kinds.length})`",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 269,
+    "label": "`E02: gold offers only the three kinds that fit, no loose diamonds (${kinds.length})`"
+  },
+  {
+    "sourceLine": 271,
+    "sourceWords": "a diamond item offers Jewellery and Loose diamonds",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 271,
+    "label": "a diamond item offers Jewellery and Loose diamonds"
+  },
+  {
+    "sourceLine": 274,
+    "sourceWords": "preview: Gold kada 22K · HSN 7113 · GST 3%",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 274,
+    "label": "preview: Gold kada 22K · HSN 7113 · GST 3%"
+  },
+  {
+    "sourceLine": 275,
+    "sourceWords": "E02: keeping it in the item list is off by default",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 275,
+    "label": "E02: keeping it in the item list is off by default"
+  },
+  {
+    "sourceLine": 278,
+    "sourceWords": "A1: Go back sits below Add to the bill; the sheet never says Cancel (E33)",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 278,
+    "label": "A1: Go back sits below Add to the bill; the sheet never says Cancel (E33)"
+  },
+  {
+    "sourceLine": 282,
+    "sourceWords": "the item is on this bill only, at today's 22K rate",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 282,
+    "label": "the item is on this bill only, at today's 22K rate",
+    "amendment": "6-D3: custom line rate starts empty"
+  },
+  {
+    "sourceLine": 283,
+    "sourceWords": "no toast saying it was added to the item list",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 283,
+    "label": "no toast saying it was added to the item list"
+  },
+  {
+    "sourceLine": 293,
+    "sourceWords": "`bill 35: walk-in, 10.000 g = ₹67,078.76 by UPI (${b35})`",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 293,
+    "label": "`bill 35: walk-in, 10.000 g = ₹67,078.76 by UPI (${b35})`",
+    "amendment": "Use exact server total; supported file share needs no phone"
+  },
+  {
+    "sourceLine": 302,
+    "sourceWords": "`E33: the cancel dialog names the bill; the way out says Keep the bill`",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 302,
+    "label": "`E33: the cancel dialog names the bill; the way out says Keep the bill`"
+  },
+  {
+    "sourceLine": 305,
+    "sourceWords": "offline cancel: not cancelled yet, the dialog stays",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 305,
+    "label": "offline cancel: not cancelled yet, the dialog stays"
+  },
+  {
+    "sourceLine": 310,
+    "sourceWords": "E-B4: a cancelled bill offers Make it again",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 310,
+    "label": "E-B4: a cancelled bill offers Make it again"
+  },
+  {
+    "sourceLine": 313,
+    "sourceWords": "Make it again: same customer, item, weight and payment, and it says which bill it replaces",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 313,
+    "label": "Make it again: same customer, item, weight and payment, and it says which bill it replaces",
+    "amendment": "X-57: a remake keeps the cancelled bill's rate (6,512.50); it is not cleared"
+  },
+  {
+    "sourceLine": 322,
+    "sourceWords": "the corrected bill is saved as bill 36",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 322,
+    "label": "the corrected bill is saved as bill 36"
+  },
+  {
+    "sourceLine": 331,
+    "sourceWords": "E06: cash over the limit is stopped with the amount to take by UPI",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 331,
+    "label": "E06: cash over the limit is stopped with the amount to take by UPI"
+  },
+  {
+    "sourceLine": 333,
+    "sourceWords": "and Check and save doesn't open the sheet",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 333,
+    "label": "and Check and save doesn't open the sheet"
+  },
+  {
+    "sourceLine": 335,
+    "sourceWords": "Choose Part cash: now Check and save",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 335,
+    "label": "Choose Part cash: now Check and save"
+  },
+  {
+    "sourceLine": 340,
+    "sourceWords": "E-B3: the check sheet asks for a tick on the cash part; Save waits",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 340,
+    "label": "E-B3: the check sheet asks for a tick on the cash part; Save waits"
+  },
+  {
+    "sourceLine": 341,
+    "sourceWords": "over ₹2 lakh: the PAN note shows",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 341,
+    "label": "over ₹2 lakh: the PAN note shows"
+  },
+  {
+    "sourceLine": 343,
+    "sourceWords": "after the tick, Save lights up",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 343,
+    "label": "after the tick, Save lights up"
+  },
+  {
+    "sourceLine": 353,
+    "sourceWords": "Throw it away: gone, with Undo",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 353,
+    "label": "Throw it away: gone, with Undo"
+  },
+  {
+    "sourceLine": 356,
+    "sourceWords": "Undo brings the unfinished bill back",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 356,
+    "label": "Undo brings the unfinished bill back"
+  },
+  {
+    "sourceLine": 358,
+    "sourceWords": "E38: Remove on Home throws an unfinished bill away, with Undo",
+    "title": "Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 358,
+    "label": "E38: Remove on Home throws an unfinished bill away, with Undo"
+  },
+  {
+    "sourceLine": 365,
+    "sourceWords": "from a bill, the header says which bill the customer is for",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 365,
+    "label": "from a bill, the header says which bill the customer is for"
+  },
+  {
+    "sourceLine": 367,
+    "sourceWords": "E19: the phone field is empty, with its rule above it, no sample number",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 367,
+    "label": "E19: the phone field is empty, with its rule above it, no sample number"
+  },
+  {
+    "sourceLine": 368,
+    "sourceWords": "E36: Town or city is asked, Udaipur filled in",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 368,
+    "label": "E36: Town or city is asked, Udaipur filled in"
+  },
+  {
+    "sourceLine": 370,
+    "sourceWords": "the fixed number is now Anil's: duplicate caught",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 370,
+    "label": "the fixed number is now Anil's: duplicate caught"
+  },
+  {
+    "sourceLine": 375,
+    "sourceWords": "a wrong GST number explained plainly",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 375,
+    "label": "a wrong GST number explained plainly"
+  },
+  {
+    "sourceLine": 377,
+    "sourceWords": "a right GST number: state named, IGST explained",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 377,
+    "label": "a right GST number: state named, IGST explained"
+  },
+  {
+    "sourceLine": 380,
+    "sourceWords": "E15: offline, not saved, said once; everything typed kept",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 380,
+    "label": "E15: offline, not saved, said once; everything typed kept"
+  },
+  {
+    "sourceLine": 384,
+    "sourceWords": "back in the bill with Ramesh Jain, IGST noted",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 384,
+    "label": "back in the bill with Ramesh Jain, IGST noted"
+  },
+  {
+    "sourceLine": 392,
+    "sourceWords": "New customer's header: For all three firms (nothing claims it's saved yet)",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 392,
+    "label": "New customer's header: For all three firms (nothing claims it's saved yet)",
+    "amendment": "§3: create associates businesses:[F], never all-three claim"
+  },
+  {
+    "sourceLine": 398,
+    "sourceWords": "E27: the new customer is on top, marked Just added",
+    "title": "Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 398,
+    "label": "E27: the new customer is on top, marked Just added"
+  },
+  {
+    "sourceLine": 403,
+    "sourceWords": "Capture is a tab of its own",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 403,
+    "label": "Capture is a tab of its own"
+  },
+  {
+    "sourceLine": 405,
+    "sourceWords": "E01: a photo that couldn't be read says so in red, with Take it again; never Read",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 405,
+    "label": "E01: a photo that couldn't be read says so in red, with Take it again; never Read"
+  },
+  {
+    "sourceLine": 406,
+    "sourceWords": "E30: a supplier bill's amount is in the purchase colour",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 406,
+    "label": "E30: a supplier bill's amount is in the purchase colour"
+  },
+  {
+    "sourceLine": 409,
+    "sourceWords": "a non-photo file is refused with a plain reason",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 409,
+    "label": "a non-photo file is refused with a plain reason"
+  },
+  {
+    "sourceLine": 411,
+    "sourceWords": "E28: the message can be closed",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 411,
+    "label": "E28: the message can be closed"
+  },
+  {
+    "sourceLine": 414,
+    "sourceWords": "offline upload: not uploaded yet, the photo stays on the phone",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 414,
+    "label": "offline upload: not uploaded yet, the photo stays on the phone"
+  },
+  {
+    "sourceLine": 418,
+    "sourceWords": "Try again uploads it: We're reading it",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 418,
+    "label": "Try again uploads it: We're reading it",
+    "amendment": "X-10: upload then explicit POST read"
+  },
+  {
+    "sourceLine": 420,
+    "sourceWords": "the photo is read: Rajasthan Silver Traders",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 420,
+    "label": "the photo is read: Rajasthan Silver Traders",
+    "amendment": "Global words: no exclamation mark; synthetic reader fixture"
+  },
+  {
+    "sourceLine": 423,
+    "sourceWords": "E29: your own photo goes at once, with Undo (no dialog)",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 423,
+    "label": "E29: your own photo goes at once, with Undo (no dialog)"
+  },
+  {
+    "sourceLine": 426,
+    "sourceWords": "Undo puts the photo back",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 426,
+    "label": "Undo puts the photo back"
+  },
+  {
+    "sourceLine": 429,
+    "sourceWords": "Take it again replaces the photo that couldn't be read",
+    "title": "Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 429,
+    "label": "Take it again replaces the photo that couldn't be read"
+  },
+  {
+    "sourceLine": 448,
+    "sourceWords": "E10: the sheet can't be closed mid-save (Escape does nothing)",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 448,
+    "label": "E10: the sheet can't be closed mid-save (Escape does nothing)"
+  },
+  {
+    "sourceLine": 449,
+    "sourceWords": "E10: Save shows Saving bill 37… while it saves",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 449,
+    "label": "E10: Save shows Saving bill 37… while it saves"
+  },
+  {
+    "sourceLine": 451,
+    "sourceWords": "then Bill 37 saved",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 451,
+    "label": "then Bill 37 saved"
+  },
+  {
+    "sourceLine": 457,
+    "sourceWords": "slow network: Bills shows placeholder rows first",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 457,
+    "label": "slow network: Bills shows placeholder rows first"
+  },
+  {
+    "sourceLine": 459,
+    "sourceWords": "then the bills appear",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 459,
+    "label": "then the bills appear"
+  },
+  {
+    "sourceLine": 462,
+    "sourceWords": "offline: Customers says so in words, nothing lost",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 462,
+    "label": "offline: Customers says so in words, nothing lost"
+  },
+  {
+    "sourceLine": 465,
+    "sourceWords": "offline Home keeps the Today section; the message sits inside it",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 465,
+    "label": "offline Home keeps the Today section; the message sits inside it"
+  },
+  {
+    "sourceLine": 466,
+    "sourceWords": "under New bill: make the bill now; today's rates stay on the phone",
+    "title": "Easy acceptance: slow save stays modal, list skeletons and offline sections",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 466,
+    "label": "under New bill: make the bill now; today's rates stay on the phone"
+  },
+  {
+    "sourceLine": 475,
+    "sourceWords": "Update 1: Text size → Larger, for this phone",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 475,
+    "label": "Update 1: Text size → Larger, for this phone"
+  },
+  {
+    "sourceLine": 480,
+    "sourceWords": "and back to Normal",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 480,
+    "label": "and back to Normal"
+  },
+  {
+    "sourceLine": 484,
+    "sourceWords": "Theme → Pearl changes this phone's look",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 484,
+    "label": "Theme → Pearl changes this phone's look"
+  },
+  {
+    "sourceLine": 488,
+    "sourceWords": "and back to Obsidian",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 488,
+    "label": "and back to Obsidian"
+  },
+  {
+    "sourceLine": 490,
+    "sourceWords": "the year: always this year, and how to reach last year's bills",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 490,
+    "label": "the year: always this year, and how to reach last year's bills"
+  },
+  {
+    "sourceLine": 493,
+    "sourceWords": "E24: the help says resending happens on the bill",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 493,
+    "label": "E24: the help says resending happens on the bill"
+  },
+  {
+    "sourceLine": 497,
+    "sourceWords": "E18: Forgot your password? says what sign-in really offers",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 497,
+    "label": "E18: Forgot your password? says what sign-in really offers",
+    "amendment": "4D/X-14: SMS reset is off"
+  },
+  {
+    "sourceLine": 502,
+    "sourceWords": "a wrong current password is explained",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 502,
+    "label": "a wrong current password is explained",
+    "amendment": "4 contract exact Caps Lock wording"
+  },
+  {
+    "sourceLine": 505,
+    "sourceWords": "password changed, said once on the page",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 505,
+    "label": "password changed, said once on the page",
+    "amendment": "X-14: returned tokens stored; real revocation belongs to 4D gate"
+  },
+  {
+    "sourceLine": 510,
+    "sourceWords": "E40: log out asks first",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 510,
+    "label": "E40: log out asks first"
+  },
+  {
+    "sourceLine": 512,
+    "sourceWords": "Stay signed in keeps you here",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 512,
+    "label": "Stay signed in keeps you here"
+  },
+  {
+    "sourceLine": 517,
+    "sourceWords": "E14: changing the firm doesn't toast what the page already shows",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 517,
+    "label": "E14: changing the firm doesn't toast what the page already shows"
+  },
+  {
+    "sourceLine": 518,
+    "sourceWords": "E11: the firm is kept on this phone",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 518,
+    "label": "E11: the firm is kept on this phone"
+  },
+  {
+    "sourceLine": 521,
+    "sourceWords": "Show the welcome again; Meera has no bills today: says so, no ₹0",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 521,
+    "label": "Show the welcome again; Meera has no bills today: says so, no ₹0"
+  },
+  {
+    "sourceLine": 531,
+    "sourceWords": "the full view shows Back to Easy at the top",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 531,
+    "label": "the full view shows Back to Easy at the top",
+    "amendment": "6-D1: header Full view is a visit; Back to Easy is a link and phoneMode stays easy. More separately switches permanently to expert without the strip."
+  },
+  {
+    "sourceLine": 534,
+    "sourceWords": "Back to Easy returns to Easy, still on Meera Ornaments",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 534,
+    "label": "Back to Easy returns to Easy, still on Meera Ornaments",
+    "amendment": "6-D1: return through the Back to Easy link after a header visit, preserving the phone firm. More permanent switch is tested separately."
+  },
+  {
+    "sourceLine": 535,
+    "sourceWords": "`no console errors (${errors.length})${errors.length ? \": \" + errors.slice(0, 3).join(\" | \") : \"\"}`",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 535,
+    "label": "`no console errors (${errors.length})${errors.length ? \": \" + errors.slice(0, 3).join(\" | \") : \"\"}`"
+  },
+  {
+    "sourceLine": 541,
+    "sourceWords": "E11: another phone still opens on Kiran Gold House",
+    "title": "Easy acceptance: More, profile, the phone firm and returning from the full view",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 541,
+    "label": "E11: another phone still opens on Kiran Gold House"
+  },
+  {
+    "sourceLine": 547,
+    "sourceWords": "E20: staff are told to ask the owner, not sent to a form they can't save",
+    "title": "staff: Easy permissions and plain GST words",
+    "roles": [
+      "staff"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 547,
+    "label": "E20: staff are told to ask the owner, not sent to a form they can't save"
+  },
+  {
+    "sourceLine": 553,
+    "sourceWords": "E44: staff see a quiet GST line, not a red alarm",
+    "title": "staff: Easy permissions and plain GST words",
+    "roles": [
+      "staff"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 553,
+    "label": "E44: staff see a quiet GST line, not a red alarm"
+  },
+  {
+    "sourceLine": 556,
+    "sourceWords": "E20: on GST, staff read what to tell the owner",
+    "title": "staff: Easy permissions and plain GST words",
+    "roles": [
+      "staff"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 556,
+    "label": "E20: on GST, staff read what to tell the owner"
+  },
+  {
+    "sourceLine": 567,
+    "sourceWords": "staff: a new item goes on this bill only, and says why",
+    "title": "staff: Easy permissions and plain GST words",
+    "roles": [
+      "staff"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 567,
+    "label": "staff: a new item goes on this bill only, and says why"
+  },
+  {
+    "sourceLine": 575,
+    "sourceWords": "staff: the item card says it's on this bill only",
+    "title": "staff: Easy permissions and plain GST words",
+    "roles": [
+      "staff"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 575,
+    "label": "staff: the item card says it's on this bill only"
+  },
+  {
+    "sourceLine": 576,
+    "sourceWords": "no console errors as staff",
+    "title": "staff: Easy permissions and plain GST words",
+    "roles": [
+      "staff"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 576,
+    "label": "no console errors as staff"
+  },
+  {
+    "sourceLine": 591,
+    "sourceWords": "with the full view on FY 2025-26, Easy Home still shows today: ₹1,42,960.00",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 591,
+    "label": "with the full view on FY 2025-26, Easy Home still shows today: ₹1,42,960.00"
+  },
+  {
+    "sourceLine": 597,
+    "sourceWords": "`and Bills · This year stays on FY 2026-27: ${dy}`",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 597,
+    "label": "`and Bills · This year stays on FY 2026-27: ${dy}`"
+  },
+  {
+    "sourceLine": 600,
+    "sourceWords": "and a new bill still gets this year's next number, 34",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 600,
+    "label": "and a new bill still gets this year's next number, 34"
+  },
+  {
+    "sourceLine": 601,
+    "sourceWords": "no console errors switching from desktop to Easy",
+    "title": "Easy acceptance: typed-rate slips, current-year reads and the older-day twin",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 601,
+    "label": "no console errors switching from desktop to Easy"
+  },
+  {
+    "sourceLine": 607,
+    "sourceWords": "E11: the viewer opens on Aarav Jewellers, the firm they usually work for",
+    "title": "viewer: Easy permissions and plain GST words",
+    "roles": [
+      "viewer"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 607,
+    "label": "E11: the viewer opens on Aarav Jewellers, the firm they usually work for"
+  },
+  {
+    "sourceLine": 608,
+    "sourceWords": "E25: the welcome names what a viewer can do",
+    "title": "viewer: Easy permissions and plain GST words",
+    "roles": [
+      "viewer"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 608,
+    "label": "E25: the welcome names what a viewer can do"
+  },
+  {
+    "sourceLine": 609,
+    "sourceWords": "viewer: New bill greyed, with the reason",
+    "title": "viewer: Easy permissions and plain GST words",
+    "roles": [
+      "viewer"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 609,
+    "label": "viewer: New bill greyed, with the reason"
+  },
+  {
+    "sourceLine": 610,
+    "sourceWords": "viewer: no Send buttons",
+    "title": "viewer: Easy permissions and plain GST words",
+    "roles": [
+      "viewer"
+    ],
+    "file": "tests-v3/easy-roles.spec.js",
+    "line": 610,
+    "label": "viewer: no Send buttons"
+  },
+  {
+    "sourceLine": 616,
+    "sourceWords": "E-B9: End of the day: 3 bills · ₹1,42,960.00 · 1 unfinished",
+    "title": "Easy acceptance: End of the day uses server figures and stale rates never nag",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 616,
+    "label": "E-B9: End of the day: 3 bills · ₹1,42,960.00 · 1 unfinished"
+  },
+  {
+    "sourceLine": 620,
+    "sourceWords": "E-B1: before the first bill, Set today's rates is asked at the top",
+    "title": "Easy acceptance: End of the day uses server figures and stale rates never nag",
+    "roles": [
+      "owner"
+    ],
+    "file": "tests-v3/easy.spec.js",
+    "line": 620,
+    "label": "E-B1: before the first bill, Set today's rates is asked at the top",
+    "amendment": "6-D16: rates stay in card below sales, no blocking nag"
+  }
+]
