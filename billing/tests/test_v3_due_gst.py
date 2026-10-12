@@ -63,6 +63,26 @@ def test_single_blocker_open_month_and_all_credit_words():
     assert card["firms"][0]["gstr3b"]["cash_paid"] == "17.00"
 
 
+@pytest.mark.parametrize("cash", ["0", "100"])
+def test_pay_3b_excludes_unlocked_and_filed_firms_from_amount_count_words_and_link(cash):
+    from billing.services.due_gst import gst_items
+
+    firms = [SimpleNamespace(pk=pk, name=name, short_name="") for pk, name in
+             [(1, "KIRAN GOLD HOUSE"), (2, "PARAS JEWELS"), (3, "MEHTA ORNAMENTS")]]
+    facts = {"stages": {(1, "2026-09"): "unlocked", (2, "2026-09"): "gstr1", (3, "2026-09"): "filed"},
+             "blocks": {}, "latest": {}, "risk": {"count": 0},
+             "positions": {pk: {"cash": {"igst": Decimal(value)}} for pk, value in [(1, cash), (2, "40"), (3, "200")]}}
+    rows = gst_items({"gst.file"}, firms, date(2026, 10, 8), facts)
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "pay_3b"
+    assert rows[0]["count"] == 1
+    assert rows[0]["firm"] == 2
+    assert rows[0]["title"] == "Pay ₹40.00 GSTR-3B tax in cash"
+    assert rows[0]["detail"] == "September · Paras ₹40.00"
+    facts["stages"][2, "2026-09"] = "unlocked"
+    assert gst_items({"gst.file"}, firms, date(2026, 10, 8), facts) == []
+
+
 def test_collect_gst_reads_month_stages_dict_once_and_reuses_its_stages():
     """P5-1/P5-2/P5-3: 3A's dict envelope; one stage call for every scanned month; its blocker counts reused."""
     from unittest.mock import MagicMock

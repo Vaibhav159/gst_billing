@@ -52,7 +52,7 @@ def gst_items(keys, firms, today, facts):
             out.append(item("file_gstr1", len(ready), f"File {name} GSTR-1 for {names}",
                 "Every check passes · " + ("ready for the portal" if len(ready) == 1 else "all ready for the portal"),
                 dates["gstr1"], ready[0].pk, month))
-        waiting = [f for f in firms if stages.get((f.pk, month)) != "filed"]
+        waiting = [f for f in firms if stages.get((f.pk, month)) not in {"filed", "unlocked"}]
         if waiting and (dates["gstr3b"] - today).days <= 15:
             payers = sorted(waiting, key=lambda f: -total(facts["positions"][f.pk]["cash"]))
             cash = sum((total(facts["positions"][f.pk]["cash"]) for f in payers), Decimal("0"))

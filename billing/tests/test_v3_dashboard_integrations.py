@@ -58,12 +58,12 @@ def test_recorded_returns_past_cash_and_legacy():
         legacy = viewer.get("/api/due-next/", {"business_id": old.pk, "returns": "1"}).json()["returns"]["firms"][0]
         assert legacy["stage"] == "filed"
         assert legacy["gstr1"] is None and legacy["gstr3b"] is None
-        # Unlocking reopens edits; it does not erase the filing record or invent paper gaps for staff.
+        # Unlocking reopens edits; it does not erase filing records or make tax and paper gaps due again.
         response = client.post("/api/gst/months/unlock/", {"business": f.pk, "month": "2026-09", "reason": "Correct a bill"}, format="json")
         assert response.status_code == 200, response.content
         for actor in (client, staff):
             items = actor.get("/api/due-next/", {"business_id": f.pk}).json()["items"]
-            assert "gaps" not in {row["kind"] for row in items}
+            assert not {"pay_3b", "file_gstr1", "gaps"} & {row["kind"] for row in items}
 
 
 @pytest.mark.django_db
