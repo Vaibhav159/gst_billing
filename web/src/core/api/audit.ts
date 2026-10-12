@@ -49,7 +49,7 @@ export function useAuditExport() {
 
 /** Shared by audit, merge and backup restore. Removed detail pages become stale without asking for a deleted row. */
 export async function invalidateRecords(qc: QueryClient): Promise<void> {
-  const roots = new Set(["audit", "sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "drafts", "suppliers", "captures", "shop-settings", "registry"]);
+  const roots = new Set(["audit", "sales", "customers", "catalog", "products", "firms", "businesses", "purchases", "bin", "gst", "reports", "search", "setup", "backup", "drafts", "suppliers", "captures", "shop-settings", "registry", "dashboard", "due-next"]);
   const affected = (q: { queryKey: readonly unknown[] }) => roots.has(String(q.queryKey[0]));
   await qc.invalidateQueries({ predicate: affected, refetchType: "none" });
   await qc.invalidateQueries({ predicate: (q) => affected(q) && !["one", "detail", "bill", "record", "restore-entry", "statement", "itax"].includes(String(q.queryKey[1])) });

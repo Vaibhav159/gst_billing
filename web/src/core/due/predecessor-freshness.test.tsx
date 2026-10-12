@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { act, cleanup, renderHook } from '@testing-library/react';
-import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, renderHook, screen, within } from '@testing-library/react';
+import { QueryClientProvider, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { afterEach, expect, test, vi } from 'vitest';
-import { testQueryClient } from '@/test/render';
+import { renderApp, testQueryClient } from '@/test/render';
 import { serve } from '@/test/server';
 import { purchaseDetailWire, purchaseBinWire, SUPPLIER } from '@/core/purchases/fixtures';
 import type { PurchaseInput } from '@/core/purchases/types';
@@ -15,6 +15,14 @@ import { useImportSession } from '@/pages/imports/session';
 import { invalidateGst, useGstWrite, type GstWrite } from '@/core/api/gst';
 import { useOpeningPreview, useSaveOpeningCredit, useMoveCredit } from '@/core/api/gstCredit';
 import { openingWire, effectWire } from '@/core/gst/creditFixtures';
+import { useAuditAction } from '@/core/api/audit';
+import { useMergeCustomer } from '@/core/api/customerMerge';
+import { useDeleteFirm, useRestoreFirm, useSaveFirm, useSignature, type FirmBody } from '@/core/api/firms';
+import { ratesKeys } from '@/core/api/dashboard';
+import { toBoard } from '@/core/dashboard/wire';
+import { useSetRates } from '@/core/rates/api';
+import { wireBoard } from '@/core/rates/testing';
+import Restore from '@/pages/records/Restore';
 
 afterEach(cleanup);
 
@@ -256,4 +264,100 @@ test.each<GstWrite>([
   await act(async () => { await h.result.current.mutateAsync(write); });
   expectStale(qc);
   expect(calls).toHaveLength(2);
+});
+
+test.each(['undo', 'revert', 'restore'] as const)('audit %s refreshes every dashboard and due scope only on success', async kind => {
+  let fail = true;
+  const calls = serve({ [`POST audit/7/${kind}/`]: () => fail ? { status: 409, data: { detail: 'Not saved.' } } : { status: 200, data: {} } });
+  const { qc, wrapper } = setup();
+  const h = renderHook(() => useAuditAction(), { wrapper });
+  await act(async () => { await expect(h.result.current.mutateAsync({ id: 7, kind })).rejects.toBeDefined(); });
+  expectStale(qc, false);
+  fail = false;
+  await act(async () => { await h.result.current.mutateAsync({ id: 7, kind }); });
+  expectStale(qc);
+  expect(calls).toHaveLength(2);
+});
+
+test('customer merge refreshes every dashboard and due scope only on success', async () => {
+  let fail = true;
+  const calls = serve({ 'POST customers/7/merge-into/': () => fail ? { status: 409, data: { detail: 'Not saved.' } } : { status: 200, data: {} } });
+  const { qc, wrapper } = setup();
+  const h = renderHook(() => useMergeCustomer(), { wrapper });
+  await act(async () => { await expect(h.result.current.mutateAsync({ source: 7, target: 8 })).rejects.toBeDefined(); });
+  expectStale(qc, false);
+  fail = false;
+  await act(async () => { await h.result.current.mutateAsync({ source: 7, target: 8 }); });
+  expectStale(qc);
+  expect(calls).toHaveLength(2);
+});
+
+test.each(['create', 'update', 'remove', 'restore', 'signature', 'removeSignature'] as const)('firm %s refreshes every dashboard and due scope only on success', async operation => {
+  let fail = true;
+  const reply = () => fail ? { status: 409, data: { detail: 'Not saved.' } } : { status: 200, data: {} };
+  const calls = serve({ 'POST firms/': reply, 'PUT firms/3/': reply, 'DELETE firms/3/': reply,
+    'POST audit/7/restore/': reply, 'PUT firms/3/signature/': reply, 'DELETE firms/3/signature/': reply });
+  const { qc, wrapper } = setup();
+  const h = renderHook(() => ({ save: useSaveFirm(), remove: useDeleteFirm(), restore: useRestoreFirm(), signature: useSignature() }), { wrapper });
+  const body: FirmBody = { name: 'Synthetic Firm', short_name: '', gst_number: '', address: '', city: '', pin_code: '', mobile_number: '', email: '',
+    bank_name: '', bank_account_number: '', bank_ifsc_code: '', bank_branch_name: '', invoice_prefix: '', paper_full_number_from: null,
+    signature_on_bills: false, jurisdiction: '', declaration: '' };
+  const writes = {
+    create: () => h.result.current.save.mutateAsync({ body }), update: () => h.result.current.save.mutateAsync({ id: 3, body }),
+    remove: () => h.result.current.remove.mutateAsync(3), restore: () => h.result.current.restore.mutateAsync(7),
+    signature: () => h.result.current.signature.mutateAsync({ id: 3, image: new File(['synthetic'], 'signature.png', { type: 'image/png' }) }),
+    removeSignature: () => h.result.current.signature.mutateAsync({ id: 3, image: null }),
+  };
+  await act(async () => { await expect(writes[operation]()).rejects.toBeDefined(); });
+  expectStale(qc, false);
+  fail = false;
+  await act(async () => { await writes[operation](); });
+  expectStale(qc);
+  expect(calls).toHaveLength(2);
+});
+
+test('rates save refreshes boards and every dashboard and due scope only on success', async () => {
+  let fail = true;
+  const calls = serve({ 'POST rates/': () => fail ? { status: 400, data: { detail: 'Not saved.' } } : { status: 201, data: wireBoard() } });
+  const { qc, wrapper } = setup();
+  const boards = [ratesKeys.board(), ratesKeys.board('2026-10-07')];
+  boards.forEach(key => qc.setQueryData(key, { fixture: true }));
+  const h = renderHook(() => useSetRates(), { wrapper });
+  const quoted = toBoard(wireBoard())!.quoted;
+  await act(async () => { await expect(h.result.current.mutateAsync(quoted)).rejects.toBeDefined(); });
+  expectStale(qc, false);
+  boards.forEach(key => expect(qc.getQueryState(key)?.isInvalidated).toBe(false));
+  fail = false;
+  await act(async () => { await h.result.current.mutateAsync(quoted); });
+  expectStale(qc);
+  boards.forEach(key => expect(qc.getQueryState(key)?.isInvalidated).toBe(true));
+  expect(calls).toHaveLength(2);
+});
+
+test('backup restore refreshes every dashboard and due scope after applying, never after preview', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    const empty = { add: [], skip: [], fail: [], add_count: 0, skip_count: 0, fail_count: 0 };
+    const plan = { firms: empty, customers: { ...empty, add: [{ name: 'Synthetic Customer' }], add_count: 1 },
+      products: empty, bills: empty, purchases: empty, adds: 1, skips: 0, fails: 0, words: '1 customer' };
+    const calls = serve({
+      'POST backup/restore/preview/': { file: { name: 'old.json', kind: 'old_v4', kind_words: 'Old app backup (v4.0)', size: '38 KB', made: '2026-03-12T19:40:00+05:30', by: '' }, plan, fingerprint: 'synthetic-fingerprint' },
+      'POST backup/restore/': { plan, added: { firms: [], customers: [7], products: [], bills: [], purchases: [] } },
+    });
+    let qc!: QueryClient;
+    function Cache() { qc = useQueryClient(); return null; }
+    renderApp(<><Cache /><Restore /></>);
+    seed(qc);
+    fireEvent.change(screen.getByLabelText('Backup file to restore'), { target: { files: [new File(['{"version":"4.0"}'], 'old.json', { type: 'application/json' })] } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add 1 customer' }));
+    expectStale(qc, false);
+    expect(calls).toHaveLength(1);
+    const dialog = screen.getByRole('dialog', { name: 'Restore from this backup?' });
+    act(() => { vi.setSystemTime(Date.now() + 400); });
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add 1 customer' }));
+    expect(await screen.findByText('Added 1 customer')).toBeVisible();
+    expectStale(qc);
+    expect(calls).toHaveLength(2);
+  } finally { vi.useRealTimers(); }
 });

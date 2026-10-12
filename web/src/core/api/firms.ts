@@ -37,7 +37,7 @@ export function useFirm(id: number | null, fy: string) {
   return useQuery({ queryKey: firmKeys.one(id, fy), queryFn: id === null ? skipToken : async ({ signal }) => toFirmDetail((await api.get(`firms/${id}/`, { params: { fy }, signal })).data) });
 }
 export function invalidateFirms(qc: QueryClient) {
-  for (const key of ["firms", "sales", "customers", "setup", "search", "registry", "audit", "shop-settings"]) void qc.invalidateQueries({ queryKey: [key] });
+  for (const key of ["firms", "sales", "customers", "setup", "search", "registry", "audit", "shop-settings", "dashboard", "due-next"]) void qc.invalidateQueries({ queryKey: [key] });
 }
 export function useSaveFirm() {
   const qc = useQueryClient();
