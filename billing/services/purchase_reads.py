@@ -51,7 +51,7 @@ from billing.numbering import bill_ref
 from billing.params import PICK_A_FIRM, date_param, fy_param, id_param, month_param
 from billing.period_lock import closed_credit_months
 from billing.services.bill_reads import figures, grouped, lines_of, search_text, sums
-from billing.tax_rules import HEADS, THOUSANDTH, clean_gstin, is_interstate, state_code
+from billing.tax_rules import HEADS, THOUSANDTH, clean_gstin, is_interstate, state_code, to_paise
 from billing.text import money, percent, person, stamp
 
 ZERO = Decimal("0")
@@ -299,7 +299,8 @@ def purchase_row(invoice, lines, closed, duplicated=False, include_lines=False, 
            "invoice_number": invoice.invoice_number, "invoice_date": invoice.invoice_date.isoformat(),
            "fy": fy_label(fy_of(invoice.invoice_date)), "created_at": stamp(invoice.created_at),
            "supplier": supplier_ref(invoice.customer), "payment_mode": invoice.payment_mode, **figures(total),
-           "total_amount": money(invoice.total_amount), "interstate": bool(total["igst"]) if total["tax"] else is_interstate(invoice.business, invoice.customer),
+           "total_amount": money(sum((to_paise(li.amount) for li in lines), ZERO)),
+           "interstate": bool(total["igst"]) if total["tax"] else is_interstate(invoice.business, invoice.customer),
            "gst_percents": sorted({percent(li.gst_tax_rate) for li in lines}, key=Decimal, reverse=True),
            "line_count": len(lines), "first_line": None if first is None else {
                "product_name": first.product_name, "quantity": str((first.quantity or ZERO).quantize(THOUSANDTH)),
@@ -436,16 +437,17 @@ def ordered(qs, params):
 
 
 def purchase_summary(qs, lines=None):
-    # Keep invoice totals separate from the line join: a two-line bill counts once.
+    # Count bills and credit separately: a two-line bill counts once.
     bills = _credit_totals(qs.select_related(None).order_by()).aggregate(
-        bills=Count("pk"), total_amount=Sum("total_amount"), credit=Sum("_claimed"))
+        bills=Count("pk"), credit=Sum("_claimed"))
     line_rows = uncached(LineItem).filter(invoice_id__in=qs.order_by().values("pk"))
     total = line_rows.aggregate(
+        total_amount=Sum(Paise(F("amount")), output_field=MONEY_SQL),
         taxable=Sum(LinePaise(F("quantity"), F("rate")), output_field=MONEY_SQL),
         **{head: Sum(Paise(F(head)), output_field=MONEY_SQL) for head in HEADS})
     total = {key: value or ZERO for key, value in total.items()}
     total["tax"] = sum((total[head] for head in HEADS), ZERO)
-    return {"bills": bills["bills"], **figures(total), "total_amount": money(bills["total_amount"] or ZERO),
+    return {"bills": bills["bills"], **figures(total), "total_amount": money(total["total_amount"]),
             "credit": money(bills["credit"] or ZERO)}
 
 

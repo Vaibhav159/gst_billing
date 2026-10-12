@@ -1,7 +1,7 @@
 """P2-8: aggregate books in SQL and keep database transfer within a shop-sized budget."""
 from contextlib import contextmanager
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from unittest.mock import patch
 
 import pytest
@@ -59,6 +59,33 @@ def test_sql_totals_round_each_stored_head_before_adding_and_count_bills_once(sh
                        "tax": "0.18", "total_amount": "0.20", "credit": "0.18"}
     facets = purchase_facets(purchase_queryset(), {"fy": "2026-27"})
     assert facets["credit_months"] == [{"month": "2026-10", "bills": 1, "credit": "0.18"}]
+
+
+def test_historical_purchase_total_matches_summary_rows_detail_and_export(shop):
+    business, supplier = shop
+    bill = sale(business, supplier, "HALF-TOTAL", date(2026, 10, 1), kind="inward")
+    LineItem.objects.filter(invoice=bill).delete()
+    LineItem.objects.bulk_create([LineItem(invoice=bill, customer=supplier, product_name="Old silver", hsn_code="7106",
+        quantity=Decimal("0.025"), rate=Decimal("1"), cgst=0, sgst=0, igst=0,
+        amount=Decimal("0.025"), gst_tax_rate=0, unit="gms") for _ in range(2)])
+    Invoice.objects.filter(pk=bill.pk).update(total_amount=Decimal("0.050"))
+    client = client_for(person("half-total-reader", *ROLE_GROUPS["viewer"]))
+    response = client.get("/api/purchases/", {"include": "lines", "business_id": business.pk})
+    assert response.status_code == 200, response.data
+    row = response.data["results"][0]
+    detail = client.get(f"/api/purchases/{bill.pk}/")
+    assert detail.status_code == 200, detail.data
+    # export.ts adds wire.ts's half-up paise amount for every line, not the stored bill total.
+    export_total = sum((Decimal(line["amount"]).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                        for line in row["lines"]), Decimal("0"))
+    assert export_total == Decimal("0.06")
+    summary = purchase_summary(purchase_queryset().filter(pk=bill.pk))
+    assert summary["bills"] == 1
+    assert [Decimal(value) for value in (summary["total_amount"], response.data["summary"]["total_amount"],
+                                       row["total_amount"], detail.data["total_amount"])] == [export_total] * 4
+    bill.refresh_from_db()
+    assert bill.total_amount == Decimal("0.050")
+    assert list(LineItem.objects.filter(invoice=bill).values_list("amount", flat=True)) == [Decimal("0.025")] * 2
 
 
 @pytest.mark.parametrize("quantity,rate,taxable,head,paise", [

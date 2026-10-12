@@ -1,6 +1,10 @@
 """P4-9/4A.11b: Audit delegates purchase identity to 2A's own bin services."""
+import os
+import subprocess
+import sys
 from contextlib import contextmanager
 from datetime import date
+from textwrap import dedent
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,11 +19,33 @@ from billing.tests.v3_helpers import ROLE_GROUPS, buyer, client_for, firm, perso
 @contextmanager
 def purchase_spies():
     # Spies on 2A's real purchase services and credit guard: Audit must dispatch to them.
-    from billing.services import purchase_bin
+    from billing.services import audit, purchase_bin
     with patch("billing.services.purchase_bin.bin_purchase", wraps=purchase_bin.bin_purchase) as bin_purchase, \
             patch("billing.services.purchase_bin.restore_purchase", wraps=purchase_bin.restore_purchase) as restore_purchase, \
-            patch("billing.period_lock.assert_purchase_open", wraps=period_lock.assert_purchase_open) as guard:
-        yield SimpleNamespace(bin_purchase=bin_purchase, restore_purchase=restore_purchase), guard
+            patch("billing.services.purchase_bin.assert_purchase_open", wraps=period_lock.assert_purchase_open) as guard, \
+            patch("billing.services.purchases.assert_purchase_open", guard), \
+            patch("billing.services.audit.assert_invoice_open", wraps=audit.assert_invoice_open) as audit_guard:
+        yield SimpleNamespace(bin_purchase=bin_purchase, restore_purchase=restore_purchase, audit_guard=audit_guard), guard
+
+
+def test_purchase_spies_do_not_leak_guard_into_a_later_service_import():
+    # A fresh interpreter reproduces a partial suite that has not loaded the URLs yet.
+    result = subprocess.run([sys.executable, "-c", dedent("""
+        import sys
+        import django
+        django.setup()
+        from billing import period_lock
+        from billing.tests.test_records_purchase_audit_preflight import purchase_spies
+        original = period_lock.assert_purchase_open
+        assert 'billing.services.purchases' not in sys.modules
+        with purchase_spies():
+            from billing.services import purchase_bin, purchases
+        assert purchases.assert_purchase_open is original
+        assert purchase_bin.assert_purchase_open is original
+        assert period_lock.assert_purchase_open is original
+    """)], env={**os.environ, "DJANGO_SETTINGS_MODULE": "gst_billing.test_settings"},
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 class PurchaseAuditDispatchTest(TestCase):
@@ -47,7 +73,7 @@ class PurchaseAuditDispatchTest(TestCase):
             self.assertEqual(service.restore_purchase.call_args.kwargs, {"via": "audit_log"})
             self.assertEqual(restored.data["link"], f"/purchases/{self.bill.pk}")
             self.assertEqual(restored.data["new_entry"]["kind"], "purchases")
-            self.assertTrue(guard.called)
+            guard.assert_called_once_with(self.business.pk, date(2026, 9, 1), "delete")
             self.assertEqual(self.client.post(f"/api/audit/{deleted}/restore/").data["code"], "already_undone")
 
     def test_restore_enforces_the_credit_guard_it_offered(self):
@@ -61,7 +87,9 @@ class PurchaseAuditDispatchTest(TestCase):
             self.assertEqual(response.data["detail"], offered["disabled"])
             self.assertIn("September 2026's GSTR-3B is filed", offered["disabled"])
             service.restore_purchase.assert_not_called()
-            self.assertEqual(guard.call_args.args, (self.business.pk, date(2026, 9, 1), "restore"))
+            guard.assert_not_called()  # Audit refuses before dispatching to the purchase service.
+            self.assertEqual(service.audit_guard.call_args.args[0], "restore")
+            self.assertTrue(service.audit_guard.call_args.args[3])  # Purchase credit, not sales filing.
             self.assertFalse(Invoice.objects.filter(pk=self.bill.pk).exists())
 
     def test_list_offers_purchase_undo_and_uses_its_credit_guard(self):
@@ -71,7 +99,7 @@ class PurchaseAuditDispatchTest(TestCase):
             guard.assert_not_called()
             FiledPeriod.objects.create(business=self.business, year=2026, month=9)
             offered = self.offered(self.entry.pk)
-            guard.assert_called_once_with(self.business.pk, date(2026, 9, 1), "delete")
+            guard.assert_not_called()  # Offering an action does not dispatch a purchase writer.
         self.assertEqual(offered["disabled"], "September 2026's GSTR-3B is filed for KIRAN GOLD HOUSE, with this bill's credit "
                                               "in it, so it can't be deleted. Have the owner unlock September 2026 in GST returns first.")
 
