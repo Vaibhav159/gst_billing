@@ -9,7 +9,7 @@ makesBills(test);
 
 const SCREENS = ["/", "/sales", "/sales/paper", "/purchases", "/purchases/inbox", "/customers", "/gst", "/reports", "/settings", "/audit", "/backup"];
 
-test("the app works inside the shipped Content-Security-Policy", async ({ page, request }, info) => {
+test("the app works inside the shipped Content-Security-Policy", { tag: "@sandbox" }, async ({ page, request }, info) => {
   const home = await request.get("/");
   test.skip(!home.headers()["content-security-policy"], "no CSP header: Vite, not nginx");
   const refused = [];

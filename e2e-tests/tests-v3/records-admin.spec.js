@@ -305,7 +305,7 @@ test("a merge refused after its preview (the kept customer removed elsewhere) se
   expect((await api.get("customers/", { search: source.name })).results.map((row) => row.id)).toContain(source.id);
 });
 
-test("a backup of more than 3,000 bills is restored one financial year at a time, each with its own confirmation", async ({ page, request }) => {
+test("a backup of more than 3,000 bills is restored one financial year at a time, each with its own confirmation", { tag: "@acceptance" }, async ({ page, request }) => {
   test.setTimeout(600_000);
   const api = client(request);
   const stamp = `${Date.now()}`;
@@ -394,7 +394,7 @@ test("the customer form uses the real GSTIN registry endpoint and keeps the name
   // This deliberately does not save a customer or demand availability of an external provider.
 });
 
-test("the loaded audit page makes no API reads during three idle minutes", async ({ page }) => {
+test("the loaded audit page makes no API reads during three idle minutes", { tag: "@acceptance" }, async ({ page }) => {
   test.setTimeout(240_000);
   const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/audit/"
     && response.request().method() === "GET");

@@ -90,7 +90,7 @@ test('duplicate and billed-to acknowledgements are explicit and persist on the s
   expect((await api.get(`purchases/${saved.id}/`)).buyer_gstin).toBe(wrongBuyer);
 });
 
-test('a typed late bill saves into the earliest open credit month', async ({ page, request }) => {
+test('a typed late bill saves into the earliest open credit month', { tag: "@sandbox" }, async ({ page, request }) => {
   const api = client(request), { bill, firm } = await newPurchase(api); notesPurchases(page);
   const [y, m] = today().split('-').map(Number); let late;
   for (let back = 1; back <= 12; back += 1) {

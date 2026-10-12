@@ -8,7 +8,7 @@ makesBills(test);
 typesPassword(test);
 test.beforeEach(async ({ page }, info) => { test.skip(info.project.name !== 'phone', 'Easy is phone-only'); await H.preventRealAI(page); });
 
-test('Easy acceptance: More, profile, the phone firm and returning from the full view', async ({ page, request, browser }) => {
+test('Easy acceptance: More, profile, the phone firm and returning from the full view', { tag: "@sandbox" }, async ({ page, request, browser }) => {
   test.setTimeout(120_000);
   const s = await H.scenario(request); await H.easyStorage(page, s);
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
@@ -106,7 +106,7 @@ test('Easy acceptance: More, profile, the phone firm and returning from the full
 test.describe('The actual owner, accountant, counter-staff and viewer sessions', () => {
   test.use({ storageState: SIGNED_OUT });
   for (const role of ['owner', 'accountant', 'staff', 'viewer']) {
-    test(`${role}: Easy permissions and plain GST words`, async ({ page, request }) => {
+    test(`${role}: Easy permissions and plain GST words`, { tag: "@sandbox" }, async ({ page, request }) => {
       test.setTimeout(90_000);
       expect(hasLogin(role), `Acceptance requires LOGINS_FILE with ${role}; CI's one user is not a four-role pass`).toBe(true);
       const owner = await H.scenario(request);

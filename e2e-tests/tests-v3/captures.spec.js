@@ -48,7 +48,7 @@ async function waitReady(page, id) {
   const response = await page.request.get(`/api/captures/${id}/`, { headers: { Authorization: `Bearer ${savedToken()}` } });
   expect(response.ok()).toBe(true); const capture = await response.json(); expect(capture.status).toBe('ready'); return capture;
 }
-test('same pages become one capture; save keeps source, file, exact lines and review status', async ({ page, request }) => {
+test('same pages become one capture; save keeps source, file, exact lines and review status', { tag: "@sandbox" }, async ({ page, request }) => {
   const api = client(request);
   const firm = await firstFirm(api);
   const suppliers = await api.get('suppliers/', { q: 'Udaipur Bullion Suppliers', page_size: 100 });
@@ -120,7 +120,7 @@ test('same pages become one capture; save keeps source, file, exact lines and re
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('capture-saved.png'), fullPage: true });
 });
-test('failed upload survives reload, retries same UUID and reads only once', async ({ page }) => {
+test('failed upload survives reload, retries same UUID and reads only once', { tag: "@sandbox" }, async ({ page }) => {
   await openCapture(page);
   const attempts = [];
   let failUploads = true;
@@ -161,7 +161,7 @@ test('failed upload survives reload, retries same UUID and reads only once', asy
   await opened(page);
   expect(reads).toHaveLength(1);
 });
-test('failed synthetic read stays available; discard can be undone', async ({ page, request }) => {
+test('failed synthetic read stays available; discard can be undone', { tag: "@sandbox" }, async ({ page, request }) => {
   await openCapture(page);
   const readResult = page.waitForResponse(r => /\/api\/captures\/\d+\/read\/$/.test(new URL(r.url()).pathname) && r.ok());
   const capture = await uploadOne(page, await synthetic(page, 'blur.jpg'));
@@ -178,7 +178,7 @@ test('failed synthetic read stays available; discard can be undone', async ({ pa
   expect((await (await restored).json()).status).toBe('failed');
 });
 for (const theme of ['obsidian', 'pearl']) {
-  test(`capture, inbox, fill and discard are WCAG 2.2 AA in ${theme}`, async ({ page }, info) => {
+  test(`capture, inbox, fill and discard are WCAG 2.2 AA in ${theme}`, { tag: "@sandbox" }, async ({ page }, info) => {
     await page.addInitScript(theme => localStorage.setItem('gst3.theme', theme), theme);
     await openCapture(page); expect(await measure(page)).toEqual([]);
     const capture = await uploadOne(page, await synthetic(page)); const ready = await waitReady(page, capture.id);

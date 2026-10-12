@@ -1,6 +1,6 @@
 # Switching the live app to v3, and back if needed
 
-**For Vaibhav.** Written 12 Oct 2026 for the switch-over (v3 design §8). The source is kept with the v3 design files; this copy is what the repo ships.
+**For Vaibhav.** Written 12 Oct 2026 for the switch-over (v3 design §8; part 7 design `2026-10-12-part-7-switchover-design.md`). A copy lives in the repo as `deploy/v3-switch-and-rollback.md`.
 
 **What happens, in short:**
 1. You try the switch on a copy of the live database (Part A).
@@ -24,7 +24,10 @@
    - the production build under its security policy;
    - the rollback with the real `v2.0.9` images;
    - the Neon transfer measurement;
-   - the whole-branch review.
+   - the whole-branch review;
+   - CircleCI and GitHub checks, including `web` and `web-e2e`, green on the PR head.
+
+   `web-e2e` runs the CI-capable subset (X-87). Full sandbox acceptance, including seeded GST scenarios and all four roles, remains the release gate.
 
    PR #171's checklist shows the figures.
 2. **The branch `v3-switch` exists on GitHub.** It is `v3` plus one commit, "v3 7.6: serve web/ in production and retire the v2 frontend". You build the rehearsal images from it.
@@ -176,7 +179,7 @@ You may change anything here, because it is a copy. Check:
 
 Write down anything that looks wrong and send it to the controller. Something that stops billing in these supported checks (can't save or can't print, or can't share in D2) stops the switch. A failed LAN check never stops the switch on its own. Everything else can follow in v3.0.x.
 
-**A9. Rehearse the rollback on the copy (laptop).**
+**A9. Rehearse the rollback on the copy (laptop).** Before starting, complete **gate G0** on PR #171's checklist: Vaibhav confirms both published `v2.0.9` images are pullable, including `docker manifest inspect vaibhav198/gst-billing-nginx:v2.0.9`. If it fails, complete B3's build-and-push step first. Use the published images below, not a locally built substitute.
 ```
 $ R exec --user app web python manage.py prepare_v2_rollback
   → 1 cancelled bill(s) to move …   (your test bill), N token(s) to blacklist
@@ -247,6 +250,7 @@ As a second copy, sign in to the live app and download its backup from the Backu
 $ docker manifest inspect vaibhav198/gst-billing:v2.0.9 >/dev/null && echo web ok
 $ docker manifest inspect vaibhav198/gst-billing-nginx:v2.0.9 >/dev/null && echo nginx ok
 ```
+If the second line prints nothing, the v2 frontend image isn't published (it wasn't on 12 Oct 2026; Ruling X-85). Before the switch, build it from the tag and push it, so a rollback never waits on a build: `git worktree add /tmp/v209 v2.0.9 && docker build -f /tmp/v209/nginx/Dockerfile -t vaibhav198/gst-billing-nginx:v2.0.9 /tmp/v209 && docker push vaibhav198/gst-billing-nginx:v2.0.9`, then run the two checks again. (Use the image name the live compose file uses, if it differs.)
 
 **B4. Say "go".** Tell the controller (through the user). It then:
 1. merges `main` into `v3`, if `main` has moved since the rehearsal;
@@ -260,7 +264,7 @@ Wait for that before C1.
 ## Part C. Merge, tag, and let Watchtower deploy
 
 **C1. Merge (GitHub).**
-1. Open PR #171, then **Ready for review**.
+1. Open PR #171. Confirm CircleCI and GitHub `web` / `web-e2e` are green on its current head, the full sandbox acceptance has passed, and gate G0 records the published rollback-image checks. Only then choose **Ready for review**.
 2. Check GitHub's branch protection: Vaibhav merges as admin where permitted, or with the required checks green. If the retired `frontend` job is still required, replace that requirement with `web` and `web-e2e` before merging.
 3. Merge with **"Create a merge commit"**, not squash. The history keeps every part's commits, which the rollback notes refer to.
 
@@ -442,11 +446,13 @@ In a browser:
 **Accepted limits in v3.0.0:**
 - **A walk-in's full-year statement PDF** takes about 30 seconds.
 - **A customer's GSTIN corrected after GSTR-1 but before GSTR-3B** can put one invoice under two GSTINs in the GSTR-1A file. The CA checks the 1A file before uploading it.
+- **Editing a customer's state after filing** stays allowed. Filed figures are frozen; current books can show a tax-head check until the owner unlocks the month and corrects them.
 - **Editing a customer's GSTIN in the same second a month is being filed** can race. Filed months are frozen copies, so only that one month is exposed.
 - **Editing a customer's state or GSTIN after filing** stays allowed. Filed figures remain frozen; a change to the current books may need a correction through GST returns.
 - **Long downloads:** a backup or export stream can run longer than gunicorn's 90-second worker timeout, which only catches a stuck worker. nginx's 95-second read timeout still ends a stalled one.
 
 **Notes that apply only if v3's server keeps running behind v2's screens** (not this runbook's rollback):
 - v3's server refuses a v2 backup restore at a customer whose stored PAN isn't PAN-shaped. Under the full rollback (F5), v2.0.9 has no such check.
+- v3's server refuses converting a capture that is no longer in the inbox with 400 ("That photo isn't in the inbox any more."). v2.0.9 used to save the bill despite that missing capture.
 - v3's server refuses deleting a filled capture, and refuses a second convert with `capture_used`. Under the full rollback, v2.0.9's old behaviour returns (F8).
 - v3's server refuses creating a purchase with a missing or stale `capture_id` with 400, "That photo isn't in the inbox any more." Under the full rollback, v2.0.9 saved the bill instead.

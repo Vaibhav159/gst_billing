@@ -154,7 +154,7 @@ test("Due next expands the server order and keeps keyboard actions", async ({ pa
 
 test.describe("a real viewer session", () => {
   test.use({ storageState: SIGNED_OUT });
-  test("empty Due next uses viewer words and offers View on returns", async ({ page }, info) => {
+  test("empty Due next uses viewer words and offers View on returns", { tag: "@sandbox" }, async ({ page }, info) => {
     test.skip(!hasLogin("viewer"), "Requires the dispatched sandbox's real viewer login; CI has one owner user.");
     await fixtureDashboard(page, { viewer: true });
     await page.goto("/login");

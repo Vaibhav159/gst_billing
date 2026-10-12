@@ -33,7 +33,7 @@ export function groupBlockers(blockers: EasyGst["blockers"]) {
 export type GstSoFar = { month: string; tax: number; bills: number };
 export function gstShareText(firm: string, previous: EasyGst, current: GstSoFar) {
   return [firm,
-    `${monthLabel(previous.month, { long: true })}: GST on sales ${inr(previous.output)}; left to pay in cash ${inr(previous.cash)}.`,
+    `${monthLabel(previous.month, { long: true })}: Tax in this month's GSTR-3B ${inr(previous.output)}; left to pay in cash ${inr(previous.cash)}.`,
     `GSTR-1 due ${date(previous.due.gstr1)}; GSTR-3B due ${date(previous.due.gstr3b)}.`,
     `${monthLabel(current.month, { long: true })} so far: GST on sales ${inr(current.tax)} · ${plural(current.bills, "bill")}.`,
     ...(previous.openingMissing ? [OPENING_WORDS] : []),

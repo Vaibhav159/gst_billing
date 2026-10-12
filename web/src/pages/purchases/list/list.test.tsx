@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { ScopeProvider } from "@/core/scope";
@@ -9,6 +9,10 @@ import PurchaseList from "../PurchaseList";
 
 vi.mock("@/core/purchases/export", () => ({ purchaseExport: vi.fn(async () => {}) }));
 const mount = (path = "/purchases", viewer = false) => renderApp(<ScopeProvider><Routes><Route path="/purchases" element={<PurchaseList />} /><Route path="/purchases/:id" element={<p>Opened the purchase</p>} /></Routes></ScopeProvider>, { path, ...(viewer ? { me: { role: "viewer" as const, permissions: ["view"] } } : {}) });
+// The full two-CPU CI run can take over a second to deliver query results.
+// Keep waiting for the actual request/DOM signal; never sleep to guess readiness.
+beforeAll(() => configure({ asyncUtilTimeout: 5000 }));
+afterAll(() => configure({ asyncUtilTimeout: 1000 }));
 beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true }); vi.setSystemTime(new Date("2026-10-08T12:30:00+05:30")); });
 afterEach(() => vi.useRealTimers());
 

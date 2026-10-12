@@ -82,7 +82,7 @@ async function noShareClaim(page) {
 test.describe('Easy GST wrapper browser boundaries', () => {
   test.beforeEach(async ({}, info) => { test.skip(info.project.name !== 'phone', 'The Easy wrapper is a phone route'); });
 
-  test('Easy GST wrapper: native cancellation makes no success claim or fallback', async ({ page, request }) => {
+  test('Easy GST wrapper: native cancellation makes no success claim or fallback', { tag: "@sandbox" }, async ({ page, request }) => {
     const { state } = await fixture(page, request); await ready(page);
     await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: async value => { window.__easyShares.push(value); throw new DOMException('Cancelled', 'AbortError'); } }));
     await H.tap(page.getByRole('button', { name: SHARE }));
@@ -93,7 +93,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     expect(state.writes).toEqual([]);
   });
 
-  test('Easy GST wrapper: native rejection is explained and the next share can succeed', async ({ page, request }) => {
+  test('Easy GST wrapper: native rejection is explained and the next share can succeed', { tag: "@sandbox" }, async ({ page, request }) => {
     const { state } = await fixture(page, request); await ready(page);
     await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: async () => { throw new Error('Synthetic native refusal'); } }));
     await H.tap(page.getByRole('button', { name: SHARE }));
@@ -107,7 +107,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     expect(state.writes).toEqual([]);
   });
 
-  test('Easy GST wrapper: unsupported phone opens WhatsApp without a recipient or success claim', async ({ page, request }) => {
+  test('Easy GST wrapper: unsupported phone opens WhatsApp without a recipient or success claim', { tag: "@sandbox" }, async ({ page, request }) => {
     const { s, state } = await fixture(page, request); await ready(page);
     await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: undefined }));
     await H.tap(page.getByRole('button', { name: SHARE }));
@@ -123,7 +123,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     expect(state.writes).toEqual([]);
   });
 
-  test('Easy GST wrapper: loading retains skeletons and withholds figures and sharing', async ({ page, request }) => {
+  test('Easy GST wrapper: loading retains skeletons and withholds figures and sharing', { tag: "@sandbox" }, async ({ page, request }) => {
     const { state } = await fixture(page, request, { held: true });
     try {
       await H.go(page, '/e/gst');
@@ -136,7 +136,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     await expect(page.locator('main')).toContainText('₹10,378.76');
   });
 
-  test('Easy GST wrapper: offline return read says what is unavailable without invented totals', async ({ page, request, context }) => {
+  test('Easy GST wrapper: offline return read says what is unavailable without invented totals', { tag: "@sandbox" }, async ({ page, request, context }) => {
     const { state } = await fixture(page, request, { held: true });
     try {
       await H.go(page, '/e/gst');
@@ -149,7 +149,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     } finally { state.mode = 'ok'; state.release(); await context.setOffline(false); }
   });
 
-  test('Easy GST wrapper: a refused return preserves server words and recovers on Try again', async ({ page, request }) => {
+  test('Easy GST wrapper: a refused return preserves server words and recovers on Try again', { tag: "@sandbox" }, async ({ page, request }) => {
     const { state } = await fixture(page, request); state.mode = 'reject';
     await H.go(page, '/e/gst');
     await expect(page.getByText('The synthetic GST month was refused. Try again.')).toBeVisible();
@@ -161,7 +161,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     await expect(page.locator('main')).toContainText('₹10,378.76');
   });
 
-  test('Easy GST wrapper: filed return shows both recorded filing dates', async ({ page, request }) => {
+  test('Easy GST wrapper: filed return shows both recorded filing dates', { tag: "@sandbox" }, async ({ page, request }) => {
     await fixture(page, request, { stage: 'filed' }); await ready(page);
     await expect(page.getByTestId('easy-gst-stage')).toHaveText('Filed');
     await expect(returnBox(page).getByText(`Filed ${H.date(today())}`, { exact: true })).toHaveCount(2);
@@ -169,7 +169,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     await expect(returnBox(page)).not.toContainText("can't file");
   });
 
-  test('Easy GST wrapper: legacy filed return never invents filing dates', async ({ page, request }) => {
+  test('Easy GST wrapper: legacy filed return never invents filing dates', { tag: "@sandbox" }, async ({ page, request }) => {
     const { state } = await fixture(page, request, { stage: 'filed' });
     state.payload.record = { ...state.payload.record, legacy: true, gstr1: null, gstr3b: null };
     await ready(page);
@@ -179,7 +179,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
     await expect(returnBox(page).getByText(/^Due /)).toHaveCount(0);
   });
 
-  test('Easy GST wrapper: unlocked corrections keep filed history and use the shared stage', async ({ page, request }) => {
+  test('Easy GST wrapper: unlocked corrections keep filed history and use the shared stage', { tag: "@sandbox" }, async ({ page, request }) => {
     const { s, state } = await fixture(page, request, { stage: 'unlocked' });
     state.payload.checks.blockers = [{ kind: 'hsn', blocks: true, text: 'A synthetic item has no HSN code.', detail: '',
       bills: [{ id: 920001, invoice_number: `SYN/${H.fy()}/1`, invoice_date: `${state.payload.month}-09`, customer_name: 'Synthetic GST buyer', status: 'active', total_amount: '11024.09' }],
@@ -195,7 +195,7 @@ test.describe('Easy GST wrapper browser boundaries', () => {
 });
 
 // /e is deliberately unavailable on desktop. The phone fallback is exercised through its button above.
-test('Easy GST desktop boundary: redirect Easy without sharing', async ({ page, request }, info) => {
+test('Easy GST desktop boundary: redirect Easy without sharing', { tag: "@sandbox" }, async ({ page, request }, info) => {
   test.skip(info.project.name !== 'phone', 'The phone acceptance project also measures the desktop boundary');
   await page.setViewportSize({ width: 1280, height: 900 });
   const { state } = await fixture(page, request);

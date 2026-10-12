@@ -28,7 +28,7 @@ describe("the Easy projection of part 3's answer", () => {
     expect(groups[3].words).toEqual(["Correct the GSTIN on the customer."]);
   });
   test("share contains exact money, both due dates and this month; opening caveat travels", () => {
-    expect(gstShareText("KIRAN GOLD HOUSE", easyGst(month), { month: "2026-10", tax: 880071, bills: 3 })).toBe("KIRAN GOLD HOUSE\nSeptember 2026: GST on sales ₹10,378.76; left to pay in cash ₹2,120.00.\nGSTR-1 due 11 Oct 2026; GSTR-3B due 20 Oct 2026.\nOctober 2026 so far: GST on sales ₹8,800.71 · 3 bills.\nThe opening credit isn't typed yet, so the credit carried in may be too low.");
+    expect(gstShareText("KIRAN GOLD HOUSE", easyGst(month), { month: "2026-10", tax: 880071, bills: 3 })).toBe("KIRAN GOLD HOUSE\nSeptember 2026: Tax in this month's GSTR-3B ₹10,378.76; left to pay in cash ₹2,120.00.\nGSTR-1 due 11 Oct 2026; GSTR-3B due 20 Oct 2026.\nOctober 2026 so far: GST on sales ₹8,800.71 · 3 bills.\nThe opening credit isn't typed yet, so the credit carried in may be too low.");
   });
 });
 describe("sharing GST text", () => {

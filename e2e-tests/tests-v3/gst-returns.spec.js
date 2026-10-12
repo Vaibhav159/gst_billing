@@ -129,7 +129,7 @@ async function emptyFixture(api) {
 }
 
 // The unit vectors own the arithmetic oracle. This checks the server's exact decimal answers reach every surface.
-test("GST figures, portal sections and WCAG 2.2 AA in both themes", async ({ page, request }, info) => {
+test("GST figures, portal sections and WCAG 2.2 AA in both themes", { tag: "@sandbox" }, async ({ page, request }, info) => {
   test.slow();
   const api = client(request), phone = info.project.name === "phone";
   const m = await findMonth(api, ["ready", "blocked", "gstr1", "filed", "open"], (m) => paise(m.gstr3b.output.total) > 0n && m.gstr1.file.b2cl > 0 && m.gstr1.file.hsn > 0, "a month with positive sales tax, a B2CL bill and HSN rows");
@@ -176,7 +176,7 @@ test("GST figures, portal sections and WCAG 2.2 AA in both themes", async ({ pag
   await expect(page.locator("#gst-ledger")).toContainText("It can never pay CGST.");
 });
 
-test("a blocker prevents a portal file and requires the explicit filing acknowledgement", async ({ page, request }) => {
+test("a blocker prevents a portal file and requires the explicit filing acknowledgement", { tag: "@sandbox" }, async ({ page, request }) => {
   const m = await findMonth(client(request), ["blocked"], () => true, "an unfiled month with a GSTR-1 blocker");
   await openMonth(page, m);
   const check = m.checks.blockers[0];
@@ -295,7 +295,7 @@ test("corrections name GSTR-1A before 3B and the carrying return after 3B", asyn
   }
 });
 
-test("month end shows phone firm badges or desktop keyboard rows and a filing sheet", async ({ page, request }, info) => {
+test("month end shows phone firm badges or desktop keyboard rows and a filing sheet", { tag: "@sandbox" }, async ({ page, request }, info) => {
   const data = await client(request).get("gst/month-end/", { month: monthBefore(today()) });
   expect(data.firms.length, "month-end keyboard acceptance needs at least two firms").toBeGreaterThan(1);
   if (info.project.name === "phone") {

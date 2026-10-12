@@ -53,7 +53,7 @@ export function GstContent({ firmName, today, current, previous, onVisit }: Prop
       <p className="text-md text-muted -mt-2">Your CA files both.</p>
       {previous.output !== null ? <>
         <div className="rounded-ctl border border-line bg-field px-4 py-1"><DL rows={[
-          [`GST on ${last}'s sales`, <Money key="o" value={previous.output} />],
+          ["Tax in this month's GSTR-3B", <Money key="o" value={previous.output} />],
           ["Left to pay in cash", previous.cash === 0 ? <span key="c" className="text-sale font-semibold">Nothing</span> : <Money key="c" value={previous.cash} strong />],
         ]} /></div>
         <p className="text-md text-muted">{previous.cash === 0 ? `GST you paid on purchases covers it all. ${inr(previous.credit)} of credit is left for next month.` : "GST you paid on purchases is taken off first."}</p>

@@ -72,7 +72,7 @@ async function prototypeShot(browser, info, screen, width, theme) {
 }
 
 for (const width of [390, 320]) for (const theme of ['obsidian', 'pearl']) for (const screen of ROUTES) {
-  test(`Easy visual ${screen.route} ${width} ${theme}: WCAG, targets and prototype pair`, async ({ page, request, browser }, info) => {
+  test(`Easy visual ${screen.route} ${width} ${theme}: WCAG, targets and prototype pair`, { tag: "@sandbox" }, async ({ page, request, browser }, info) => {
     test.skip(info.project.name !== 'phone', 'the phone project measures both requested widths');
     test.setTimeout(120_000);
     const s = await H.scenario(request); const c = await H.customer(s.api, s.firm); const b = await newBill(s.api, { firm: s.firm, customer: c });
@@ -115,7 +115,7 @@ const STATES = [
   },
 ];
 for (const width of [390, 320]) for (const theme of ['obsidian', 'pearl']) for (const screen of STATES) {
-  test(`Easy visual ${screen.route} ${screen.state} ${width} ${theme}: WCAG, targets and prototype pair`, async ({ page, request, browser }, info) => {
+  test(`Easy visual ${screen.route} ${screen.state} ${width} ${theme}: WCAG, targets and prototype pair`, { tag: "@sandbox" }, async ({ page, request, browser }, info) => {
     test.skip(info.project.name !== 'phone', 'the phone project measures both requested widths');
     test.setTimeout(120_000);
     const s = await H.scenario(request); const c = await H.customer(s.api, s.firm);

@@ -59,7 +59,7 @@ async function open(page, m) {
 }
 
 for (const role of ["owner", "accountant", "staff", "viewer"]) {
-  test(`${role}: GST visibility and server permissions agree`, async ({ page }) => {
+  test(`${role}: GST visibility and server permissions agree`, { tag: "@sandbox" }, async ({ page }) => {
     test.slow();
     expect(hasLogin(role), `Integration prerequisite: LOGINS_FILE must supply ${role}; one-user CI does not prove four-role permissions`).toBe(true);
     await page.goto("/login");

@@ -165,7 +165,7 @@ test("pre-April-2025 import previews remain outside the credit ledger", async ({
   expect(months).toMatchObject({ bill_month: "2025-03", bill_month_closed: false, default: null, options: [], lapsed: false });
 });
 
-test("twelve synthetic photos are read once, retain rows, and show both directions and a firm pair", async ({ page }, info) => {
+test("twelve synthetic photos are read once, retain rows, and show both directions and a firm pair", { tag: "@sandbox" }, async ({ page }, info) => {
   test.skip(info.project.name !== "desktop", "Batch photo reading is a computer flow; the phone guidance has its own assertion.");
   test.skip(process.env.E2E_FAKE_READER !== "1", "Enable only against the assigned sandbox configured with AI_READER=fake.");
   test.setTimeout(90_000);
@@ -209,7 +209,7 @@ test("twelve synthetic photos are read once, retain rows, and show both directio
   await page.screenshot({ path: info.outputPath("twelve-synthetic-photos.png"), fullPage: true });
 });
 
-test("a blurred synthetic photo retries only when asked", async ({ page }, info) => {
+test("a blurred synthetic photo retries only when asked", { tag: "@sandbox" }, async ({ page }, info) => {
   test.skip(info.project.name !== "desktop", "Photo reading needs the computer layout.");
   test.skip(process.env.E2E_FAKE_READER !== "1", "Enable only against AI_READER=fake; names containing blur fail by contract.");
   let reads = 0;

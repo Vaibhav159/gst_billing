@@ -7,7 +7,13 @@ const { AUTH } = require("./tests-v3/session");
 
 const launchOptions = process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH.replace(/^~/, process.env.HOME) } : {};
 
+// X-87: the full seed/four-role and long-running acceptance suite is the release gate.
+// CI proves these self-contained flows on its fresh one-user database, in both viewports.
+const ci = !!process.env.CI;
 module.exports = defineConfig({
+  testMatch: ci ? /(?:^|\/)(shell|signed-out|sales|bill-form|purchases|purchases-a11y|gst-returns|easy-bill|easy-send-core)\.spec\.js$/ : undefined,
+  grepInvert: ci ? /@sandbox|@acceptance/ : undefined,
+  globalTimeout: ci ? 20 * 60_000 : undefined,
   testDir: "./tests-v3",
   timeout: 60_000,
   forbidOnly: !!process.env.CI,

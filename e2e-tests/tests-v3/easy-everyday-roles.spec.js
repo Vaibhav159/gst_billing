@@ -35,7 +35,7 @@ async function choose(page, name) {
   await expect(page.getByRole("button", { name: /^Firm on this phone/ })).toContainText(name);
 }
 
-for (const role of ["owner", "accountant", "staff", "viewer"]) test(`${role}: Everyday actions follow the role and the bill stays readable`, async ({ page, request }) => {
+for (const role of ["owner", "accountant", "staff", "viewer"]) test(`${role}: Everyday actions follow the role and the bill stays readable`, { tag: "@sandbox" }, async ({ page, request }) => {
   test.skip(!hasLogin(role), `${role} login is not supplied in this environment`);
   const bill = await newBill(client(request));
   await login(page, role);
@@ -65,7 +65,7 @@ for (const role of ["owner", "accountant", "staff", "viewer"]) test(`${role}: Ev
   else await expect(page.getByRole("button", { name: "Add a customer" })).toBeVisible();
 });
 
-test("two people on one phone retain different explicit firms across sign-out", async ({ page, request }) => {
+test("two people on one phone retain different explicit firms across sign-out", { tag: "@sandbox" }, async ({ page, request }) => {
   test.skip(!hasLogin("owner") || !hasLogin("staff"), "owner and staff logins are needed");
   const firms = (await client(request).get("businesses/", { page_size: 100 })).results;
   expect(firms.length).toBeGreaterThanOrEqual(2);

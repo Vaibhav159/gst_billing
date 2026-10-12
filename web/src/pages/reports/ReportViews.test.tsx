@@ -38,6 +38,8 @@ it("shows output and 4C separately, paid/to-pay and whole-month cash from the se
   const data: TaxReport = { firms: [{ firm, months: [{ month: "2026-09", output: heads, credit: zero, cash: heads, carry_on: zero, state: "paid", filed_on: "2026-10-19" }], totals: { output: heads, credit: zero, cash: heads } }], gap: [], whole_months: null };
   renderApp(<TaxView ctx={ctx} data={data} />);
   expect(screen.getAllByText("Credit on purchases")).toHaveLength(2);
+  expect(screen.getAllByText("Tax in GSTR-3B")).toHaveLength(2);
+  expect(screen.getByText("Includes corrections carried in from earlier filed months.")).toBeVisible();
   expect(screen.getByText("paid · 19 Oct 2026")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Sep 2026" })).toHaveAttribute("href", "/gst?firm=3&month=2026-09");
 });

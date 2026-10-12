@@ -11,7 +11,7 @@ typesPassword(test);
 test.use({ trace: "off", screenshot: "off", video: "off" });
 temporaryPeople(test);
 
-test("fake SMS resets a temporary owner's password and ends their existing session", async ({ page, request, browser, baseURL }) => {
+test("fake SMS resets a temporary owner's password and ends their existing session", { tag: "@sandbox" }, async ({ page, request, browser, baseURL }) => {
   test.skip(process.env.SANDBOX_FAKE_SMS !== "1", "P4-11 / X-40: requires 4B's explicitly enabled sandbox fake SMS provider and readable outbox.");
   const file = process.env.SMS_FAKE_OUTBOX_FILE;
   if (!file || !isAbsolute(file)) throw new Error("Set the assigned sandbox's absolute fake SMS outbox path.");

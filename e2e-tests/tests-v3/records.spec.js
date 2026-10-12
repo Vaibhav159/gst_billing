@@ -184,7 +184,7 @@ for (const theme of ["obsidian", "pearl"]) {
   });
 }
 
-test("desktop: every Records page stays idle for 180 seconds without another API request", async ({ page, request }, info) => {
+test("desktop: every Records page stays idle for 180 seconds without another API request", { tag: "@acceptance" }, async ({ page, request }, info) => {
   test.skip(info.project.name !== "desktop");
   test.setTimeout(300_000);
   const api = client(request);

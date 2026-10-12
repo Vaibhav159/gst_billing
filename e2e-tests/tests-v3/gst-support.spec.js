@@ -230,7 +230,7 @@ for (const theme of ["obsidian", "pearl"]) {
     expect(await measure(page)).toEqual([]);
   });
 
-  test(`${theme}: live CA workbook preview and XLSX download for this role`, async ({ page, request }, info) => {
+  test(`${theme}: live CA workbook preview and XLSX download for this role`, { tag: "@sandbox" }, async ({ page, request }, info) => {
     test.setTimeout(120_000);
     const { me, fy } = await context(request);
     await prepare(page, me, theme, fy);

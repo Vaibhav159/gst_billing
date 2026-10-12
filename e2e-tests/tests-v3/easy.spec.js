@@ -24,7 +24,7 @@ test.afterEach(async ({ page, request }) => {
   for (const customer of await Promise.all(customerSaves)) await api.del(`customers/${customer.id}/`);
 });
 
-test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one send', async ({ page, request }) => {
+test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one send', { tag: "@sandbox" }, async ({ page, request }) => {
   test.setTimeout(180_000);
   const s = await H.scenario(request);
   const buyer = await H.customer(s.api, s.firm);
@@ -150,7 +150,7 @@ test('Easy acceptance: Home, bill brain, offline keeping, saved paper and one se
   await H.check(248, async () => { await expect(page.getByText(`Until it's fixed, your CA can't file ${H.monthName(gst.month)}'s return.`, { exact: false }).first()).toBeVisible(); await expect(page.getByRole('button', { name: 'Fix it in the full view' }).first()).toBeVisible(); });
 });
 
-test('Easy acceptance: typed-rate slips, current-year reads and the older-day twin', async ({ page, request }) => {
+test('Easy acceptance: typed-rate slips, current-year reads and the older-day twin', { tag: "@sandbox" }, async ({ page, request }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const s = await H.scenario(request); await H.easyStorage(page, s);
   const buyer = await H.customer(s.api, s.firm);
@@ -213,7 +213,7 @@ test('Easy acceptance: typed-rate slips, current-year reads and the older-day tw
   await H.check(601, async () => expect(errors).toEqual([]));
 });
 
-test('Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks', async ({ page, request }) => {
+test('Easy acceptance: custom materials, walk-in send, offline cancel, remake and cash checks', { tag: "@sandbox" }, async ({ page, request }) => {
   test.setTimeout(120_000);
   const s = await H.scenario(request); await H.easyStorage(page, s);
   await H.go(page, '/e/new'); await H.tap(page.getByRole('button', { name: /^Walk-in customer/i }));
@@ -277,7 +277,7 @@ test('Easy acceptance: custom materials, walk-in send, offline cancel, remake an
   await H.check(358, async () => { await expect(draft).toHaveCount(0); await expect(H.toast(page)).toContainText('Unfinished bill removed'); });
 });
 
-test('Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering', async ({ page, request }) => {
+test('Easy acceptance: customer creation, duplicate phone, GSTIN, offline values and just-added ordering', { tag: "@sandbox" }, async ({ page, request }) => {
   const s = await H.scenario(request); await H.easyStorage(page, s);
   const buyer = await H.customer(s.api, s.firm); const name = `Easy interstate ${Date.now()}`;
   await H.go(page, '/e/new'); await page.getByLabel('Search by name or phone').fill(name);
@@ -306,7 +306,7 @@ test('Easy acceptance: customer creation, duplicate phone, GSTIN, offline values
   await H.check(398, async () => { await expect(page.locator('main li').first()).toContainText(newName); await expect(page.locator('main li').first()).toContainText('Just added'); });
 });
 
-test('Easy acceptance: slow save stays modal, list skeletons and offline sections', async ({ page, request }) => {
+test('Easy acceptance: slow save stays modal, list skeletons and offline sections', { tag: "@sandbox" }, async ({ page, request }) => {
   const s = await H.scenario(request); await H.easyStorage(page, s);
   const buyer = await H.customer(s.api, s.firm); await H.chooseBuyer(page, buyer); await H.item(page); await H.fillLine(page, '4.145', '6512.50'); await H.tap(page.getByRole('radio', { name: 'Cash', exact: true }));
   const d = await H.review(page);
@@ -337,7 +337,7 @@ test('Easy acceptance: slow save stays modal, list skeletons and offline section
   await page.context().setOffline(false);
 });
 
-test('Easy acceptance: scoped GST share, bill links and no idle polling', async ({ page, request }) => {
+test('Easy acceptance: scoped GST share, bill links and no idle polling', { tag: "@sandbox" }, async ({ page, request }) => {
   const s = await H.scenario(request); await H.easyStorage(page, s);
   const month = await s.api.get('gst/month/', { business_id: s.firm.id, month: monthBefore(today()) });
   await H.go(page, '/e/gst');
@@ -352,7 +352,7 @@ test('Easy acceptance: scoped GST share, bill links and no idle polling', async 
   await H.go(page, '/e/capture'); await H.waitIdleWithoutRequests(page);
 });
 
-test('Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo', async ({ page, request }) => {
+test('Easy acceptance: capture type checks, retained upload, upload then read and immediate discard Undo', { tag: "@sandbox" }, async ({ page, request }) => {
   const s = await H.scenario(request); await H.easyStorage(page, s);
   // Prove the dated/narrow real endpoint independently; the rest of this test is a synthetic AI transport fixture.
   const live = await s.api.get('captures/', { business_id: s.firm.id, day: today(), summary: 1, page_size: 50 });
@@ -412,7 +412,7 @@ test('Easy acceptance: capture type checks, retained upload, upload then read an
   await H.check(429, async () => { await expect(page.getByText(/^Couldn't read this photo/)).toHaveCount(0); expect(calls).toContain(`DELETE /api/captures/${failed.id}/`); await expect.poll(() => calls.filter((c) => c === 'POST /api/captures/').length).toBe(2); });
 });
 
-test('Easy acceptance: End of the day uses server figures and stale rates never nag', async ({ page, request }) => {
+test('Easy acceptance: End of the day uses server figures and stale rates never nag', { tag: "@sandbox" }, async ({ page, request }) => {
   const s = await H.scenario(request); await H.easyStorage(page, s);
   await page.clock.setFixedTime(new Date(`${today()}T18:30:00+05:30`));
   const day = await s.api.get('sales/', { business_id: s.firm.id, start_date: today(), end_date: today(), page_size: 50 });

@@ -51,6 +51,7 @@ test.each(["loading", "error"] as const)("an unresolved firm in %s state sends n
 test("the Home card and page share their two narrow reads and keep server paise", async () => {
   const calls = server(); renderApp(<><GstCard /><Gst /></>, { path: "/e/gst" });
   expect(await screen.findByText("₹10,378.76")).toBeVisible();
+  expect(screen.getByText("Tax in this month's GSTR-3B")).toBeVisible();
   expect(screen.getAllByText("₹8,800.71")).toHaveLength(2);
   expect(calls).toHaveLength(2);
   expect(calls.find(c => c.url === "sales/")?.params).toMatchObject({ business_id: 3, month: "2026-10", page_size: 1 });
@@ -81,7 +82,7 @@ test.each(["shared", "cancelled", "rejected"] as const)("native GST sharing hand
   renderApp(<Gst />, { path: "/e/gst" });
   fireEvent.click(await screen.findByRole("button", { name: "Share these figures with your CA" }));
   await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
-  expect(share.mock.calls[0][0]).toEqual({ text: expect.stringContaining("GST on sales ₹10,378.76; left to pay in cash ₹2,120.00.") });
+  expect(share.mock.calls[0][0]).toEqual({ text: expect.stringContaining("Tax in this month's GSTR-3B ₹10,378.76; left to pay in cash ₹2,120.00.") });
   await waitFor(() => expect(screen.getByRole("button", { name: "Share these figures with your CA" })).toBeEnabled());
   expect(open).not.toHaveBeenCalled();
   expect(calls.every(c => c.method === "GET")).toBe(true);

@@ -165,3 +165,21 @@ Pitfalls:
   cache (`web/node_modules/.vite`) may be older than an import such as the PDF's
   `qrcode`. Otherwise Vite optimizes that dependency the first time a page
   needs it and reloads the page mid-test.
+
+### CI and sandbox acceptance (X-87)
+
+`CI=true` selects nine self-contained v3 spec files in `v3.config.js`: shell,
+signed-out, sales, bill-form, purchases, purchases-a11y, gst-returns, easy-bill
+and easy-send-core. Both desktop and phone run, with one worker and no retries.
+Playwright has a 20-minute global limit inside GitHub's 25-minute step.
+
+Tests tagged `@sandbox` need seeded scenarios, multiple real roles, fake services,
+or the release stack; the review's sales-search and CA workbook cases also stay
+in sandbox acceptance. `@acceptance` marks long idle/large-restore checks.
+Keep metadata tags separate from titles: the Easy evidence checker matches titles.
+The other files remain part of broader acceptance coverage. With `CI` unset,
+the full suite collects every file and tag; run it on the assigned sandbox with
+its lock, seed and role logins. That full acceptance remains a release gate.
+
+CI also runs `node --test tests-node/*.test.js scripts/*.test.mjs` after `npm ci`.
+These test helpers, CI selection and acceptance evidence without a live stack.

@@ -324,10 +324,14 @@ jobs:
         run: |
           npm ci
           npx playwright install chromium
+      - name: Test E2E helpers and acceptance evidence checks
+        working-directory: e2e-tests
+        run: node --test tests-node/*.test.js scripts/*.test.mjs
       - name: Run v3 E2E
         working-directory: e2e-tests
-        # one worker on purpose (one login, the phone's mode kept on the server, one number series); a full run is
-        # ~15 min on a 2-CPU machine (after 1D's axe states) and each part adds specs, so the limit leaves room (Ruling 1E-22)
+        # X-87: v3.config.js selects fresh-database CI flows and excludes @sandbox/@acceptance.
+        # One worker: one login, saved phone mode and one bill-number series. Playwright stops
+        # at 20 minutes, leaving time to report within this 25-minute step.
         timeout-minutes: 25
         env:
           BASE_URL_V3: http://127.0.0.1:8081

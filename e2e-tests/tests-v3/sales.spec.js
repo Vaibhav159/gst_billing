@@ -131,7 +131,7 @@ test("desktop: a walk-in's bill goes to the number typed: that chat opens, and t
   expect((await api.get(`sales/${bill.id}/`)).sent).toMatchObject({ via: "whatsapp", to: "9829041122" });
 });
 
-test("desktop: Ctrl K puts the bill with the number typed first, so Enter opens it, and finds it deleted to restore", async ({ page, request }, info) => {
+test("desktop: Ctrl K puts the bill with the number typed first, so Enter opens it, and finds it deleted to restore", { tag: "@sandbox" }, async ({ page, request }, info) => {
   test.skip(info.project.name !== "desktop");
   const api = client(request);
   const bill = await billToSearch(api);
