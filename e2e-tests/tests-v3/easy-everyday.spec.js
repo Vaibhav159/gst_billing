@@ -144,6 +144,7 @@ test("121 unsent bills are gathered before first send; rows 1, 51 and 121 remain
     await ready.getByRole("button", { name: "Share", exact: true }).click();
     expect((await recorded).ok()).toBe(true);
     await expect(sheet.getByRole("button", { name: labels[index], exact: true })).toHaveCount(0);
+    await expect(ready).toHaveCount(0);
   }
   expect(await page.evaluate(() => window.__easyShares)).toBe(3);
   const sentEvents = events.filter((event) => event.method === "POST" && /\/sent\/$/.test(event.url.pathname));
@@ -272,7 +273,7 @@ test("Profile identity and empty password fields stay readable offline", async (
   const api = client(request), firm = await easyFirm(api), account = await api.get("account/");
   await chooseInitially(page, api, firm);
   await loaded(page, "/e/profile", "Profile and password");
-  await expect(page.getByText(`@${account.username}`, { exact: true })).toBeVisible();
+  await expect(page.locator("header").getByText(`@${account.username}`, { exact: true })).toBeVisible();
   for (const label of ["Current password", "New password", "New password again"]) await expect(page.getByLabel(label, { exact: true })).toHaveValue("");
   await context.setOffline(true);
   await expect(page.getByText(/You're offline/).first()).toBeVisible();

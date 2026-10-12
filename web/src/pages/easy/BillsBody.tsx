@@ -2,10 +2,11 @@ import { useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { ReceiptText, SearchX } from "lucide-react";
 import { rowsOf, type useSalesList } from "@/core/api/sales";
+import { useNetwork } from "@/core/api/network";
 import { dateLong, fyOf, monthLabel, monthOf, plural, rangeLabel, todayIST } from "@/core/format";
 import type { BillRow } from "@/core/sales/types";
 import { useDebounced } from "@/core/useDebounced";
-import { Checkbox, EmptyState, Field, ListSkeleton, Money, QueryView, SearchInput, Segmented, Skeleton } from "@/core/ui";
+import { Checkbox, EmptyState, Field, ListSkeleton, LoadError, Money, QueryView, SearchInput, Segmented, Skeleton } from "@/core/ui";
 
 const WHEN = ["today", "month", "year"] as const;
 type When = typeof WHEN[number];
@@ -18,6 +19,7 @@ export type BillsBodyProps = {
 
 /** The first 40 rows only; the server summary is the whole filtered period. */
 export function BillsBody({ firmId, renderRows, useBills }: BillsBodyProps) {
+  const net = useNetwork();
   const [params, setParams] = useSearchParams();
   const today = todayIST();
   const ym = monthOf(today);
@@ -50,7 +52,9 @@ export function BillsBody({ firmId, renderRows, useBills }: BillsBodyProps) {
       </div>
       <QueryView query={bills} what="the bill list" skeleton={<div className="flex flex-col gap-3"><Skeleton w="70%" h={26} /><ListSkeleton rows={4} what="sales bills" /></div>}>
         {(data) => {
-          if (bills.isPlaceholderData) return <ListSkeleton rows={4} what="sales bills" />;
+          if (bills.isPlaceholderData) return bills.isPaused && net === "offline"
+            ? <LoadError problem={{ kind: "offline", message: "You're offline" }} what="the bill list" />
+            : <ListSkeleton rows={4} what="sales bills" />;
           const page = data.pages[0];
           const rows = rowsOf(data).slice(0, 40);
           return <>
