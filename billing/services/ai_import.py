@@ -20,6 +20,7 @@ from billing.models import Business, Customer, Invoice, LineItem
 from billing.numbering import lock_firms
 from billing.period_lock import assert_period_unlocked
 from billing.services.line_items import build_line_items
+from billing.services.sales import frozen_firms
 from billing.tax_rules import clean_gstin, gstin_problem, itc_refusal
 from billing.utils import AIInvoiceProcessor
 
@@ -345,6 +346,8 @@ def create_from_ai(request):
             invoice_date=inv_date,
             type_of_invoice=type_of_invoice,
             total_amount=invoice_data.get("total_amount", 0) or 0,
+            # X-64: a sale freezes its firm at create, read under the firm's lock.
+            firm_snapshot=frozen_firms(business.pk)[business.pk] if type_of_invoice == INVOICE_TYPE_OUTWARD else None,
         )
 
         # Persist the source image as audit trail. Done AFTER

@@ -61,7 +61,7 @@ from billing.services.customers import (
 )
 from billing.services.customers import statement as customer_statement
 from billing.services.line_items import build_line_items
-from billing.services.sales import CANCELLED_WORDS
+from billing.services.sales import CANCELLED_WORDS, frozen_firms
 from billing.tax_rules import itc_refusal, registered
 from billing.utils import (
     AIInvoiceProcessingError,
@@ -1096,6 +1096,10 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 data = serializer.validated_data
                 if data.get("type_of_invoice") == INVOICE_TYPE_INWARD:
                     lock_firms(data["business"].pk)
+                elif data.get("type_of_invoice", INVOICE_TYPE_OUTWARD) == INVOICE_TYPE_OUTWARD:
+                    # X-64: a v2 sale freezes its firm at create, as v3's do (firm_snapshot is read-only to v2's
+                    # serializer, so it goes in beside the validated fields).
+                    data["firm_snapshot"] = frozen_firms(data["business"].pk)[data["business"].pk]
                 assert_period_unlocked(data["business"].pk, data["invoice_date"], "create")
                 self.perform_create(serializer)  # saves invoice + writes audit log
                 invoice = serializer.instance

@@ -46,6 +46,16 @@ def firm_snapshot(business):
     return data
 
 
+def frozen_firms(*business_ids):
+    """The firms v2 sales freeze at create (Ruling X-64), {id: snapshot}, read fresh under the firms' locks in
+    the create's transaction. A firm edit holds every firm's lock, so it either committed first (the bills freeze
+    the new identity) or waits until these bills commit, and its freeze then finds them already frozen."""
+    from billing.cache import uncached
+    from billing.models import Business
+    lock_firms(*business_ids)
+    return {business.pk: firm_snapshot(business) for business in uncached(Business).filter(pk__in=business_ids)}
+
+
 def entity_name(invoice):
     """The audit log's name for a bill, as v2's InvoiceViewSet writes it, kept to the column's 255
     characters: a 255-character customer name would make Postgres refuse the row (a 500)."""

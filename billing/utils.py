@@ -574,6 +574,9 @@ def process_invoice_csv(
 
         # Process each invoice with its line items in a transaction
         with transaction.atomic():
+            from billing.services.sales import frozen_firms
+            # X-64: every bill in the file freezes the firm as it stands under its lock.
+            snapshot = frozen_firms(business.id)[business.id]
             # One catalog read for the whole file (Product.name is unique) —
             # the old per-line helper SELECTed the product and the invoice
             # again for every row.
@@ -605,6 +608,7 @@ def process_invoice_csv(
                     invoice_date=invoice_date,
                     type_of_invoice="outward",  # Default to outward invoice
                     workspace_id=1,
+                    firm_snapshot=snapshot,
                 )
 
                 print(f"Invoice {invoice_number} created with {invoice=}")

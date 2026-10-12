@@ -19,6 +19,7 @@ from billing.constants import INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD, normali
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.numbering import lock_firms
 from billing.period_lock import locked_period_or_none
+from billing.services.sales import frozen_firms
 from billing.tax_rules import (
     LINE_MONEY_TOLERANCE,
     clean_gstin,
@@ -422,8 +423,11 @@ def run_bulk_import(request):
     new_customers_added_to_biz = []  # (customer, business) pairs
 
     with transaction.atomic():
-        lock_firms(*(business.pk for row in invoices_data if row.get("type") == "INWARD"
-                     if (business := business_for(row)) is not None))
+        # Every firm in the file is locked in one call, in id order. Sales freeze their firm at create (X-64),
+        # read under that lock; re-locking a held row below adds no wait.
+        lock_firms(*(business.pk for row in invoices_data if (business := business_for(row)) is not None))
+        frozen = frozen_firms(*(business.pk for row in invoices_data if row.get("type") != "INWARD"
+                                if (business := business_for(row)) is not None))
         for inv_data in invoices_data:
             try:
                 # Savepoint per row: on Postgres a failed statement aborts the whole
@@ -579,6 +583,7 @@ def run_bulk_import(request):
                         total_amount=Decimal(str(inv_data.get("total", 0))),
                         payment_mode=normalize_payment_mode(inv_data.get("paymentMode")),
                         workspace_id=1,
+                        firm_snapshot=frozen.get(business.pk) if type_of_invoice == INVOICE_TYPE_OUTWARD else None,
                     )
                     # The bill's GSTIN decides the head too, so the party carries
                     # it while the lines are built; it is saved only if they are.
