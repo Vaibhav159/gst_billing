@@ -142,6 +142,7 @@ def test_workbook_carries_return_tables_and_amendments_without_customer_payload(
     firm = result["firms"][0]
     assert firm["gstr1"][0]["sections"]["b2b"] == [{"bill": {"id": 1}}]
     assert firm["gstr3b"][0]["tables"]["t31a"]["cgst"] == "1205.95"
+    assert firm["gstr3b"][0]["note"] == "Includes purchases from unregistered suppliers with no GST charged."
     assert firm["amendments"] == [{"month": "2026-08", "kind": "changed"}]
     assert returns[(3, "2026-09")]["gstr1"]["b2b"][0]["customer"]["name"] == "Anil"
 

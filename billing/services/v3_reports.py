@@ -17,6 +17,7 @@ from billing.reconciliation import payment_split as old_payment_split
 from billing.services.bill_reads import line_taxable
 from billing.services.gst_amounts import heads as decimal_heads
 from billing.services.gstr1_file import hsn_description
+from billing.services.ledger import T5_NOTE
 from billing.tax_rules import HEADS, classify_b2c, clean_gstin, has_gstin, normalize_rate, to_paise
 from billing.text import day_text, inr, money, percent
 
@@ -423,7 +424,10 @@ def ca_workbook(sales, purchases, *, firms, start, end, split=False, return_data
             returns = return_data.get((firm["id"], month))
             if returns is not None:
                 sheet["gstr1"].append({"month": month, "sections": _without_customers(returns["gstr1"]), "stage": returns["stage"]})
-                sheet["gstr3b"].append({"month": month, "tables": returns["gstr3b"], "stage": returns["stage"], "filing": returns.get("filing")})
+                # R3A-3: the 3B sheet says Table 5 counts unregistered suppliers' no-GST purchases, even for
+                # months frozen before 3A's tables carried the note.
+                sheet["gstr3b"].append({"month": month, "tables": returns["gstr3b"], "stage": returns["stage"],
+                                        "filing": returns.get("filing"), "note": T5_NOTE})
                 sheet["amendments"].extend(returns.get("amendments", []))
         sheets.append(sheet)
     scope = scope or (firms[0]["name"] if len(firms) == 1 else "All firms")
