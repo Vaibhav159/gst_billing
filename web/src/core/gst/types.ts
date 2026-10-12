@@ -16,7 +16,9 @@ export type BillRef = { id: number | null; bin_id?: number; invoice_number: stri
 export type PurchaseRef = { id: number; bill_no: string; supplier_name: string; tax?: number; heads?: Heads };
 export type Check = { kind: 'duplicate' | 'gstin' | 'badgstin' | 'empty' | 'hsn' | 'state' | 'head' | 'gap' | 'deleted' | 'tax' | 'to_confirm'; blocks: boolean; text: string; detail: string; bills: (BillRef | PurchaseRef)[]; more_bills: number; customer: { id: number; name: string; gst_number: string } | null; suggested: number | null };
 export type LateFee = { days: number; per_day: number; fee: number; cap: number; capped: boolean };
-export type LateCost = { gstr1: LateFee; gstr3b: LateFee; interest: number; interest_on: number; interest_from: string; turnover_band: 'upto_1.5cr' | '1.5cr_5cr' | 'over_5cr'; nil: { gstr1: boolean; gstr3b: boolean }; total: number };
+export type LateCost = { gstr1: LateFee; gstr3b: LateFee; interest: number; interest_on: number; interest_from: string; turnover_band: 'upto_1.5cr' | '1.5cr_5cr' | 'over_5cr'; nil: { gstr1: boolean; gstr3b: boolean }; total: number;
+  /** R3A-4: a filed GSTR-3B's late fee and interest as typed on its record (days 0), not worked out. */
+  recorded?: true };
 export type DownloadState = { by: Person; at: string; via: 'download' | 'share'; stale: boolean; changed: { id: number; invoice_number: string; action: string; at: string; by: string }[] };
 export type SetOffStep = { from: Head; to: Head; amount: number };
 export type Figures = Omit<Heads, 'total'> & { taxable: number; total: number; gst_number?: string; invoice_number?: string };
@@ -37,6 +39,8 @@ export type Gstr1 = { b2b: (Figures & { bill: BillRef; customer: Person & { gst_
 export type Gstr3b = { month: string; filed: boolean; as_filed_at: string | null; t31a: Figures & { bills: number }; t31c: { taxable: number };
   amendments: { months: string[]; output: Heads; credit: Heads } | null; t32: { place_of_supply: string; place_of_supply_name: string; bills: number; taxable: number; igst: number }[];
   carry_in: { heads: Heads; from: string; as_filed: boolean; opening: boolean }; t4a5: { bills: number; heads: Heads; late: { id: number; bill_no: string; bill_date: string; entered_on: string; heads: Heads }[] };
-  t4b1: { bills: number; heads: Heads; list: PurchaseRef[] }; t4c: Heads; t4d2: { bills: number; heads: Heads; list: PurchaseRef[] }; t5: { inter: number; intra: number }; available: Heads; steps: SetOffStep[]; used: Heads; cash: Heads; cash_paid: PaidHeads | null; carry_on: Heads; to_confirm: PurchaseRef[];
-  cross_head: { month: string; paid: Head; paid_amount: number; left: Head; left_amount: number } | null; late: LateCost | null; opening_missing: boolean };
+  t4b1: { bills: number; heads: Heads; list: PurchaseRef[] }; t4c: Heads; t4d2: { bills: number; heads: Heads; list: PurchaseRef[] }; t5: { inter: number; intra: number }; t5_note: string;
+  /** R3A-2: a correction 3.1(a) couldn't take (it never goes below 0) comes off next month's output; the note says how much. */
+  reduction_on: Heads; reduction_note: string | null; available: Heads; steps: SetOffStep[]; used: Heads; cash: Heads; cash_paid: PaidHeads | null; carry_on: Heads; to_confirm: PurchaseRef[];
+  cross_head: { month: string; paid: Head; paid_amount: number; left: Head; left_amount: number } | null; late: LateCost | null; interest_note: string; opening_missing: boolean };
 export type FilingInput = { business: number; month: string; kind: ReturnKind | 'both'; filed_on: string; arn: string; gstr1_filed_on?: string | null; gstr1_arn?: string; gstr1a_filed_on?: string | null; gstr1a_arn?: string; cash_total?: string | null; cash?: Record<Head, string> | null; late_fee?: string | null; interest?: string | null; credit_left?: Record<Head, string> | null; confirm_checks?: boolean };

@@ -20,6 +20,13 @@ test('status uses server totals and cap with no local money calculations', () =>
   expect(screen.getByText(/43 days.*₹50.00 a day/)).toBeInTheDocument();
 });
 
+test('a filed GSTR-3B shows its recorded late fee and interest, not a day count (R3A-4)', () => {
+  const m=monthFixture({stage:'filed',late:{gstr1:{days:0,per_day:5000,fee:0,cap:200000,capped:false},gstr3b:{days:0,per_day:5000,fee:40000,cap:200000,capped:false},interest:1250,interest_on:20000,interest_from:'2026-10-21',turnover_band:'upto_1.5cr',nil:{gstr1:false,gstr3b:false},total:41250,recorded:true}});
+  renderApp(<StatusCard month={m} />);
+  expect(screen.getByText('Recorded with GSTR-3B: late fee ₹400.00 · interest ₹12.50')).toBeInTheDocument();
+  expect(screen.queryByText(/a day|Interest so far/)).not.toBeInTheDocument();
+});
+
 const record = (kind: Filing['kind']): Filing => ({ id: kind === 'gstr1' ? 81 : 82, business: 3, month: '2026-09', kind, filed_on: kind === 'gstr1' ? '2026-10-10' : '2026-10-19', arn: kind === 'gstr1' ? 'AA0810260345671' : 'AA081026034590Z', cash: kind === 'gstr3b' ? heads(0, 12500, 12500) : null, cash_worked_out: kind === 'gstr3b' ? heads(0, 10000, 10000) : null, late_fee: null, interest: null, credit_left: null, marked_by: { id: 1, name: 'Kailash Mehta' }, marked_at: '2026-10-19T17:00:00+05:30', updated_by: null, updated_at: null, legacy: false });
 
 test('filed returns show dates and ARNs instead of overdue words, and retain recorded cash', () => {

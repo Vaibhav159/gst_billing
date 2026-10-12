@@ -34,7 +34,7 @@ function month(overrides: Partial<Month> = {}): Month {
 // Output 300; opening 120; 4(A)(5) 100 − 4(B)(1) 20 = 4(C) 80.
 // Available 200, used 200, cash 100, carry 0. Lapsed 30 stays outside 4(A).
 function ledger(overrides: Partial<Gstr3b> = {}): Gstr3b {
-  return { month: "2026-09", filed: false, as_filed_at: null, t31a: { bills: 2, taxable: 1000000, igst: 0, cgst: 15000, sgst: 15000, total: 30000 }, t31c: { taxable: 120000 }, amendments: null, t32: [], carry_in: { heads: heads(0, 6000, 6000), from: "2026-08", as_filed: true, opening: false }, t4a5: { bills: 2, heads: heads(0, 5000, 5000), late: [{ id: 77, bill_no: "JGE/1098", bill_date: "2026-02-18", entered_on: "2026-10-05", heads: heads(0, 4000, 4000) }] }, t4b1: { bills: 1, heads: heads(0, 1000, 1000), list: [{ id: 78, bill_no: "JGE/1099", supplier_name: "Jaipur Gem Exports", heads: heads(0, 1000, 1000) }] }, t4c: heads(0, 4000, 4000), t4d2: { bills: 1, heads: heads(0, 1500, 1500), list: [{ id: 79, bill_no: "JGE/1000", supplier_name: "Jaipur Gem Exports", heads: heads(0, 1500, 1500) }] }, t5: { inter: 0, intra: 120000 }, available: heads(0, 10000, 10000), steps: [{ from: "cgst", to: "cgst", amount: 10000 }, { from: "sgst", to: "sgst", amount: 10000 }], used: heads(0, 10000, 10000), cash: heads(0, 5000, 5000), cash_paid: null, carry_on: heads(), to_confirm: [], cross_head: null, late: null, opening_missing: false, ...overrides };
+  return { month: "2026-09", filed: false, as_filed_at: null, t31a: { bills: 2, taxable: 1000000, igst: 0, cgst: 15000, sgst: 15000, total: 30000 }, t31c: { taxable: 120000 }, amendments: null, t32: [], carry_in: { heads: heads(0, 6000, 6000), from: "2026-08", as_filed: true, opening: false }, t4a5: { bills: 2, heads: heads(0, 5000, 5000), late: [{ id: 77, bill_no: "JGE/1098", bill_date: "2026-02-18", entered_on: "2026-10-05", heads: heads(0, 4000, 4000) }] }, t4b1: { bills: 1, heads: heads(0, 1000, 1000), list: [{ id: 78, bill_no: "JGE/1099", supplier_name: "Jaipur Gem Exports", heads: heads(0, 1000, 1000) }] }, t4c: heads(0, 4000, 4000), t4d2: { bills: 1, heads: heads(0, 1500, 1500), list: [{ id: 79, bill_no: "JGE/1000", supplier_name: "Jaipur Gem Exports", heads: heads(0, 1500, 1500) }] }, t5: { inter: 0, intra: 120000 }, t5_note: "Includes purchases from unregistered suppliers with no GST charged.", reduction_on: heads(), reduction_note: null, interest_note: "worked out to today; check on the portal", available: heads(0, 10000, 10000), steps: [{ from: "cgst", to: "cgst", amount: 10000 }, { from: "sgst", to: "sgst", amount: 10000 }], used: heads(0, 10000, 10000), cash: heads(0, 5000, 5000), cash_paid: null, carry_on: heads(), to_confirm: [], cross_head: null, late: null, opening_missing: false, ...overrides };
 }
 afterEach(() => { (window as unknown as { __phone: boolean }).__phone = false; vi.useRealTimers(); });
 
@@ -280,6 +280,21 @@ it("labels the downloadable GSTR-3B interest for the CA to check on the portal, 
   again.unmount();
   renderApp(<Gstr3bCard month={month()} data={ledger({ late, filed: true, as_filed_at: "2026-10-19T17:02:11+05:30" })} />);
   expect(screen.queryByText(note)).not.toBeInTheDocument();
+});
+
+it("shows 3A's recorded late costs, the carried 3.1(a) correction and the Table 5 note", () => {
+  // R3A-4: a filed GSTR-3B's charges come from its record (days 0), so no day count or cap is shown.
+  const late = { gstr1: { days: 0, per_day: 5000, fee: 0, cap: 200000, capped: false }, gstr3b: { days: 0, per_day: 5000, fee: 40000, cap: 200000, capped: false }, interest: 1250, interest_on: 10000, interest_from: "2026-10-21", turnover_band: "upto_1.5cr" as const, nil: { gstr1: false, gstr3b: false }, total: 41250, recorded: true as const };
+  // R3A-2: CGST 60 of an earlier correction couldn't come off this month's 3.1(a), which stays at 0.
+  const reduction_note = "₹0.60 of an earlier correction is taken off next month's tax.";
+  renderApp(<Gstr3bCard month={month()} data={ledger({ late, filed: true, as_filed_at: "2026-10-19T17:02:11+05:30", reduction_on: heads(0, 60, 0), reduction_note })} />);
+  expect(screen.getByRole("heading", { name: "Late fee and interest recorded" })).toBeVisible();
+  expect(screen.getByText("As typed when GSTR-3B was marked filed.")).toBeVisible();
+  expect(screen.getByText("₹400.00")).toBeVisible();
+  expect(screen.getByText("₹12.50")).toBeVisible();
+  expect(screen.queryByText(/days? at/)).not.toBeInTheDocument();
+  expect(screen.getByText(reduction_note)).toBeVisible();
+  expect(screen.getByText("Includes purchases from unregistered suppliers with no GST charged.")).toBeVisible();
 });
 
 it("does not count the firms in the explanation", () => {
