@@ -39,6 +39,19 @@ it('applies supplied slip fixes to the typed line and shows field refusals',()=>
  expect(p.onChange).toHaveBeenCalledWith('one',{rate:'6512.50'});
  expect(screen.getByText('Type the paper rate.')).toBeVisible();
 });
+it.each([
+ {field:'qty' as const,label:'Weight in grams',error:'Type the paper weight.',slip:'Check the weight on the paper bill.'},
+ {field:'rate' as const,label:'Rate per gram, as on the paper bill',error:'Type the paper rate.',slip:'Rates here are per gram.'},
+])('describes the $field input with both its refusal and slip',({field,label,error,slip})=>{
+ renderApp(<BillItems {...base()} lines={[line()]} errors={{[`one-${field}`]:error}} notices={{one:[{field,text:slip}]}}/>);
+ const input=screen.getByLabelText(label);
+ expect(input).toHaveAccessibleDescription(`${error} ${slip}`);
+ expect(input).toHaveAttribute('aria-invalid','true');
+});
+it('keeps the rate hint in its description when a slip is shown without a refusal',()=>{
+ renderApp(<BillItems {...base()} lines={[line()]} notices={{one:[{text:'Rates here are per gram.'}]}}/>);
+ expect(screen.getByLabelText('Rate per gram, as on the paper bill')).toHaveAccessibleDescription('Making is included in this rate. Rates here are per gram.');
+});
 it('lets the owner repair a nonempty HSN that the server refused',()=>{
  renderApp(<BillItems {...base()} lines={[{...line(),hsn:'123'}]} errors={{'one-hsn':'Type 4 to 8 digits.'}}/>);
  expect(screen.getByLabelText('HSN code')).toHaveValue('123');

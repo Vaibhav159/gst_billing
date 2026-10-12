@@ -37,6 +37,12 @@ export function BillItems({lines:allLines,products,canEditProducts,errors,notice
   const old=copied.find(x=>x.key===l.key);
   const fig=lineFigures({quantity:l.qty??"",rate:l.rate,gst_percent:l.gst??""},false);
   const warnings=(field:string)=>(notices[l.key]??[]).filter(n=>(n.field??"rate")===field);
+  const describedBy=(field:'qty'|'rate')=>{
+   if(!warnings(field).length)return undefined;
+   const id=`${l.key}-${field}`;
+   const detail=errors[id]?`${id}-error`:field==='rate'?`${id}-hint`:undefined;
+   return [detail,`${id}-slips`].filter(Boolean).join(' ');
+  };
   const notice=(field:string)=>warnings(field).length?<div id={`${l.key}-${field}-slips`}>{warnings(field).map(n=><div key={n.text} role="alert" className="rounded-ctl border border-neg-line bg-neg-tint px-3.5 py-3 anim-rise"><p>{n.text}</p>{n.fix&&<Button onClick={()=>onChange(l.key,n.fix!.patch)}>{n.fix.label}</Button>}</div>)}</div>:null;
   const copiedQty=old?.qty===l.qty&&old?.name===l.name;
   const copiedRate=old?.rate===l.rate&&old?.name===l.name;
@@ -56,12 +62,12 @@ export function BillItems({lines:allLines,products,canEditProducts,errors,notice
    </div><IconButton label={`Remove ${l.name}`} icon={Trash2} variant="danger" onClick={()=>onRemove(l)}/></div>
    <Field label={gram?'Weight in grams':l.unit==='ct'?'Weight in carats':`Quantity in ${l.unit}`} htmlFor={`${l.key}-qty`} error={errors[`${l.key}-qty`]}>
     <QtyInput id={`${l.key}-qty`} unit={l.unit} decimals={unitDecimals(l.unit)} value={l.qty} onChange={v=>onChange(l.key,{qty:v})}
-     aria-describedby={warnings("qty").length?`${l.key}-qty-slips`:undefined} invalid={Boolean(errors[`${l.key}-qty`])||Boolean(warnings("qty").length)} inputClassName={cn('!text-2xl font-semibold tnum',copiedQty&&'!border-brand')} enterKeyHint="next"
+     aria-describedby={describedBy("qty")} invalid={Boolean(errors[`${l.key}-qty`])||Boolean(warnings("qty").length)} inputClassName={cn('!text-2xl font-semibold tnum',copiedQty&&'!border-brand')} enterKeyHint="next"
      onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();document.getElementById(`${l.key}-rate`)?.focus();}}}/>
    </Field>
    {notice("qty")}
    <Field label={`Rate per ${word}, as on the paper bill`} htmlFor={`${l.key}-rate`} hint="Making is included in this rate." error={errors[`${l.key}-rate`]}>
-    <RateInput id={`${l.key}-rate`} value={l.rate} aria-describedby={warnings("rate").length?`${l.key}-rate-slips`:undefined} invalid={Boolean(errors[`${l.key}-rate`])||Boolean(warnings("rate").length)} onChange={rate=>onChange(l.key,{rate})} inputClassName={cn('!text-xl tnum',copiedRate&&'!border-brand')}
+    <RateInput id={`${l.key}-rate`} value={l.rate} aria-describedby={describedBy("rate")} invalid={Boolean(errors[`${l.key}-rate`])||Boolean(warnings("rate").length)} onChange={rate=>onChange(l.key,{rate})} inputClassName={cn('!text-xl tnum',copiedRate&&'!border-brand')}
      onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector<HTMLElement>('[role="radiogroup"][aria-labelledby="easy-paid-t"] [role="radio"]:not([disabled])')?.focus();}}}/>
    </Field>
    {(repairs.current.has(l.key)||!l.hsn)&&(canEditProducts?<Field label="HSN code" htmlFor={`${l.key}-hsn`} hint="Type the HSN code, 4 to 8 digits (7113 for jewellery)" error={errors[`${l.key}-hsn`]}>
