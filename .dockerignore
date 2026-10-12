@@ -70,6 +70,7 @@ gst_bill.bak
 
 # Never bake these into a public image
 backups/
+scratchpad/
 e2e-tests/
 sweet-rebuild-suite-main/node_modules/
 web/node_modules/
