@@ -64,12 +64,12 @@ test("viewer gets reading cards, no create/capture actions or changes", async ()
   expect(screen.queryByRole("region", { name: "Latest changes" })).not.toBeInTheDocument(); expect(screen.getByRole("link", { name: "View" })).toBeVisible();
 });
 test("a failed firm read never redirects to setup or fetches figures for a guessed firm", async () => {
-  const { calls } = salesServer([["GET", "businesses/", () => refuse(503, {})]]); show();
+  const { calls } = salesServer([["GET", "firms/", () => refuse(503, {})]]); show();
   expect(await screen.findByRole("button", { name: "Try again" })).toBeVisible(); expect(screen.getByLabelText("Location")).toHaveTextContent("/");
   expect(calls.some(c => c.url === "dashboard/" || c.url === "due-next/")).toBe(false);
 });
-test("before 4C's setup gate, no firms retains the existing placeholder and reads no figures", async () => {
-  const { calls } = salesServer([["GET", "businesses/", () => ({ results: [] })]]); show();
+test("outside the shell's setup gate, no firms retains the placeholder and reads no figures", async () => {
+  const { calls } = salesServer([["GET", "firms/", () => ({ results: [] })]]); show();
   expect(await screen.findByText("Dashboard comes in part 5")).toBeVisible(); expect(calls.some(c => c.url === "dashboard/")).toBe(false);
 });
 test("the phone's firm chips scope both queries, and last30 toggle reads nothing", async () => {
