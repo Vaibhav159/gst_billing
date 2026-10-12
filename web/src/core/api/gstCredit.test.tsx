@@ -61,7 +61,7 @@ describe("GST credit wire boundary", () => {
     expect(calls.map(c => c.params)).toEqual([{ preview: 1 }, {}]);
     expect(calls.every(c => JSON.stringify(c.data) === JSON.stringify({ business: 3, igst: "1.23", cgst: "9500.00", sgst: "9500.00" }))).toBe(true);
     expect(keys.every(k => client.getQueryState(k)?.isInvalidated)).toBe(true);
-    expect(invalidations.mock.calls.map(([filter]) => filter?.queryKey)).toEqual([["gst"], ["reports"], ["purchases"]]);
+    expect(invalidations.mock.calls.map(([filter]) => filter?.queryKey)).toEqual([["gst"], ["reports"], ["purchases"], ["dashboard"], ["due-next"]]);
   });
   it("uses part 2's credit-month endpoint and invalidates the ledger and purchase on success", async () => {
     const calls = serve({ "PUT purchases/77/credit-month/": { id: 77, credit: {}, previous: "2026-10" } });

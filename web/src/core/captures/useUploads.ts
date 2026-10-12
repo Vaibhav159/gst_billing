@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/core/auth/AuthProvider';
 import { captureKeys, getCapture, readCapture, uploadCapture } from '@/core/api/captures';
+import { invalidateDashboard } from '@/core/due/fresh';
 import { createCaptureQueue } from './queue';
 import { IndexedDbCaptureStore } from './store';
 
@@ -10,8 +11,18 @@ function queueFor(client: QueryClient) {
   let queue = queues.get(client);
   if (!queue) {
     queue = createCaptureQueue(new IndexedDbCaptureStore(), {
-      upload: (item, signal) => uploadCapture({ client_id: item.clientId, files: item.files, business_id: item.businessId, hint: item.hint, note: item.note }, signal, item.userId),
-      read: async (id, signal, owner) => { const capture = await getCapture(id, signal, owner); return !capture.read && capture.status === 'reading' ? readCapture(id, signal, owner) : capture; },
+      upload: async (item, signal) => {
+        const capture = await uploadCapture({ client_id: item.clientId, files: item.files, business_id: item.businessId, hint: item.hint, note: item.note }, signal, item.userId);
+        invalidateDashboard(client);
+        return capture;
+      },
+      read: async (id, signal, owner) => {
+        const capture = await getCapture(id, signal, owner);
+        if (capture.read || capture.status !== 'reading') return capture;
+        const answer = await readCapture(id, signal, owner);
+        invalidateDashboard(client);
+        return answer;
+      },
       changed: (id) => {
         void client.invalidateQueries({ queryKey: ['captures', 'list'] });
         if (id !== null) void client.invalidateQueries({ queryKey: captureKeys.one(id) });

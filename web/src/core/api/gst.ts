@@ -2,6 +2,7 @@ import axios from 'axios';
 import { skipToken, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { readGst } from '@/core/gst/wire';
+import { invalidateDashboard } from '@/core/due/fresh';
 import type { Gstr1, Gstr3b, Month, MonthEnd, Year } from '@/core/gst/types';
 export const gstKeys = {
   all: ['gst'] as const,
@@ -32,7 +33,7 @@ export function useGstLedger(business: number | null, month: string | null) {
 export type GstWrite = { method: 'post' | 'patch' | 'delete'; path: string; body: unknown };
 export function useGstWrite() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({method,path,body}: GstWrite) => (await api.request({ method, url: `gst/${path}`, data: body })).data, onSuccess: () => invalidateGst(qc) });
+  return useMutation({ mutationFn: async ({method,path,body}: GstWrite) => (await api.request({ method, url: `gst/${path}`, data: body })).data, onSuccess: () => { invalidateGst(qc); invalidateDashboard(qc); } });
 }
 /** Files stay server-owned. Blob errors still carry the contract's 400/409 words. */
 export async function getGstFile(business: number, month: string, kind: 'gstr1' | 'gstr1a' | 'gstr3b' | 'amendments', asFiled = false, via: 'download' | 'share' = 'download'): Promise<Blob> {

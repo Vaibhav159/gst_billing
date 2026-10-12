@@ -3,6 +3,7 @@ import { api } from '@/core/api/client';
 import type { LineInput, PaymentMode } from '@/core/sales/types';
 import type { PurchaseRead } from '@/core/captures/types';
 import { assertMultipartSize } from '@/core/captures/multipart';
+import { invalidateDashboard } from '@/core/due/fresh';
 export type ImportKind = 'purchases' | 'sales';
 export type ImportLine = LineInput | { product_name: string; hsn_code: string; gst_percent: string; unit: string; taxable: string; note: string; amount_only: true; quantity?: string };
 export type ImportBill = { ref: string; business: number; invoice_number: string; invoice_date: string; payment_mode: PaymentMode; lines: ImportLine[]; supplier?: number | string; customer?: number | string; itc_eligible?: boolean; itc_month?: string | null; buyer_gstin?: string; buyer_ack?: boolean; pair?: { seller: number; invoice_number: string } | null; paper?: true; place_of_supply?: string | null; notes?: string };
@@ -20,7 +21,10 @@ export async function batchRequest(kind: ImportKind, body: ImportBody): Promise<
 export function useBatchImport(kind: ImportKind) {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (body: ImportBody) => batchRequest(kind, body), onSuccess: async (result, body) => {
-    if (!body.dry_run && result.ok && !result.dry_run) await Promise.all(['purchases', 'sales', 'suppliers', 'customers', 'search', 'gst'].map(key => qc.invalidateQueries({ queryKey: [key] })));
+    if (!body.dry_run && result.ok && !result.dry_run) {
+      invalidateDashboard(qc);
+      await Promise.all(['purchases', 'sales', 'suppliers', 'customers', 'search', 'gst'].map(key => qc.invalidateQueries({ queryKey: [key] })));
+    }
   } });
 }
 export function useReadBill() {

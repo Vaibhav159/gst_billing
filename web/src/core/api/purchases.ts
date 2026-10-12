@@ -4,6 +4,7 @@ import type { PurchaseBinRow, PurchaseDetail, PurchaseInput, PurchasePage, Purch
 import { toCredit, toCreditMonths, toDuplicateCheck, toPurchaseBin, toPurchaseDetail, toPurchasePage, toPurchaseRead, toUsualRate } from '@/core/purchases/wire';
 import { api } from './client';
 import { problemOf } from './errors';
+import { invalidateDashboard } from '@/core/due/fresh';
 
 export type PurchaseQuery = { fy?: string; month?: string; start_date?: string; end_date?: string; credit_month?: string; supplier_id?: number; check?: boolean; photo?: boolean; dups?: boolean; empty?: boolean; no_hsn?: boolean; eligible?: 0; q?: string; ordering?: '-date' | 'date' | 'total' | '-total' | 'supplier'; include?: 'lines'; facets?: boolean; summary?: 0 };
 export const PURCHASES_PAGE_SIZE = 40;
@@ -70,7 +71,8 @@ export function useUsualRate(args: UsualRateArgs | null) {
 }
 export function invalidatePurchases(qc: QueryClient, keep?: number): void {
   void qc.invalidateQueries({ queryKey: purchasesKeys.all, predicate: (q) => !(keep !== undefined && q.queryKey[1] === 'bill' && q.queryKey[2] === keep) });
-  for (const queryKey of [['suppliers'], ['captures'], ['customers'], ['search'], ['dashboard'], ['gst'], ['catalog'], ['firms']]) void qc.invalidateQueries({ queryKey });
+  for (const queryKey of [['suppliers'], ['captures'], ['customers'], ['search'], ['gst'], ['catalog'], ['firms']]) void qc.invalidateQueries({ queryKey });
+  invalidateDashboard(qc);
 }
 function keepPurchase(qc: QueryClient, purchase: PurchaseDetail): void {
   const outcome: PurchaseOutcome = { kind: 'purchase', purchase };

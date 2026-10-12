@@ -2,6 +2,7 @@ import { skipToken, useMutation, useQuery, useQueryClient, type QueryClient } fr
 import { api } from "./client";
 import { paiseToDecimal, toPaise } from "@/core/format";
 import type { CreditValue, Credit, OpeningCreditValue, OpeningCredit, OpeningEffectValue, OpeningEffect, OpeningInput } from "@/core/gst/creditTypes";
+import { invalidateDashboard } from "@/core/due/fresh";
 
 export function toOpeningCredit(o: OpeningCreditValue<string>): OpeningCredit {
   const h = o.carried_out_of_first_month.heads;
@@ -22,9 +23,10 @@ function toCredit(c: CreditValue<string>): Credit {
 function openingBody(input: OpeningInput) {
   return { business: input.business, igst: paiseToDecimal(input.igst), cgst: paiseToDecimal(input.cgst), sgst: paiseToDecimal(input.sgst) };
 }
-// An opening change and a purchase move can cross FYs. Dashboard refresh wiring belongs to plan 5D (X-23).
+// An opening change and a purchase move can cross FYs.
 function invalidateCreditDependents(qc: QueryClient) {
   for (const queryKey of [["gst"], ["reports"], ["purchases"]]) void qc.invalidateQueries({ queryKey });
+  invalidateDashboard(qc);
 }
 export function useGstCredit(businessId: number | null, fy: string) {
   return useQuery({ queryKey: ["gst", "credit", businessId, fy], queryFn: businessId === null ? skipToken : async ({ signal }) =>

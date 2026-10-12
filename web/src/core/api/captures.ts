@@ -5,6 +5,7 @@ import { problemOf, type ApiProblem } from './errors';
 import { captureFormData, type UploadCapture } from '@/core/captures/multipart';
 export type { UploadCapture } from '@/core/captures/multipart';
 import type { AiReads, Capture, CaptureList, CaptureSummaryList } from '@/core/captures/types';
+import { invalidateDashboard } from '@/core/due/fresh';
 
 export const captureKeys = {
   all: ['captures'] as const,
@@ -49,7 +50,7 @@ export function useCaptureAction(action: 'read' | 'discard' | 'restore') {
     mutationFn: async (id: number) => action === 'read' ? readCapture(id)
       : action === 'discard' ? (await api.delete<Capture>(`captures/${id}/`)).data
       : (await api.post<Capture>(`captures/${id}/restore/`)).data,
-    onSuccess: (capture) => { client.setQueryData(captureKeys.one(capture.id), capture); },
+    onSuccess: (capture) => { client.setQueryData(captureKeys.one(capture.id), capture); invalidateDashboard(client); },
     onSettled: () => { void client.invalidateQueries({ queryKey: ['captures', 'list'] }); void client.invalidateQueries({ queryKey: ['ai-reads'] }); },
   });
 }
