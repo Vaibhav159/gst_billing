@@ -29,7 +29,7 @@ test("a rejected badge chunk preserves the Easy page, tabs and keyboard focus", 
   const errors = vi.spyOn(console, "error").mockImplementation(() => {});
   const calls = serve({
     "GET preferences/": { data: {} },
-    "GET businesses/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }] },
+    "GET firms/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }] },
   });
   const router = createMemoryRouter([{ path: "*", element:
     <ScopeProvider><PhoneShell easy><main><input aria-label="Bill note" /></main></PhoneShell></ScopeProvider>,

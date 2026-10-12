@@ -39,11 +39,10 @@ describe('batch imports', () => {
     for (const key of ['suppliers', 'purchases', 'sales', 'customers', 'dashboard', 'due-next']) client.setQueryData([key], []);
     const h = renderHook(() => useBatchImport('purchases'), { wrapper });
     await act(async () => { await h.result.current.mutateAsync(body); });
-    expect(client.getQueryState(['suppliers'])?.isInvalidated).toBe(false);
+    for (const key of ['suppliers', 'purchases', 'sales', 'customers', 'dashboard', 'due-next']) expect(client.getQueryState([key])?.isInvalidated).toBe(false);
     saved = true;
     await act(async () => { await h.result.current.mutateAsync({ ...body, dry_run: false }); });
-    for (const key of ['suppliers', 'purchases', 'sales', 'customers']) expect(client.getQueryState([key])?.isInvalidated).toBe(true);
-    for (const key of ['dashboard', 'due-next']) expect(client.getQueryState([key])?.isInvalidated).toBe(false);
+    for (const key of ['suppliers', 'purchases', 'sales', 'customers', 'dashboard', 'due-next']) expect(client.getQueryState([key])?.isInvalidated).toBe(true);
   });
   it('does not retry a lost answer or queue an offline save', async () => {
     const calls = serve({ 'POST purchases/import/': () => ({ status: 0 }) });

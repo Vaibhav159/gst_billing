@@ -25,7 +25,7 @@ function VisibleRich() {
 function setup({ cached, rich = false, age = 0, reply = answer, visibleRich = false }: { cached?: DueNext; rich?: boolean; age?: number; reply?: Answer; visibleRich?: boolean } = {}) {
   const qc = testQueryClient();
   if (cached) qc.setQueryData(dueNextKeys.one(3, rich), cached, { updatedAt: Date.now() - age });
-  const calls = serve({ "GET preferences/": { data: {} }, "GET businesses/": { results: [
+  const calls = serve({ "GET preferences/": { data: {} }, "GET firms/": { results: [
     { id: 3, name: "KIRAN GOLD HOUSE" }, { id: 4, name: "MEERA ORNAMENTS" },
   ] }, "GET due-next/": reply });
   const router = createMemoryRouter([{ path: "*", element: <ScopeProvider>{visibleRich ? <VisibleRich /> : null}<AttentionButton /><ScopeControls /></ScopeProvider> }], { initialEntries: ["/sales"] });

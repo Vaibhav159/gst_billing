@@ -22,7 +22,7 @@ const answer: DueNext = { today: "2026-10-08", returns: null, items: [
 function setup(easy: boolean, palette = false, data: DueNext | undefined = answer) {
   const qc = testQueryClient();
   if (data) qc.setQueryData(dueNextKeys.one(3, true), data);
-  const calls = serve({ "GET preferences/": { data: {} }, "GET businesses/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }] },
+  const calls = serve({ "GET preferences/": { data: {} }, "GET firms/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }] },
     "GET sales/": { count: 0, results: [] } });
   const close = vi.fn();
   const router = createMemoryRouter([{ path: "*", element: <ScopeProvider>{palette ? <AttentionPalette open onClose={close} /> : <PhoneShell easy={easy}><main>Today</main></PhoneShell>}</ScopeProvider> }]);

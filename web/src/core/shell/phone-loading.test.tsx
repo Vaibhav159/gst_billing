@@ -34,7 +34,7 @@ test("loading phone badges keeps the navigation and focused tab mounted", async 
   }] });
   const calls = serve({
     "GET preferences/": { data: {} },
-    "GET businesses/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }] },
+    "GET firms/": { results: [{ id: 3, name: "KIRAN GOLD HOUSE" }] },
   });
   const router = createMemoryRouter([{ path: "*", element:
     <ScopeProvider><PhoneShell easy={false}><main>Today</main></PhoneShell></ScopeProvider>,

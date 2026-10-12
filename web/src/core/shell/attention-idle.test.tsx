@@ -27,7 +27,7 @@ function Surface({ showing }: { showing: "bell" | "palette" | "phone" | "dashboa
 function setup(showing: "bell" | "palette" | "phone" | "dashboard", cached = true) {
   const qc = testQueryClient();
   if (cached) qc.setQueryData(dueNextKeys.one(3, true), empty);
-  const calls = serve({ "GET preferences/": { data: {} }, "GET businesses/": { results: [{ id: 3, name: "KIRAN" }] },
+  const calls = serve({ "GET preferences/": { data: {} }, "GET firms/": { results: [{ id: 3, name: "KIRAN" }] },
     "GET sales/": { count: 0, results: [] }, "GET due-next/": empty });
   const router = createMemoryRouter([{ path: "*", element: <ScopeProvider><Surface showing={showing} /></ScopeProvider> }]);
   render(<QueryClientProvider client={qc}><AuthContext.Provider value={stubAuth()}><RouterProvider router={router} /></AuthContext.Provider></QueryClientProvider>);
