@@ -50,7 +50,7 @@ test("desktop: add a diamond by keyboard, then delete and undo @record", async (
   await dialog.getByRole("button", { name: "Delete product", exact: true }).click();
   await expect(page).toHaveURL(/\/products$/);
   await expect(page.getByText(name + " deleted", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.getByRole("button", { name: /^Undo(?:\s|$)/ }).click();
   await expect(page).toHaveURL(new RegExp("/products/" + product.id + "$"));
   await expect(page.getByRole("heading", { level: 1, name, exact: true })).toBeVisible();
   expect((await api.get("catalog/" + product.id + "/")).name).toBe(name);
