@@ -67,7 +67,7 @@ test("a route still says which screen it opens: a lazy page's loaded component, 
   expect(await loadedPage(route("/sales/:id")?.element)).toBe(BillPage);
   expect(await loadedPage(route("/purchases")?.element)).toBe(PurchaseList);
   expect(await loadedPage(route("/suppliers")?.element)).toBe(SupplierList);
-  expect(await loadedPage(route("/audit")?.element)).toBe(Placeholder);
+  expect(await loadedPage(route("/")?.element)).toBe(Placeholder);
   expect(await loadedPage(undefined)).toBeUndefined();
 });
 

@@ -36,9 +36,9 @@ function mount(path: string, signedIn = true, extra: ReactNode = null) {
 }
 
 test("a screen from a later part says which part brings it", async () => {
-  mount("/audit");
-  expect(await screen.findByRole("heading", { level: 1, name: "Records and admin" })).toBeInTheDocument();
-  expect(screen.getByText(/comes in part 4/i)).toBeInTheDocument();
+  mount("/");
+  expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
+  expect(screen.getByText(/comes in part 5/i)).toBeInTheDocument();
 });
 
 test("signed out, any page goes to sign-in and remembers where it was going", async () => {
@@ -54,8 +54,8 @@ test("v2's addresses still work", async () => {
 });
 
 test("a new page puts focus on its title and announces it", async () => {
-  const router = mount("/audit");
-  await screen.findByRole("heading", { level: 1, name: "Records and admin" });
+  const router = mount("/");
+  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
   await act(async () => { await router.navigate("/customers"); });
   const h1 = await screen.findByRole("heading", { level: 1, name: "Customers" }, { timeout: 5000 });
   await waitFor(() => expect(h1).toHaveFocus());
@@ -99,8 +99,8 @@ test("something outside a page's own boundary that fails to draw (the shell, sig
 });
 
 test("the second click of a double click doesn't land on the page that just opened", async () => {
-  const router = mount("/audit");
-  await screen.findByRole("heading", { level: 1, name: "Records and admin" });
+  const router = mount("/");
+  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
   // the clock moves only when the test says, so a busy runner can't carry the click past the 300 ms
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   try {
@@ -200,8 +200,8 @@ test("one toast host covers sign-in and the app: a toast shows exactly once on e
   expect(await screen.findAllByText("Shown on the sign-in page")).toHaveLength(1);
   cleanup();
 
-  mount("/audit", true, <Grab />);
-  await screen.findByRole("heading", { level: 1, name: "Records and admin" });
+  mount("/", true, <Grab />);
+  await screen.findByRole("heading", { level: 1, name: "Dashboard" });
   act(() => { toast.show({ title: "Shown in the app" }); });
   expect(await screen.findAllByText("Shown in the app")).toHaveLength(1);
 });
@@ -403,8 +403,8 @@ test("Back keeps the list's place even when the next page's clamp is reported be
 
 test("signing in lands with focus on the page's title and announces it; the page the app opened on is left alone", async () => {
   // opened straight on a page: the browser decides where focus starts
-  mount("/audit");
-  const opened = await screen.findByRole("heading", { level: 1, name: "Records and admin" });
+  mount("/");
+  const opened = await screen.findByRole("heading", { level: 1, name: "Dashboard" });
   await wait(200);
   expect(opened).not.toHaveFocus();
   expect(document.getElementById("route-announcer")).toBeEmptyDOMElement();
@@ -415,16 +415,16 @@ test("signing in lands with focus on the page's title and announces it; the page
   api.defaults.adapter = ((config) => (config.url === "token/" || config.url === "me/"
     ? Promise.resolve({ status: 200, statusText: "", headers: {}, config, data: config.url === "token/" ? { access: "a", refresh: "r" } : OWNER_ME })
     : answer(config))) as AxiosAdapter;
-  const router = createMemoryRouter(appRoutes, { initialEntries: ["/login?next=%2Faudit"] });
+  const router = createMemoryRouter(appRoutes, { initialEntries: ["/login?next=%2F"] });
   render(<AppRoutes router={router} />);
   await screen.findByRole("heading", { level: 1, name: "GST Billing" }); // the sign-in page (Task 14)
   await userEvent.type(screen.getByLabelText("Username"), "kailash");
   await userEvent.type(screen.getByLabelText("Password"), "pw");
   await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  const h1 = await screen.findByRole("heading", { level: 1, name: "Records and admin" });
-  expect(router.state.location.pathname).toBe("/audit");
+  const h1 = await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+  expect(router.state.location.pathname).toBe("/");
   await waitFor(() => expect(h1).toHaveFocus());
-  await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Records and admin"));
+  await waitFor(() => expect(document.getElementById("route-announcer")).toHaveTextContent("Dashboard"));
 });
 
 test("Back remembers the place on the last 50 pages left, and forgets older ones", async () => {
