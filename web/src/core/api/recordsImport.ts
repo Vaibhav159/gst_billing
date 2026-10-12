@@ -8,7 +8,7 @@ import { SLABS, slabOf } from "@/pages/sales/form/model";
 export type RecordImportKind = "customers" | "products" | "firms";
 export type RecordCells = Record<string, string>;
 export type RecordImportRow = { row: number; values: RecordCells; state: "ready" | "skip" | "fix" | "saved" | "uncertain"; note: string };
-export type RecordImportResult = { saved: number; rows: RecordImportRow[] };
+export type RecordImportResult = { saved: number; total: number; rows: RecordImportRow[]; failure?: { row: number; problem: string } };
 type Wire = Record<string, unknown>;
 const text = (value: unknown) => String(value ?? "").trim();
 const nameKey = (value: unknown) => text(value).replace(/\s+/g, " ").toLowerCase();
@@ -155,7 +155,9 @@ export async function checkRecordRows(kind: RecordImportKind, values: RecordCell
 /** CRUD has no batch transaction or idempotency token. Never retry a write; report confirmed rows and stop. */
 export async function saveRecordRows(kind: RecordImportKind, preview: RecordImportRow[]): Promise<RecordImportResult> {
   const rows = preview.map((row) => ({ ...row }));
+  const total = rows.filter((row) => row.state === "ready").length;
   let saved = 0;
+  let failure: RecordImportResult["failure"];
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].state !== "ready") continue;
     let writing = false;
@@ -171,8 +173,9 @@ export async function saveRecordRows(kind: RecordImportKind, preview: RecordImpo
       const p = problemOf(error);
       const uncertain = writing && !["validation", "conflict", "forbidden", "auth", "notfound"].includes(p.kind);
       rows[i] = { ...rows[i], state: uncertain ? "uncertain" : "fix", note: uncertain ? "The answer didn't arrive, so this row may have been saved. Check the rows again before another import." : p.message };
+      failure = { row: rows[i].row, problem: p.message };
       break;
     }
   }
-  return { saved, rows };
+  return { saved, total, rows, failure };
 }

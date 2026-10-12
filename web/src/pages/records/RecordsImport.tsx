@@ -72,6 +72,7 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
     onSettled: () => { void qc.invalidateQueries({ predicate: (query) => ["customers", "products", "catalog", "firms", "audit", "backup", "setup", "search", "sales"].includes(String(query.queryKey[0])) }); },
   });
   const busy = reading || checkedRows.isPending || save.isPending;
+  const report = savedCount !== null ? save.data : undefined;
   const ready = rows.filter((row) => row.state === "ready").length;
   const used = columns.map((column) => column.field).filter(Boolean);
   const duplicate = new Set(used).size !== used.length;
@@ -121,6 +122,7 @@ function RecordsImportSession({ kind, readWorkbook }: Props) {
     <Card><ol className="flex flex-wrap gap-4 text-sm text-fg2" aria-label="Import steps">{["Choose the file", "Match the columns", "Check the rows", "Import"].map((label, index) => <li key={label} aria-current={step === index + 1 ? "step" : undefined} className={step === index + 1 ? "text-brand font-semibold" : ""}>{index + 1}. {label}</li>)}</ol></Card>
     {!allowed ? <Banner tone="muted" icon={Lock}>{whyNot(PERMISSION[kind])}</Banner> : null}
     {error ? <Banner tone="neg" title="This file couldn't be used">{error}</Banner> : null}
+    {report?.failure ? <Banner tone="neg" title="Import stopped">{`Added ${report.saved} of ${report.total}. Row ${report.failure.row}: ${report.failure.problem.replace(/\.$/, "")}. Fix it and import again; rows already added are skipped.`}</Banner> : null}
     {step === 1 ? <Card title="1. What are you importing?" subtitle={`One ${ONE[kind]} on each row.`}>
       <div className="flex flex-col gap-5">
         <Segmented label="What are you importing" value={kind} options={RECORD_IMPORT_OPTIONS} onChange={(value) => navigate(`/import?type=${value}`)} />

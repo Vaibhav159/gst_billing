@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { serve, serveWith } from "@/test/server";
-import { checkRecordRows, saveRecordRows } from "./recordsImport";
+import { checkRecordRows, saveRecordRows, type RecordCells, type RecordImportKind } from "./recordsImport";
 
 test("product rates use the allowlist: 0.25 stays 0.25 and 0.18 becomes 18; explicit product fields survive", async () => {
   const calls = serve({ "GET catalog/": { results: [], next: null }, "POST catalog/": { id: 9 } });
@@ -152,4 +152,49 @@ test("duplicate search follows every page rather than losing a match on the seco
   serveWith((call) => ({ status: 200, data: call.params.page === 1 ? { results: [], next: "next" } : { results: [{ id: 7, name: "gold" }], next: null } }));
   const rows = await checkRecordRows("products", [{ name: "Gold", hsn_code: "7113", gst_percent: "3" }]);
   expect(rows[0].state).toBe("skip");
+});
+
+test.each([
+  ["products", "name"], ["customers", "name"], ["customers", "GSTIN"], ["firms", "name"], ["firms", "GSTIN"],
+] as const)("a partial %s import skips the saved row by %s on a fresh run", async (kind: RecordImportKind, match) => {
+  const first = { name: "First record", mobile_number: "9414123456", gst_number: "08AAMFR5567K1ZG", address: "1 Demo Road", hsn_code: "7113", gst_percent: "3", __row: "5" };
+  const second = { ...first, name: "Second record", mobile_number: "9414123457", gst_number: "27XTZPS7585P1ZB", __row: "9" };
+  const stored: RecordCells[] = [];
+  let writes = 0;
+  const calls = serveWith((call) => {
+    if (call.method === "GET") return { status: 200, data: { results: stored, next: null } };
+    if (++writes === 2) return { status: 400, data: { detail: "Check this row." } };
+    stored.push(call.data as RecordCells);
+    return { status: 201, data: { id: stored.length } };
+  });
+  const result = await saveRecordRows(kind, await checkRecordRows(kind, [first, second]));
+  expect(result).toMatchObject({ saved: 1, total: 2, failure: { row: 9, problem: "Check this row." } });
+  expect(result.rows.map(row => row.state)).toEqual(["saved", "fix"]);
+  expect(writes).toBe(2);
+  const same = { ...first, name: match === "name" ? "  FIRST   RECORD  " : "New spelling", mobile_number: "9414123458", gst_number: match === "name" ? "08VRHFA2322D1ZI" : first.gst_number.toLowerCase() };
+  const checkedAgain = await checkRecordRows(kind, [same, second]);
+  expect(checkedAgain.map(row => row.state)).toEqual(["skip", "ready"]);
+  const rerun = await saveRecordRows(kind, checkedAgain);
+  expect(rerun.saved).toBe(1);
+  expect(rerun.failure).toBeUndefined();
+  expect(calls.filter(call => call.method === "POST").map(call => (call.data as RecordCells).name)).toEqual(["First record", "Second record", "Second record"]);
+});
+
+test("a re-run skips both confirmed rows and a row saved before its response was lost", async () => {
+  const stored: RecordCells[] = [];
+  let writes = 0;
+  const calls = serveWith((call) => {
+    if (call.method === "GET") return { status: 200, data: { results: stored, next: null } };
+    stored.push(call.data as RecordCells);
+    return ++writes === 2 ? { status: 0 } : { status: 201, data: { id: stored.length } };
+  });
+  const cells = ["A", "B", "C"].map((name, i) => ({ name, hsn_code: "7113", gst_percent: "3", __row: String([5, 9, 12][i]) }));
+  const result = await saveRecordRows("products", await checkRecordRows("products", cells));
+  expect(result).toMatchObject({ saved: 1, total: 3, failure: { row: 9, problem: "The app couldn't get through" } });
+  expect(result.rows.map(row => row.state)).toEqual(["saved", "uncertain", "ready"]);
+  expect(writes).toBe(2);
+  const checkedAgain = await checkRecordRows("products", cells);
+  expect(checkedAgain.map(row => row.state)).toEqual(["skip", "skip", "ready"]);
+  expect((await saveRecordRows("products", checkedAgain)).saved).toBe(1);
+  expect(calls.filter(call => call.method === "POST").map(call => (call.data as RecordCells).name)).toEqual(["A", "B", "C"]);
 });
