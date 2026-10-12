@@ -14,7 +14,7 @@ from billing.models import FiledPeriod, FilingMonth, FilingRecord, Invoice, Line
 from billing.period_lock import credit_month_closed
 from billing.services.filing import mark_filed, unlock_month
 from billing.services.v3_credit import credit_data, on_record_months
-from billing.tests.v3_helpers import buyer, firm, line, person, sale
+from billing.tests.v3_helpers import buyer, client_for, firm, line, person, sale
 
 pytestmark = pytest.mark.django_db
 TODAY = date(2026, 10, 8)
@@ -118,16 +118,21 @@ def test_null_month_uses_bill_month_and_entered_day_is_ist(shop):
 
 
 def test_before_ledger_credit_month_is_none_and_never_a_claim_choice(shop):
-    business, supplier, _ = shop
+    business, supplier, owner = shop
     old = purchase(business, supplier, "old", day="2025-03-31", month=None)
     assert credit_month_of(old) is None
     assert open_credit_months(business.pk, old.invoice_date, TODAY) == []
     assert read(business, 2025, today=date(2025, 10, 8))["at_risk"]["count"] == 0
-    assert read(business, 2024)["buckets"]["lapsed"] == {"bills": 1, "tax": "902.40"}
+    response = client_for(owner).get("/api/gst/credit/", {"business_id": business.pk, "fy": "2024-25"})
+    assert response.status_code == 200
+    buckets = response.json()["buckets"]
+    assert buckets["before_ledger"] == {"count": 1, "tax": "902.40"}
+    assert buckets["lapsed"] == buckets["claimed"] == buckets["open"] == {"bills": 0, "tax": "0.00"}
     recent = purchase(business, supplier, "first", day="2025-04-01", month=None)
     out = read(business)["at_risk"]["bills"]
     assert [row["id"] for row in out] == [recent.pk]
     assert out[0]["claim_months"][0]["month"] == "2025-04"
+    assert read(business, 2025)["buckets"]["before_ledger"] == {"count": 0, "tax": "0.00"}
 
 
 def test_x36_rounds_each_historical_line_before_adding_and_other_risk_uses_rounded_tax(shop):

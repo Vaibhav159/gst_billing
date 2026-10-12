@@ -31,10 +31,12 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
     credit stays lapsed when recorded; otherwise an unfiled bill expires after its deadline.
     """
     buckets = {"fy": fy_label(fy), "deadline": deadline.isoformat(), "days_left": (deadline - today).days,
-               **{key: {"bills": 0, "tax": Decimal("0")} for key in ("claimed", "open", "lapsed")}, "none": []}
+               **{key: {"bills": 0, "tax": Decimal("0")} for key in ("claimed", "open", "lapsed")},
+               "before_ledger": {"count": 0, "tax": Decimal("0")}, "none": []}
     risk = []
     for row in rows:
         bill_fy = fy_of(row["bill_date"])
+        before_ledger = row["bill_date"] < LEDGER_START
         month = row["credit_month"]
         claimed = month is not None and (business_id, month.year, month.month) in filed
         lapsed = row["lapsed"] or month is None or (not claimed and today > row["deadline"])
@@ -45,11 +47,14 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
             if reason:
                 buckets["none"].append({"id": row["id"], "bill_no": row["bill_no"],
                                         "supplier_name": row["supplier"]["name"], "why": reason})
+            elif before_ledger:
+                buckets["before_ledger"]["count"] += 1
+                buckets["before_ledger"]["tax"] += row["tax"]
             else:
                 key = "lapsed" if lapsed else "claimed" if claimed else "open"
                 buckets[key]["bills"] += 1
                 buckets[key]["tax"] += row["tax"]
-        if bill_fy != fy - 1 or reason or lapsed or claimed:
+        if bill_fy != fy - 1 or before_ledger or reason or lapsed or claimed:
             continue
         risk.append({"id": row["id"], "bill_no": row["bill_no"], "bill_date": row["bill_date"].isoformat(),
                      "entered_on": row["entered_on"].isoformat(), "supplier": dict(row["supplier"]),
@@ -57,7 +62,7 @@ def assemble_credit(business_id, fy, rows, filed, opening, *, today, deadline, o
                      "credit_month_due": row["credit_month_due"].isoformat(), "claim_months": row["claim_months"],
                      "deadline": row["deadline"].isoformat(), "days_left": (row["deadline"] - today).days})
     risk.sort(key=lambda row: (row["deadline"], row["bill_date"], row["id"]))
-    for key in ("claimed", "open", "lapsed"):
+    for key in ("claimed", "open", "lapsed", "before_ledger"):
         buckets[key]["tax"] = money(buckets[key]["tax"])
     return {"business": business_id, "fy": fy_label(fy), "at_risk": {
         "deadline": risk[0]["deadline"] if risk else None, "days_left": risk[0]["days_left"] if risk else None,

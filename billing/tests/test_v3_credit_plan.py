@@ -128,12 +128,26 @@ def test_photo_needing_review_still_counts_as_credit():
     assert out["at_risk"]["tax"] == "902.40"
 
 
-def test_bill_before_ledger_has_no_credit_month_and_is_never_at_risk():
-    bill = row(day=date(2025, 3, 31), credit_month=None, credit_month_due=None, deadline=date(2025, 11, 30))
-    assert data([bill], fy=2025, today=date(2025, 10, 8))["at_risk"]["bills"] == []
-    old = data([bill], fy=2024, today=date(2025, 10, 8))
-    assert old["buckets"]["lapsed"] == {"bills": 1, "tax": "902.40"}
-    assert old["buckets"]["open"] == {"bills": 0, "tax": "0.00"}
+@pytest.mark.parametrize("month,filed", [(None, set()), (date(2025, 10, 1), set()),
+                                         (date(2025, 10, 1), {(3, 2025, 10)})])
+def test_bill_before_ledger_has_its_own_bucket_and_is_never_at_risk(month, filed):
+    bill = row(day=date(2025, 3, 31), credit_month=month, credit_month_due=date(2025, 11, 20),
+               deadline=date(2025, 11, 30))
+    current = data([bill], filed, fy=2025, today=date(2025, 10, 8))
+    assert current["at_risk"]["bills"] == []
+    assert current["buckets"]["before_ledger"] == {"count": 0, "tax": "0.00"}
+    old = data([bill], filed, fy=2024, today=date(2025, 10, 8))
+    assert old["buckets"]["before_ledger"] == {"count": 1, "tax": "902.40"}
+    assert old["buckets"]["lapsed"] == old["buckets"]["claimed"] == old["buckets"]["open"] == {"bills": 0, "tax": "0.00"}
+
+
+def test_before_ledger_totals_are_decimal_exact_and_exclude_bills_giving_no_credit():
+    bills = [row(1, date(2025, 3, 30), "0.10"), row(2, date(2025, 3, 31), "0.20"),
+             row(3, date(2025, 3, 31), "99.99", eligible=False)]
+    buckets = data(bills, fy=2024)["buckets"]
+    assert buckets["before_ledger"] == {"count": 2, "tax": "0.30"}
+    assert buckets["none"] == [{"id": 3, "bill_no": "JGE/3",
+                                "supplier_name": "Jaipur Gem Exports", "why": "not_allowed"}]
 
 
 def test_opening_cutoff_is_preserved_from_its_owner_without_recalculation():
