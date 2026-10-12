@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import type { Filing, Heads, Month } from '@/core/gst/types';
 import { renderApp } from '@/test/render';
@@ -102,6 +102,19 @@ test('retry retains typed values; busy save blocks cancel and inputs', () => {
   expect(screen.getByLabelText('GSTR-1 ARN')).toBeDisabled();
   fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
   expect(close).not.toHaveBeenCalled();
+});
+
+test('a GSTR-1A record waits for the GSTR-3B record to go first, as the server refuses otherwise', () => {
+  const m = month(); m.stage = 'filed'; m.record.gstr1 = filing('gstr1'); m.record.gstr1a = { ...filing('gstr1a'), id: 83 }; m.record.gstr3b = filing('gstr3b');
+  const view = renderApp(<FilingCard month={m} onAction={vi.fn()} />);
+  const remove = (name: string) => within(screen.getByRole('region', { name: `${name} filing record` })).getByRole('button', { name: 'Remove this record' });
+  expect(remove('GSTR-1')).toBeDisabled();
+  expect(remove('GSTR-1A')).toBeDisabled();
+  expect(remove('GSTR-1A')).toHaveAttribute('title', 'Remove the later filing record first.');
+  expect(remove('GSTR-3B')).toBeEnabled();
+  view.unmount();
+  renderApp(<FilingCard month={{ ...m, record: { ...m.record, gstr3b: null } }} onAction={vi.fn()} />);
+  expect(remove('GSTR-1A')).toBeEnabled();
 });
 
 test('as-filed download remains enabled after the books develop blockers; only owner can unlock/remove', () => {

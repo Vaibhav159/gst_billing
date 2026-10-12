@@ -37,7 +37,7 @@ export function FilingRecords({ month: m, onAction }: FilingCardProps) {
   const { can } = useAuth();
   return <div className="flex flex-col gap-2">{(['gstr1', 'gstr1a', 'gstr3b'] as const).map((kind) => {
     const r = m.record[kind]; if (!r) return null;
-    const inUse = kind === 'gstr1' && Boolean(m.record.gstr1a || m.record.gstr3b);
+    const inUse = kind === 'gstr1' ? Boolean(m.record.gstr1a || m.record.gstr3b) : kind === 'gstr1a' && Boolean(m.record.gstr3b);
     return <section key={kind} aria-label={`${returnName[kind]} filing record`} className="rounded-ctl border border-line bg-field px-3 py-2.5 text-sm">
       <p className="font-medium">{returnName[kind]} filed {date(r.filed_on)}</p>{r.arn ? <p className="tnum text-fg2">ARN {r.arn}</p> : null}
       <p className="text-muted">Marked by {r.marked_by.name} on {date(r.marked_at.slice(0, 10))}</p>
