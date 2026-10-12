@@ -3,7 +3,6 @@
 import csv
 import json
 from importlib import import_module
-from importlib.util import find_spec
 from io import StringIO
 from pathlib import Path
 
@@ -17,8 +16,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def predecessor(module, reason):
-    if find_spec(module) is None:
-        pytest.skip(reason)
+    """X-40: the named plans are on v3, so a missing module fails rather than skips."""
     return import_module(module)
 
 

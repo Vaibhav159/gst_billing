@@ -3,7 +3,6 @@
 import json
 from contextlib import contextmanager
 from datetime import date, datetime
-from importlib import import_module
 from itertools import islice
 
 from django.contrib.auth.models import User
@@ -32,6 +31,7 @@ from billing.models import (
 )
 from billing.roles import can, role_of
 from billing.services.bill_reads import FY_EXPR
+from billing.services.filing import backup_rows
 from billing.text import person, stamp
 
 BATCH = 500
@@ -114,13 +114,8 @@ def audit_rows():
 
 
 def filing_rows():
-    try:
-        module = import_module("billing.services.filing")
-    except ModuleNotFoundError as error:
-        if error.name != "billing.services.filing":
-            raise
-        return []
-    return module.backup_rows()
+    """Part 3's filing records, months and opening credits, as its own object (X-46)."""
+    return backup_rows()
 
 
 def counts():
@@ -128,7 +123,7 @@ def counts():
         sales=Count("id", filter=Q(type_of_invoice="outward", status="active")),
         cancelled=Count("id", filter=Q(type_of_invoice="outward", status="cancelled")),
         purchases=Count("id", filter=Q(type_of_invoice="inward")))
-    suppliers = uncached(Customer).filter(is_supplier=True).count() if "is_supplier" in fields_of(Customer) else 0
+    suppliers = uncached(Customer).filter(is_supplier=True).count()
     return dict(firms=uncached(Business).count(), customers=uncached(Customer).count(), suppliers=suppliers,
                 products=uncached(Product).count(), **invoices, people=uncached(User).count(),
                 audit=uncached(AuditLog).count(), bin=uncached(BinnedInvoice).live().count())

@@ -88,12 +88,13 @@ class RecordExportTests(TransactionTestCase):
                     finally:
                         response.close()
 
-    def test_purchase_columns_and_part2_blank_fallback(self):
+    def test_purchase_columns_and_part2_credit(self):
         rows = self.rows(self.call("purchases", format="csv", fy="2026-27"))
         self.assertEqual(rows[0], ["Date", "Supplier bill no.", "Firm", "Supplier", "GSTIN", "Taxable",
                                   "CGST", "SGST", "IGST", "Total", "Credit month", "Credit allowed"])
         self.assertEqual(rows[1][1], "P1")
-        self.assertEqual(rows[1][-2:], ["", ""])
+        # 2A's credit month: a bill dated October 2026 with no chosen month credits that month.
+        self.assertEqual(rows[1][-2:], ["2026-10", "Yes"])
         self.assertEqual(rows[-1][5:10], ["300.00", "4.50", "4.50", "0.00", "309.00"])
 
     def test_customer_columns_and_formula_phone(self):
@@ -179,11 +180,7 @@ class RecordExportTests(TransactionTestCase):
                          "business__name": self.biz.name, "customer__name": self.customer.name,
                          "customer__gst_number": "", "status": "active", "itc_month": None,
                          "itc_eligible": True}
-            reader = Mock(return_value=effective)
-            with (patch.dict("sys.modules", {"billing.credit": SimpleNamespace(credit_month_of=reader)}),
-                  patch("billing.services.record_exports.batches", return_value=iter([[projected]]))):
+            # 2A's real credit_month_of: before April 2025 a blank month is outside the ledger.
+            with patch("billing.services.record_exports.batches", return_value=iter([[projected]])):
                 rows = list(bill_rows("purchases", None, None, None, [0]))
-            reader.assert_called_once()
-            self.assertEqual(reader.call_args.args[0].invoice_date, day)
-            self.assertIsNone(reader.call_args.args[0].itc_month)
             self.assertEqual(rows[0][-2], effective.strftime("%Y-%m") if effective else "")

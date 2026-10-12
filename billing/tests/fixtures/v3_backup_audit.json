@@ -1,5 +1,5 @@
 [
-  {"entity": "backup", "action": "exported", "entity_id": 0, "entity_name": "Full backup", "kind": "backup", "group": "send", "words": {"text": "Downloaded the full backup", "target": "", "after": ""}},
+  {"entity": "backup", "action": "exported", "entity_id": 0, "entity_name": "Full backup", "kind": "backup", "group": "send", "words": {"text": "Downloaded", "target": "the full backup", "after": ""}},
   {"entity": "backup", "action": "exported", "entity_id": 0, "entity_name": "Sales bills", "kind": "backup", "group": "send", "words": {"text": "Downloaded", "target": "Sales bills", "after": ""}},
   {"entity": "backup", "action": "exported", "entity_id": 0, "entity_name": "Purchase bills", "kind": "backup", "group": "send", "words": {"text": "Downloaded", "target": "Purchase bills", "after": ""}},
   {"entity": "backup", "action": "exported", "entity_id": 0, "entity_name": "Customers", "kind": "backup", "group": "send", "words": {"text": "Downloaded", "target": "Customers", "after": ""}},

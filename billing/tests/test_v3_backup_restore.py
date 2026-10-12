@@ -457,7 +457,8 @@ def test_purchase_file_identity_keeps_supplier_firm_fy_and_digit_separators():
     plan = preview(upload(data))["plan"]
     assert plan["purchases"]["skip"] == [{"name": "sup/001", "why": "listed twice in the file"}]
     assert plan["purchases"]["fail_count"] == 7
-    assert all(row["why"] == "can't add yet" for row in plan["purchases"]["fail"])
+    # Each other identity reaches 2A's own checks (this supplier has no GSTIN), not the file's duplicate rule.
+    assert all(row["why"].startswith("Line 1: the supplier has no GSTIN") for row in plan["purchases"]["fail"])
 
 
 def test_purchase_bin_match_uses_shared_identity_and_never_claims_a_sale():

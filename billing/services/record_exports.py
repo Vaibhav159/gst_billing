@@ -13,10 +13,11 @@ from openpyxl import Workbook
 from rest_framework.exceptions import ValidationError
 
 from billing.cache import uncached
+from billing.credit import credit_month_of
 from billing.fy import fy_label, fy_of, fy_range
 from billing.models import AuditLog, Business, Customer, Invoice, LineItem, Product
 from billing.params import PICK_A_FIRM, date_param, fy_param, id_param
-from billing.services.backups import batches, fields_of
+from billing.services.backups import batches
 from billing.services.bill_reads import sums
 from billing.tax_rules import HEADS, to_paise
 from billing.text import money, percent
@@ -56,7 +57,7 @@ def export_scope(params):
     firm_id = id_param(params, "business_id", PICK_A_FIRM)
     firm = None
     if firm_id is not None:
-        fields = ["id", "name"] + (["short_name"] if "short_name" in fields_of(Business) else [])
+        fields = ["id", "name", "short_name"]
         firm = uncached(Business).filter(pk=firm_id).values(*fields).first()
         if firm is None:
             raise ValidationError({"business_id": [PICK_A_FIRM]})
@@ -76,7 +77,7 @@ def bill_rows(kind, start, end, firm, count):
     if kind == "sales":
         fields += ["customer__state_name", "payment_mode", "paper"]
     else:
-        fields += [key for key in ("itc_month", "itc_eligible") if key in fields_of(Invoice)]
+        fields += ["itc_month", "itc_eligible"]
     total = {key: Decimal("0") for key in ("taxable", "cgst", "sgst", "igst", "total")}
     for batch in batches(queryset.order_by("invoice_date", "pk"), fields):
         lines = {}
@@ -100,13 +101,8 @@ def bill_rows(kind, start, end, firm, count):
             if kind == "sales":
                 row += ["Cancelled" if bill["status"] == "cancelled" else "Active", "Yes" if bill["paper"] else "No"]
             else:
-                credit = None
-                if "itc_month" in bill:
-                    from billing.credit import credit_month_of
-
-                    credit = credit_month_of(SimpleNamespace(invoice_date=bill["invoice_date"], itc_month=bill["itc_month"]))
-                row += [credit.strftime("%Y-%m") if credit is not None else "",
-                        ("Yes" if bill["itc_eligible"] else "No") if "itc_eligible" in bill else ""]
+                credit = credit_month_of(SimpleNamespace(invoice_date=bill["invoice_date"], itc_month=bill["itc_month"]))
+                row += [credit.strftime("%Y-%m") if credit is not None else "", "Yes" if bill["itc_eligible"] else "No"]
             yield row
     offset = 7 if kind == "sales" else 5
     yield ["Total"] + [""] * (offset - 1) + [Decimal(money(total[key])) for key in total] + ["", ""]
@@ -119,7 +115,7 @@ def master_rows(kind, count):
         "products": ["name", "hsn_code", "gst_tax_rate", "default_unit", "kind", "purity", "usual_rate", "purchase_only", "description"],
         "firms": ["name", "short_name", "gst_number", "pan_number", "state_name", "city", "pin_code", "address", "mobile_number", "email", "invoice_prefix", "bank_name", "bank_account_number", "bank_ifsc_code", "bank_branch_name"],
     }[kind]
-    for batch in batches(uncached(model).order_by("name", "pk"), [key for key in keys if key in fields_of(model)]):
+    for batch in batches(uncached(model).order_by("name", "pk"), keys):
         firms = {}
         if kind == "customers":
             for customer_id, name in uncached(Customer.businesses.through).filter(
@@ -134,10 +130,10 @@ def master_rows(kind, count):
             elif kind == "products":
                 from billing.services.catalog import effective_kind
 
-                product = SimpleNamespace(**{"kind": None, **row})
+                product = Product(**row)
                 yield [row["name"], row["hsn_code"], percent(row["gst_tax_rate"]), row["default_unit"], effective_kind(product),
-                       row.get("purity", ""), money(row["usual_rate"]) if row.get("usual_rate") is not None else "",
-                       "Yes" if row.get("purchase_only") else "No", row["description"]]
+                       row["purity"], money(row["usual_rate"]) if row["usual_rate"] is not None else "",
+                       "Yes" if row["purchase_only"] else "No", row["description"]]
             else:
                 yield [row.get(key) or "" for key in keys]
 

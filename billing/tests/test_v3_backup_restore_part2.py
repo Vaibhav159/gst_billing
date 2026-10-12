@@ -1,10 +1,8 @@
 """X-40 integration gate: requires real 2A purchase fields, services and routes."""
 
-import os
 from datetime import date
 from decimal import Decimal
 from importlib import import_module
-from importlib.util import find_spec
 
 import pytest
 
@@ -17,12 +15,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def part2_credit():
-    if find_spec("billing.credit") is None:
-        reason = "Requires 2A's billing.credit and real purchase create/bin integration (X-40)."
-        if os.environ.get("GST_RESTORE_REQUIRE_PART2") == "1":
-            pytest.fail(reason)
-        pytest.skip(reason)
-    assert "itc_month" in {field.name for field in Invoice._meta.concrete_fields}, "2A purchase fields must land"
+    """X-40: 2A's real credit reader; 2A is on v3, so these never skip."""
     return import_module("billing.credit")
 
 
@@ -194,11 +187,6 @@ def test_real_purchase_bin_uses_current_credit_and_stales_an_old_preview(part2_c
 def test_real_gstr1_only_month_does_not_block_purchase_restore(part2_credit):
     from billing import models
 
-    if not hasattr(models, "FilingRecord"):
-        reason = "Requires 3A's real filing source merged after 2A (X-40)."
-        if os.environ.get("GST_RESTORE_REQUIRE_PART3") == "1":
-            pytest.fail(reason)
-        pytest.skip(reason)
     client = client_for(person("gstr1-credit-restore-owner", "admin"))
     business = firm(gstin="08VRHFA2322D1ZI")
     buyer("Supplier", gst_number="08WWUFP9975S1ZN")

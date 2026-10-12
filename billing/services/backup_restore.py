@@ -283,18 +283,17 @@ def _purchase_match(firm, supplier, number, day):
 
 
 
+# The part 2 contract: a purchase's source is one of these ("" made in v2 or before v3).
+PURCHASE_SOURCES = {"typed", "capture", "photos", "excel", ""}
+
+
 def _purchase_services():
-    """2A's published interfaces; only the absent predecessor gets the staged fallback."""
-    try:
-        from billing.services.purchases import save_purchase
-    except ModuleNotFoundError as error:
-        if error.name == "billing.services.purchases":
-            return None
-        raise
+    """2A's purchase save, restore and credit-month services."""
     from billing.api.purchases import PurchaseSerializer
     from billing.credit import choose_credit_month, credit_month_of
     from billing.period_lock import assert_purchase_open
     from billing.services.purchase_bin import restore_purchase
+    from billing.services.purchases import save_purchase
 
     return SimpleNamespace(save_purchase=save_purchase, restore_purchase=restore_purchase,
         PurchaseSerializer=PurchaseSerializer, choose_credit_month=choose_credit_month,
@@ -321,11 +320,12 @@ def _purchase_input(row, day, business, supplier, services):
     payload = {**row["purchase_fields"], "invoice_number": row["number"], "invoice_date": day,
                "itc_month": _credit_input(row["purchase_fields"].get("itc_month"), day),
                "duplicate_ok": False, "capture": None,
-               "lines": [{**{name: value for name, value in item.items() if name != "gst_tax_rate"},
-                          "gst_percent": rate_as_percent(item["gst_tax_rate"])} for item in row["lines"]]}
+               # 2A's line fields read text or JSON numbers, so the file's decimals go in as text.
+               "lines": [{**{name: str(value) if isinstance(value, Decimal) else value
+                             for name, value in item.items() if name != "gst_tax_rate"},
+                          "gst_percent": str(rate_as_percent(item["gst_tax_rate"]))} for item in row["lines"]]}
     source = serializers.CharField(max_length=10, allow_blank=True).run_validation(payload.get("source", "typed"))
-    choices = next((field.choices for field in Invoice._meta.concrete_fields if field.name == "source"), None)
-    if choices and source not in {value for value, _ in choices}:
+    if source not in PURCHASE_SOURCES:
         raise ValidationError({"source": ["That bill's source isn't one this app records."]})
     # The public serializer accepts typed/capture; a backup also retains 2A import sources.
     payload["source"] = "typed"
@@ -463,12 +463,6 @@ def _plan(data, info, raw_hash):
             existing, binned_purchase = _purchase_match(firm, supplier, row["number"], day)
             if existing is not None:
                 record("purchases", "skip", name, f"already on file as {existing.invoice_number}")
-                continue
-            if purchase_services is None:
-                # X-40: this replay base lacks 2A; the real adapter activates when it lands.
-                record("purchases", "fail", name, "can't add yet")
-                if binned_purchase is not None:
-                    locked.append({"purchase_bin": binned_purchase.pk})
                 continue
             business = Business(**{field: firm[field] for field in ("name", "gst_number", "state_name") if field in firm})
             business.pk = firm["id"] if isinstance(firm["id"], int) else None
@@ -632,11 +626,11 @@ def _restore_locks():
     # Only its primary key is read. This serializes two owners restoring a previously unseen firm.
     from django.contrib.auth import get_user_model
     get_user_model().objects.order_by("pk").select_for_update().values_list("pk", flat=True).first()
-    # Bin restores lock audit -> bin -> firm (part 1); acquiring the firm first reverses that order.
+    # Bin restores lock audit -> firm -> bin (4A), and firm edits hold the firm before its bin rows.
     ids = BinnedInvoice.objects.live().exclude(audit_log_id=None).values_list("audit_log_id", flat=True)
     list(AuditLog.objects.select_for_update().filter(pk__in=ids).order_by("pk").values_list("pk", flat=True))
-    list(BinnedInvoice.objects.live().select_for_update().order_by("pk").values_list("pk", flat=True))
     lock_firms(*uncached(Business).values_list("pk", flat=True))
+    list(BinnedInvoice.objects.live().select_for_update().order_by("pk").values_list("pk", flat=True))
     for model in (Customer, Product):
         list(uncached(model).select_for_update().order_by("pk").values_list("pk", flat=True))
 
@@ -665,9 +659,7 @@ def apply_restore(file, fingerprint, user, fy=None):
                 audits.append(_imported(instance, kind, user, info["name"]))
         for kind, model, ref in (("firms", Business, "business"), ("customers", Customer, "buyer")):
             ids = {row[ref] for row in ops["bills"] + ops["purchases"] if isinstance(row[ref], int)}
-            fields = ["id", "name", "gst_number", "state_name"]
-            if model is Customer and any(field.name == "is_supplier" for field in model._meta.concrete_fields):
-                fields.append("is_supplier")
+            fields = ["id", "name", "gst_number", "state_name"] + (["is_supplier"] if model is Customer else [])
             mapped[kind].update(uncached(model).only(*fields).in_bulk(ids))
         for row in ops["bills"]:
             _open_month(months, mapped["firms"][row["business"]].pk, row["day"], "backup_restore")
@@ -699,11 +691,13 @@ def apply_restore(file, fingerprint, user, fy=None):
         for row in ops["purchases"]:
             if row["bin"]:
                 binned = uncached(BinnedInvoice).get(pk=row["bin"])
-                invoice = services.restore_purchase(binned, user, check_month=True)
+                invoice = services.restore_purchase(binned, user)
             else:
                 inputs = _purchase_input(row, row["day"], mapped["firms"][row["business"]], mapped["customers"][row["buyer"]], services)
-                invoice = services.save_purchase(inputs, user)
-            audits.append(_imported(invoice, "purchases", user, info["name"]))
+                # The plan, re-run under these locks, already refused file and book duplicates by 2A's identity.
+                invoice = services.save_purchase({**inputs, "duplicate_ok": True}, user)
+            # 2A returns its narrow read; the audit snapshot needs every field, read once.
+            audits.append(_imported(uncached(Invoice).get(pk=invoice.pk), "purchases", user, info["name"]))
             added["purchases"].append(invoice.pk)
         AuditLog.objects.bulk_create(audits, batch_size=250)
         invalidate(Invoice, LineItem)

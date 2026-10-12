@@ -105,11 +105,12 @@ def test_purchase_preview_is_read_only_and_apply_uses_the_published_save_service
     assert sent["supplier"].pk == Customer.objects.get().pk
     assert sent["invoice_date"] == date(2026, 3, 31)
     assert sent["invoice_number"] == "SUP-001"
-    assert sent["lines"][0]["gst_percent"] == Decimal("0.25")
+    assert sent["lines"][0]["gst_percent"] == "0.25"
     assert sent["itc_month"] == "2026-04"
     assert sent["itc_eligible"] is False and sent["needs_review"] is True and sent["buyer_ack"] is True
     assert sent["source"] == "excel" and sent["payment_mode"] == "bank"
-    assert sent["duplicate_ok"] is False and sent.get("capture") is None and "linked_sale" not in sent
+    # The plan already refused duplicates under the restore's locks, so 2A's scan is not repeated.
+    assert sent["duplicate_ok"] is True and sent.get("capture") is None and "linked_sale" not in sent
     assert AuditLog.objects.filter(entity="invoice", action="imported", entity_id=result["added"]["purchases"][0]).exists()
 
 
