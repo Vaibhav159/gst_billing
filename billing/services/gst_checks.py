@@ -1,9 +1,11 @@
 """GSTR-1 checks, with the same database predicates for detail and bulk reads."""
 
 import re
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
+from django.db import connection
 from django.db.models import (
     BooleanField,
     Case,
@@ -27,20 +29,20 @@ from django.db.models.functions import (
     Coalesce,
     Concat,
     Length,
-    Lower,
     Mod,
     Replace,
     Round,
     StrIndex,
     Substr,
     Trim,
+    TruncMonth,
     Upper,
 )
 
 from billing.cache import uncached
 from billing.constants import BILL_ACTIVE, GST_CODE
 from billing.fy import fy_label, fy_of, fy_range
-from billing.models import Business, Invoice, LineItem
+from billing.models import Invoice, LineItem
 from billing.numbering import bill_ref
 from billing.services.bill_reads import _tax_off
 from billing.services.gstr1_file import build_gstr1
@@ -87,9 +89,10 @@ def _checksum():
     return Substr(alphabet, index, 1)
 
 
-def checked_bills(business_ids, year, month):
+def checked_bills(business_ids, year, month, *, stop=None):
     """Narrow, uncached sales with one flag per check; no line data crosses the wire."""
-    first, stop = date(year, month, 1), date(year + month // 12, month % 12 + 1, 1)
+    first = date(year, month, 1)
+    stop = stop or date(year + month // 12, month % 12 + 1, 1)
     fy = fy_of(first)
     start, end = fy_range(fy)
     prior = fy_range(fy - 1 if fy > 2025 else fy)
@@ -160,62 +163,69 @@ def _message(kind):
                             default=Value(": an HSN code needs 6 digits for a business buyer")))
 
 
-def _firm_count(firm_bills, counter):
-    return Coalesce(Subquery(firm_bills.values("business_id").annotate(n=Count(counter, distinct=True)).values("n")[:1]), 0)
+def gstr1_blockers(business_ids, months, *, include_text=True):
+    """Compile each FY's checks once; SQL reuses those flags for counts and witnesses.
 
-
-def gstr1_blockers(business_ids, months):
-    """Only grouped counts and first witness text, never every bill or line; one query for every month."""
-    business_ids = list(business_ids)
+    A materialized CTE avoids cloning the large GSTIN/state expressions for every
+    kind and month. Only grouped counts and two distinct witnesses cross the wire.
+    """
+    business_ids, months = list(business_ids), sorted(set(months))
     out = {(bid, month): {"count": 0, "bills": 0, "first_two": []} for bid in business_ids for month in months}
     if not business_ids or not months:
         return out
-    per_month = []
+    years = defaultdict(list)
     for month in months:
-        year, mm = map(int, month.split("-"))
-        bills = checked_bills(business_ids, year, mm).annotate(**{f"text_{k}": _message(k) for k in KINDS})
-        any_check = Q(**{f"check_{KINDS[0]}": True})
-        for k in KINDS[1:]:
-            any_check |= Q(**{f"check_{k}": True})
-        # One row per firm, each figure a subquery over that firm's bills: a witness subquery inside an
-        # aggregate would run once per bill, which SQLite took minutes over at a few hundred bills.
-        firm_bills = bills.filter(business_id=OuterRef("pk"))
-        fields = {"month_key": Value(month, output_field=CharField()),
-                  "bills": _firm_count(firm_bills.filter(any_check), "pk")}
-        for k in KINDS:
-            condition = Q(**{f"check_{k}": True})
-            fields[k] = _firm_count(firm_bills.filter(condition), Lower("invoice_number") if k == "duplicate" else "pk")
-            texts = firm_bills.filter(condition).order_by(f"text_{k}").values(f"text_{k}").distinct()
-            fields[f"first_{k}"] = Subquery(texts[:1])
-            fields[f"second_{k}"] = Subquery(texts[1:2])
-        per_month.append(uncached(Business).filter(pk__in=business_ids).annotate(**fields).values("pk", *fields).order_by())
-    # The months run as one UNION ALL so a year's scan stays one query (P5-3).
-    rows = per_month[0].union(*per_month[1:], all=True) if len(per_month) > 1 else per_month[0]
-    for row in rows:
-        out[row["pk"], row["month_key"]] = {"count": sum(row[k] for k in KINDS), "bills": row["bills"],
-                                            "first_two": [row[f"{order}_{k}"] for k in KINDS for order in ("first", "second")
-                                                          if row[f"{order}_{k}"]][:2]}
-    return out
-    for month in months:
-        year, mm = map(int, month.split("-"))
-        bills = checked_bills(business_ids, year, mm).annotate(**{f"text_{k}": _message(k) for k in KINDS})
-        any_check = Q(**{f"check_{KINDS[0]}": True})
-        for k in KINDS[1:]:
-            any_check |= Q(**{f"check_{k}": True})
-        # One row per firm, each figure a subquery over that firm's bills: a witness subquery inside an
-        # aggregate would run once per bill, which SQLite took minutes over at a few hundred bills.
-        firm_bills = bills.filter(business_id=OuterRef("pk"))
-        fields = {"bills": _firm_count(firm_bills.filter(any_check), "pk")}
-        for k in KINDS:
-            condition = Q(**{f"check_{k}": True})
-            fields[k] = _firm_count(firm_bills.filter(condition), Lower("invoice_number") if k == "duplicate" else "pk")
-            texts = firm_bills.filter(condition).order_by(f"text_{k}").values(f"text_{k}").distinct()
-            fields[f"first_{k}"] = Subquery(texts[:1])
-            fields[f"second_{k}"] = Subquery(texts[1:2])
-        for row in uncached(Business).filter(pk__in=business_ids).annotate(**fields).values("pk", *fields):
-            out[row["pk"], month] = {"count": sum(row[k] for k in KINDS), "bills": row["bills"],
-                                               "first_two": [row[f"{order}_{k}"] for k in KINDS for order in ("first", "second")
-                                                             if row[f"{order}_{k}"]][:2]}
+        day = date.fromisoformat(month + "-01")
+        years[fy_of(day)].append(day)
+    queries, parameters = [], []
+    for days in years.values():
+        first, last = min(days), max(days)
+        stop = date(last.year + last.month // 12, last.month % 12 + 1, 1)
+        bills = checked_bills(business_ids, first.year, first.month, stop=stop).filter(
+            invoice_date__month__in=[day.month for day in days])
+        text_fields = {f"text_{kind}": _message(kind) for kind in KINDS} if include_text else {}
+        bills = bills.annotate(month_key=TruncMonth("invoice_date"), **text_fields).order_by().values(
+            "id", "business_id", "invoice_number", "month_key", *(f"check_{kind}" for kind in KINDS), *text_fields)
+        sql, params = bills.query.sql_with_params()
+        queries.append(sql)
+        parameters.extend(params)
+    kinds = " UNION ALL ".join(f"SELECT {i} AS kind" for i in range(len(KINDS)))
+    flags = "CASE kinds.kind " + " ".join(f'WHEN {i} THEN "check_{kind}"' for i, kind in enumerate(KINDS)) + " END"
+    words = ("CASE kinds.kind " + " ".join(f'WHEN {i} THEN "text_{kind}"' for i, kind in enumerate(KINDS)) + " END") if include_text else "''"
+    # Both supported databases implement materialized CTEs and window functions.
+    sql = f"""SELECT * FROM (
+        WITH checked AS MATERIALIZED ({' UNION ALL '.join(queries)}),
+        hits AS MATERIALIZED (
+            SELECT business_id, month_key, id, LOWER(invoice_number) AS number_key,
+                   kinds.kind, {words} AS words
+            FROM checked CROSS JOIN ({kinds}) kinds WHERE {flags}
+        ), totals AS (
+            SELECT business_id, month_key, COUNT(DISTINCT id) AS bills
+            FROM hits GROUP BY business_id, month_key
+        ), counts AS (
+            SELECT business_id, month_key, kind,
+                   COUNT(DISTINCT CASE WHEN kind = 0 THEN number_key ELSE CAST(id AS TEXT) END) AS n
+            FROM hits GROUP BY business_id, month_key, kind
+        ), witnesses AS (
+            SELECT business_id, month_key, kind, words,
+                   ROW_NUMBER() OVER (PARTITION BY business_id, month_key, kind ORDER BY words) AS place
+            FROM (SELECT DISTINCT business_id, month_key, kind, words FROM hits) distinct_words
+        )
+        SELECT c.business_id, c.month_key, c.kind, c.n, t.bills,
+               MAX(CASE WHEN w.place = 1 THEN w.words END), MAX(CASE WHEN w.place = 2 THEN w.words END)
+        FROM counts c JOIN totals t ON t.business_id = c.business_id AND t.month_key = c.month_key
+        JOIN witnesses w ON w.business_id = c.business_id AND w.month_key = c.month_key AND w.kind = c.kind AND w.place <= 2
+        GROUP BY c.business_id, c.month_key, c.kind, c.n, t.bills
+        ORDER BY c.business_id, c.month_key, c.kind
+    ) grouped_checks"""
+    with connection.cursor() as cursor:
+        cursor.execute(sql, parameters)
+        for bid, month, _kind, count, bills, first, second in cursor.fetchall():
+            label = month.strftime("%Y-%m") if hasattr(month, "strftime") else str(month)[:7]
+            result = out[bid, label]
+            result["count"] += count
+            result["bills"] = bills
+            result["first_two"] = (result["first_two"] + [text for text in (first, second) if text])[:2]
     return out
 
 

@@ -48,7 +48,7 @@ def target_id(raw, source_id):
 
 def duplicates():
     groups = {"gstin": defaultdict(list), "phone": defaultdict(list)}
-    customers = uncached(Customer).exclude(customer_type="walkin").only(*REF_FIELDS).order_by("name", "pk")
+    customers = uncached(Customer).exclude(customer_type="walkin").exclude(name__iexact="Walk-in Customer").only(*REF_FIELDS).order_by("name", "pk")
     for customer in customers:
         reference = customer_ref(customer)
         gstin = (customer.gst_number or "").strip().upper()

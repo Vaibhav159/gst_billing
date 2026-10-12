@@ -132,3 +132,37 @@ def test_v2_sale_made_during_a_firm_edit_prints_the_identity_it_was_made_under(f
     assert bill.firm_snapshot["name"] == expected
     assert firm_block(bill)["name"] == expected
     assert Business.objects.get(pk=business.pk).name == "KIRAN NEW NAME"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_v2_move_waits_for_new_firm_identity_and_freezes_it():
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL row-lock test")
+    from billing.tests.test_v3_restore_lock_order import wait_for_lock_waiter
+
+    original, target, customer = firm(), firm("TARGET FIRM"), buyer()
+    bill = Invoice.objects.create(business=original, customer=customer, invoice_number="MOVE-1",
+                                   invoice_date="2026-09-01", firm_snapshot=firm_snapshot(original))
+    started = Event()
+
+    def move():
+        close_old_connections()
+        try:
+            row = Invoice.objects.get(pk=bill.pk)
+            row.business_id = target.pk
+            started.set()
+            row.save_from_v2()
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with transaction.atomic():
+            lock_firms(target.pk)
+            Business.objects.filter(pk=target.pk).update(name="NEW TARGET NAME")
+            moved = pool.submit(move)
+            assert started.wait(10)
+            waited = wait_for_lock_waiter()
+        moved.result(timeout=20)
+    assert waited, "The v2 move did not wait for the firm's identity edit"
+    bill.refresh_from_db()
+    assert bill.firm_snapshot["name"] == "NEW TARGET NAME"

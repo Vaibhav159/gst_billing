@@ -6,7 +6,15 @@ from rest_framework.views import APIView
 from billing.cache import uncached
 from billing.models import Business
 from billing.params import fy_param
-from billing.services.firms import DETAIL_FIELDS, SLIM_FIELDS, firm_detail, firm_figures, firm_numbers, firm_row
+from billing.services.firms import (
+    DETAIL_FIELDS,
+    SLIM_FIELDS,
+    firm_detail,
+    firm_figures,
+    firm_numbers,
+    firm_row,
+    firm_saved,
+)
 
 from .permissions import V3Permission
 
@@ -28,7 +36,7 @@ class FirmsView(APIView):
     def post(self, request):
         from billing.services.firms import save_firm
         business, _, _ = save_firm(request.data, request.user)
-        return Response(firm_detail(business), status=201)
+        return Response(firm_saved(business), status=201)
 
     def get(self, request):
         fy = fy_param(request.query_params)
@@ -53,7 +61,7 @@ class FirmDetailView(APIView):
         from billing.services.audit import change_rows
         from billing.services.firms import save_firm
         business, changes, frozen = save_firm(request.data, request.user, found_firm(pk))
-        return Response({**firm_detail(business), "changes": change_rows(Business, changes), "frozen_bills": frozen})
+        return Response({**firm_saved(business), "changes": change_rows(Business, changes), "frozen_bills": frozen})
 
     def delete(self, request, pk):
         from billing.services.firms import delete_firm
@@ -71,9 +79,9 @@ class FirmSignatureView(APIView):
     def put(self, request, pk):
         from billing.services.firms import save_signature
         business = save_signature(found_firm(pk), request.FILES.get("image"), request.user)
-        return Response(firm_detail(business))
+        return Response(firm_saved(business))
 
     def delete(self, request, pk):
         from billing.services.firms import save_signature
         business = save_signature(found_firm(pk), None, request.user, remove=True)
-        return Response(firm_detail(business))
+        return Response(firm_saved(business))

@@ -30,8 +30,10 @@ class FirmPreflightTests(TestCase):
                                invoice_date=date(2026, 9, 1), type_of_invoice="outward")
         with patch("billing.services.gst_checks.gstr1_blockers", wraps=gst_checks.gstr1_blockers) as checks:
             result = read_filings([self.business.pk], [key[1]])
-        # 3A's month_stages runs the grouped checks once; 4A reuses its answer for the words.
-        checks.assert_called_once_with([self.business.pk], ["2026-09"])
+        # The grid reads grouped counts, then fetches text only for blocked months.
+        self.assertEqual(checks.call_count, 2)
+        self.assertEqual(checks.call_args_list[0].kwargs, {"include_text": False})
+        self.assertEqual(checks.call_args.args, ([self.business.pk], ["2026-09"]))
         self.assertEqual(result["months"][key]["state"], "blocked")
         self.assertEqual(result["blockers"], {key: gst_checks.gstr1_blockers(*checks.call_args.args)[key]["first_two"][0]})
         self.assertTrue(result["blockers"][key])

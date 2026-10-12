@@ -76,8 +76,10 @@ class FirmFilingReadTests(TestCase):
         with stages_spy as stages, checks_spy as checks:
             response = self.client.get("/api/firms/", {"figures": "1", "fy": "2026-27"})
         self.assertEqual(response.status_code, 200, response.data)
-        stages.assert_called_once_with(ids, ["2026-09"], today=date(2026, 10, 8))
-        checks.assert_called_once_with(ids, ["2026-09"])
+        stages.assert_called_once_with(ids, ["2026-09"], today=date(2026, 10, 8), include_checks=False)
+        self.assertEqual(checks.call_count, 2)
+        self.assertEqual(checks.call_args_list[0].kwargs, {"include_text": False})
+        self.assertEqual(checks.call_args.args, (ids, ["2026-09"]))
         rows = {row["id"]: row for row in response.data["results"]}
         for business in (self.business, other):
             figures = rows[business.pk]["figures"]
@@ -100,7 +102,9 @@ class FirmFilingReadTests(TestCase):
         with stages_spy, checks_spy as checks:
             filings = read_filings(ids, labels)
             figures = firm_figures(ids, 2026, filings)
-        checks.assert_called_once_with(ids, labels)
+        self.assertEqual(checks.call_count, 2)
+        self.assertEqual(checks.call_args_list[0].kwargs, {"include_text": False})
+        self.assertEqual(checks.call_args.args, (ids, labels))
         self.assertEqual({key: month["state"] for key, month in filings["months"].items()},
                          {(self.business.pk, "2026-08"): "gstr1", (self.business.pk, "2026-09"): "blocked",
                           (other.pk, "2026-08"): "blocked", (other.pk, "2026-09"): "gstr1"})
@@ -120,8 +124,11 @@ class FirmFilingReadTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual([row["state"] for row in response.data["months"]],
                          ["unlocked", "gstr1", "blocked", "ready", "ready", "filed", "open"])
-        stages.assert_called_once_with([self.business.pk], labels, today=date(2026, 10, 8))
-        checks.assert_called_once_with([self.business.pk], ["2026-06", "2026-07", "2026-08"])
+        stages.assert_called_once_with([self.business.pk], labels, today=date(2026, 10, 8), include_checks=False)
+        self.assertEqual(checks.call_count, 2)
+        self.assertEqual(checks.call_args_list[0].args, ([self.business.pk], ["2026-06", "2026-07", "2026-08"]))
+        self.assertEqual(checks.call_args_list[0].kwargs, {"include_text": False})
+        self.assertEqual(checks.call_args.args, ([self.business.pk], ["2026-06"]))
         self.assertEqual(response.data["figures"]["previous_month"], {"month": "2026-09", "state": "filed", "blocker": ""})
 
     def test_retained_filing_models_and_zero_opening_rows_all_count(self):

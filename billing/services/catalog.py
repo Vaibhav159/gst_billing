@@ -11,7 +11,7 @@ from rest_framework.exceptions import ValidationError
 from billing.cache import uncached
 from billing.constants import BILL_CANCELLED, INVOICE_TYPE_INWARD, INVOICE_TYPE_OUTWARD
 from billing.fy import fy_of, fy_range
-from billing.models import AuditLog, BinnedInvoice, Business, FiledPeriod, Invoice, LineItem, Product
+from billing.models import AuditLog, BinnedInvoice, Business, Invoice, LineItem, Product
 from billing.numbering import REF_FIELDS, bill_ref
 from billing.params import PICK_A_FIRM, fy_param, id_param
 from billing.services.firms import firm_ref
@@ -219,7 +219,8 @@ def hsn_on_bills(product, names):
             else:
                 group[target] = [{"id": pk, "bill_no": number} for pk, number in bills.values_list("id", "invoice_number")[:3]]
         groups.append(group)
-    closed = set(uncached(FiledPeriod).values_list("business_id", "year", "month"))
+    from billing.period_lock import closed_months
+    closed = closed_months(uncached(Business).values_list("pk", flat=True))
     ids = lines.filter(hsn_code="", invoice__type_of_invoice=INVOICE_TYPE_OUTWARD).counted().values("invoice_id")
     bills = uncached(Invoice).filter(pk__in=ids).select_related("customer", "business").only(
         *REF_FIELDS, "business_id", "business__name", "business__short_name").order_by("invoice_date", "id")

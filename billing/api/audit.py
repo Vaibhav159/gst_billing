@@ -72,8 +72,8 @@ class AuditView(APIView):
         pages = AuditPages()
         page = pages.paginate_queryset(rows, request, view=self)
         response = pages.get_paginated_response(entry_rows(page))
-        response.data["total"] = AuditLog.objects.count()
         if request.query_params.get("counts") == "1":
+            response.data["total"] = AuditLog.objects.count()
             scope = filtered(request.query_params, with_kind=False)
             response.data["counts"] = scope.aggregate(all=Count("pk"), **{kind: Count("pk", filter=kind_filter(kind)) for kind in KINDS})
             people = AuditLog.objects.order_by().values("user_id", "user__first_name", "user__last_name", "user__username").distinct()

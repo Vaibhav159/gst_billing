@@ -135,6 +135,7 @@ def read_entries():
         "user__id", "user__username", "user__first_name", "user__last_name",
     ).annotate(
         used=Exists(used), has_invoice=Exists(bills),
+        has_snapshot=Exists(AuditLog.objects.filter(pk=OuterRef("pk"), snapshot__isnull=False).exclude(snapshot={})),
         is_purchase=Exists(bills.filter(type_of_invoice="inward")),
         was_purchase=Exists(bins.filter(type_of_invoice="inward")), in_bin=Exists(bins.live()),
         has_customer=Exists(uncached(Customer).filter(pk=OuterRef("entity_id"))),
@@ -437,7 +438,7 @@ def available(entry, obj=None, binned=None, page=None):
         kind = "undo"
     elif entry.action in {"updated", "reverted"} and entry.entity in {"customer", "product", "business"} and obj is not None and entry.changes:
         kind = "revert"
-    elif entry.action == "deleted" and (binned is not None or (entry.entity in {"customer", "product", "business"} and obj is None)):
+    elif entry.action == "deleted" and (entry.has_snapshot if hasattr(entry, "has_snapshot") else bool(entry.snapshot)) and (binned is not None or (entry.entity in {"customer", "product", "business"} and obj is None)):
         kind = "restore"
     if kind is None:
         return None

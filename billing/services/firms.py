@@ -100,11 +100,17 @@ def filing_dates(ids, months):
 
 
 def read_filings(ids, months):
-    """One bulk stage call, one narrow date query and one grouped blocker call; no monthly query loop."""
+    """Read the stage grid first, grouped counts next, and words only for blocked months."""
     from billing.services.filing import month_stages
+    from billing.services.gst_checks import gstr1_blockers
     months = sorted(set(months))
-    result = month_stages(ids, months, today=timezone.localdate())
+    result = month_stages(ids, months, today=timezone.localdate(), include_checks=False)
     stages, latest = result["stages"], result["latest_gstr1"]
+    ready = sorted({label for (_pk, label), stage in stages.items() if stage == "ready"})
+    counts = gstr1_blockers(ids, ready, include_text=False) if ready else {}
+    for key, value in counts.items():
+        if stages.get(key) == "ready" and value["count"]:
+            stages[key] = "blocked"
     dates = filing_dates(ids, set(months) | {label for label in latest.values() if label})
     def dates_for(pk, label):
         return {"month": label, "gstr1_filed_on": dates.get((pk, label, "gstr1")),
@@ -113,7 +119,8 @@ def read_filings(ids, months):
     blocked = [(pk, label) for (pk, label), state in stages.items() if state == "blocked"]
     blockers = {}
     if blocked:
-        blockers = {key: (result["blockers"].get(key, {}).get("first_two") or [""])[0] for key in blocked}
+        words = gstr1_blockers(ids, sorted({label for _pk, label in blocked}))
+        blockers = {key: (words.get(key, {}).get("first_two") or [""])[0] for key in blocked}
     return {"months": shown, "last": {pk: dates_for(pk, label) if label else None for pk, label in latest.items()},
             "blockers": blockers}
 
@@ -180,7 +187,7 @@ def assert_firm_unused(business, uses=None, history_only=False):
     if any(uses[key] for key in ("filing_records", "filing_months", "filed_periods", "opening_credits")):
         raise Refusal(f"{business.name} has filing records or opening credit, so it can't be deleted. "
                       "Its GST history keeps its firm.", "in_use", uses=uses)
-    if not history_only and any(uses.values()):
+    if (not history_only and any(uses.values())) or uses.get("captures", 0):
         parts = [f"{count} {label if count == 1 else plural}" for key, label, plural in (
             ("sales", "sales bill", "sales bills"), ("cancelled", "cancelled bill", "cancelled bills"),
             ("purchases", "purchase bill", "purchase bills"), ("bin", "bill in the bin", "bills in the bin"),
@@ -204,13 +211,20 @@ def firm_detail(business, fy=None):
     months = [filings["months"][business.pk, label] for label in month_labels]
     recent = Invoice.objects.sales().filter(business=business).select_related("customer").only(
         *REF_FIELDS, "payment_mode", "total_amount").order_by("-invoice_date", "-pk")[:6]
-    data = {field: getattr(business, field) or "" for field in DETAIL_FIELDS if field not in ("signature_image", "updated_at", "paper_full_number_from")}
-    return {**data, **firm_row(business), **live_print_fields(business), "gstin_valid": validate(business.gst_number)[0],
-            "has_bank": bool(business.bank_account_number), "numbers": firm_numbers(business),
+    return {**firm_saved(business), "numbers": firm_numbers(business),
             "figures": firm_figures([business.pk], fy, filings)[business.pk], "months": months, "uses": firm_uses(business),
             "recent": [{**bill_ref(b), "payment_mode": b.payment_mode, "total_amount": money(b.total_amount)} for b in recent],
             "plain_after_full_date": Invoice.objects.sales().filter(business=business, invoice_date__gte=business.paper_full_number_from,
                 invoice_number__regex=r"^[0-9]+$").count() if business.paper_full_number_from else 0,
+            "updated_at": stamp(business.updated_at)}
+
+
+def firm_saved(business):
+    """Persisted fields and live print settings; saves never rebuild annual figures."""
+    data = {field: getattr(business, field) or "" for field in DETAIL_FIELDS
+            if field not in ("signature_image", "updated_at", "paper_full_number_from")}
+    return {**data, **firm_row(business), **live_print_fields(business),
+            "gstin_valid": validate(business.gst_number)[0], "has_bank": bool(business.bank_account_number),
             "updated_at": stamp(business.updated_at)}
 
 
@@ -336,19 +350,23 @@ def check_firm_unique(values, business=None):
         raise ValidationError(errors)
 
 
-def freeze_older_bills(business, changed_fields):
+def freeze_older_bills(business, changed_fields, *, all_bills=False):
     """Freeze pre-snapshot sales, including restorable bin rows, while holding the firm's lock."""
     from billing.cache import invalidate
     from billing.services.sales import firm_snapshot
     if not IDENTITY_FIELDS.intersection(changed_fields):
         return 0
     snapshot = firm_snapshot(business)
-    total = Invoice.objects.sales().filter(business=business, firm_snapshot__isnull=True).update(firm_snapshot=snapshot)
+    rows = uncached(Invoice) if all_bills else Invoice.objects.sales()
+    total = rows.filter(business=business, firm_snapshot__isnull=True).update(firm_snapshot=snapshot)
     if total:
         invalidate(Invoice)
-    binned = list(uncached(BinnedInvoice).live().select_for_update().filter(
+    bins = uncached(BinnedInvoice).live()
+    if not all_bills:
+        bins = bins.filter(type_of_invoice=INVOICE_TYPE_OUTWARD)
+    binned = list(bins.select_for_update().filter(
         Q(data__invoice__firm_snapshot__isnull=True) | Q(data__invoice__firm_snapshot=None),
-        business=business, type_of_invoice=INVOICE_TYPE_OUTWARD,
+        business=business,
     ).only("data").order_by("pk"))
     for row in binned:
         row.data = {**row.data, "invoice": {**row.data["invoice"], "firm_snapshot": snapshot}}
@@ -418,6 +436,7 @@ def delete_firm(business, user):
 
 def save_signature(business, image, user, remove=False):
     from decimal import Decimal
+    from uuid import uuid4
 
     from django.db import transaction
     from PIL import Image, UnidentifiedImageError
@@ -435,8 +454,10 @@ def save_signature(business, image, user, remove=False):
             with Image.open(image) as picture:
                 if picture.format not in {"PNG", "JPEG", "WEBP"}:
                     raise ValueError
+                extension = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}[picture.format]
                 picture.verify()
             image.seek(0)
+            image.name = f"{uuid4().hex}.{extension}"
         except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError):
             raise ValidationError({"image": [f"{image.name} isn't a picture. Pick a PNG, JPG or WebP of the signature."]}) from None
     with transaction.atomic():

@@ -661,7 +661,7 @@ def amendment_plan(business, year, month, *, changes=_NOT_PROVIDED):
             "summary": summary, "rows": len(allowed)}
 
 
-def month_stages(business_ids, months, today=None):
+def month_stages(business_ids, months, today=None, *, include_checks=True):
     """Two small queries plus the aggregate blocker service; no bill snapshots."""
     from django.db.models import CharField, Max, Value
 
@@ -697,7 +697,7 @@ def month_stages(business_ids, months, today=None):
             stages[key] = stage
             if stage == "ready":
                 open_months.add(month_key(day))
-    blockers = gstr1_blockers(business_ids, sorted(open_months)) if open_months else {}
+    blockers = gstr1_blockers(business_ids, sorted(open_months)) if include_checks and open_months else {}
     for key, value in blockers.items():
         if stages.get(key) == "ready" and value["count"]:
             stages[key] = "blocked"

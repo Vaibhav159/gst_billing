@@ -32,7 +32,13 @@ def _gst_number(value):
     return clean_gstin(value) if value else value
 
 
+class OptionalFormBoolean(serializers.BooleanField):
+    # An omitted HTML control keeps the instance value (or the model default).
+    default_empty_html = serializers.empty
+
+
 class BusinessSerializer(serializers.ModelSerializer):
+    signature_on_bills = OptionalFormBoolean(required=False)
     total_revenue = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
@@ -117,6 +123,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    purchase_only = OptionalFormBoolean(required=False)
     kind_effective = serializers.ReadOnlyField()
 
     def validate_kind(self, value):
@@ -203,7 +210,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # DRF's default ends in a plain save(), which writes the v3 columns back as they were read
         # and so can undo a cancel that landed in between (Ruling 1A-16); a changed firm also
-        # clears the frozen one (Ruling 1A-23). Invoice has no many-to-many fields for DRF's
+        # freezes the new one (Ruling X-74). Invoice has no many-to-many fields for DRF's
         # default to set.
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

@@ -460,8 +460,7 @@ class Invoice(AbstractBaseModel):
         """Save as v2's paths do (PATCH and PUT, the line replace, the admin): v2_columns() only.
 
         One v3 column besides: when this save changes the firm, the firm frozen on the bill would
-        name the old one, so it goes to NULL and the bill reads its new firm live (Ruling 1A-23).
-        Only v3's move freezes the new firm.
+        name the old one, so freeze the new firm under its lock (Ruling X-74).
         """
         fields = self.v2_columns()
         with transaction.atomic():
@@ -473,8 +472,9 @@ class Invoice(AbstractBaseModel):
                       .only("business_id", "invoice_date", "type_of_invoice", "itc_month").first())
             moved = before is not None and str(before.business_id) != str(self.business_id)
             if moved:
-                self.firm_snapshot = None
-                fields.append("firm_snapshot")  # Ruling 1A-23: the one v3 column v2's paths write, and only to NULL
+                from billing.services.sales import frozen_firms
+                self.firm_snapshot = frozen_firms(before.business_id, int(self.business_id))[int(self.business_id)]
+                fields.append("firm_snapshot")
             if before is not None and "inward" in (before.type_of_invoice, self.type_of_invoice):
                 from billing.numbering import lock_firms
                 from billing.period_lock import assert_inward_unlocked, assert_period_unlocked

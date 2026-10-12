@@ -120,6 +120,14 @@ class SettledPartyDeleteAdminMixin:
 
 @admin.register(Business)
 class BusinessAdmin(SettledPartyDeleteAdminMixin, admin.ModelAdmin):
+    def has_delete_permission(self, request, obj=None):
+        # Firm deletion and issued-identity changes belong to the guarded records API.
+        return False
+
+    def get_readonly_fields(self, request, obj=None):
+        from billing.services.firms import IDENTITY_FIELDS
+        return tuple(sorted(IDENTITY_FIELDS)) if obj is not None else ()
+
     list_display = ("name", "address", "gst_number")
     list_filter = ("name", "address", "gst_number")
     search_fields = ("name", "address", "gst_number")

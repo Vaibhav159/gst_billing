@@ -1,10 +1,6 @@
-from importlib.util import find_spec
-from unittest import skipUnless
-
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
-from django.urls import Resolver404, resolve
 
 from billing.models import AuditLog
 from billing.services import audit
@@ -12,16 +8,6 @@ from billing.tests.test_audit_mapping_reads import AuditMappingFixture
 from billing.tests.v3_helpers import ROLE_GROUPS, client_for, person
 
 
-def dashboard_has_landed():
-    try:
-        resolve("/api/dashboard/")
-    except Resolver404:
-        return False
-    return True
-
-
-@skipUnless(find_spec("billing.services.dashboard") is not None,
-            "X-40: run the actual Dashboard adapter checks after 5A Task 3 lands")
 class DashboardAdapterMappingTest(AuditMappingFixture, TestCase):
     def test_latest_four_use_shared_words_and_only_the_dashboard_exclusions(self):
         from billing.services.dashboard import latest_changes
@@ -65,7 +51,6 @@ class DashboardAdapterMappingTest(AuditMappingFixture, TestCase):
         self.assertNotIn("PRIVATE", str(rows))
 
 
-@skipUnless(dashboard_has_landed(), "X-40: run the Dashboard HTTP gate after plan 5A lands")
 class DashboardMappingTest(AuditMappingFixture, TestCase):
     def test_owner_receives_shared_whole_shop_words_and_bounded_details(self):
         from billing.services.dashboard import latest_changes
