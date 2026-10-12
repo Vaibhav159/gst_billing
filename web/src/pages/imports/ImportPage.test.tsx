@@ -11,7 +11,7 @@ function setup(answers = {}, me = undefined as typeof VIEWER | undefined) {
 }
 describe('Excel and CSV wizard', () => {
   it('leaves a list of import kinds for records and offers photos', () => {
-    setup(); expect(IMPORT_KINDS.map(k => k.value)).toEqual(['bills']);
+    setup(); expect(IMPORT_KINDS.map(k => k.value)).toEqual(['bills', 'customers', 'products', 'firms']);
     expect(screen.getByRole('link', { name: 'Import bill photos' })).toHaveAttribute('href', '/purchases/ai-import');
   });
   it('keeps viewers read-only without opening a file input', () => {

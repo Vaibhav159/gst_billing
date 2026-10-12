@@ -17,13 +17,16 @@ import { useImportSession } from './session';
 import type { ImportKind, ImportResult } from './batch';
 import { useIsPhone } from '@/core/device';
 import { ImportMobile } from './ImportMobile';
+import { RecordsImportRoute } from '@/pages/records/RecordsImport';
+import { readRecordsWorkbook } from './recordWorkbook';
 import { ImportTemplate } from './Template';
 import { TotalsByType } from './TotalsByType';
 import { BillEditor } from './BillEditor';
 type SavedBill = ImportResult['bills'][number] & { kind: ImportKind };
 const STEPS = ['Choose the file', 'Check the layout', 'Check the bills', 'Import'];
 export default function ImportPage() {
-  return useIsPhone() ? <ImportMobile /> : <ImportDesktop />;
+  if (useIsPhone()) return <ImportMobile />;
+  return <RecordsImportRoute bills={<ImportDesktop />} readWorkbook={readRecordsWorkbook} />;
 }
 function ImportDesktop() {
   const { can } = useAuth(), { firms, loading: firmsLoading, error: firmsError } = useFirms();
