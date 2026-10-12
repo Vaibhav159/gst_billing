@@ -119,6 +119,8 @@ test.each(['filled', 'discarded'] as const)('%s capture is unavailable; an exist
   mount(); expect(await screen.findByText("This photo isn't in the inbox any more")).toBeVisible();
   expect(screen.queryByLabelText("Supplier's bill number")).not.toBeInTheDocument();
   if (status === 'filled') expect(screen.getByRole('link', { name: 'Open the purchase' })).toHaveAttribute('href', '/purchases/905');
+  // A filled or discarded capture can't be discarded again; offering it would only fetch a refusal.
+  expect(screen.queryByRole('button', { name: 'Discard photo' })).not.toBeInTheDocument();
 });
 
 test.each(['12', 'not-an-id'])('missing capture %s gives the unavailable screen', async id => {
@@ -131,11 +133,14 @@ test.each(['12', 'not-an-id'])('missing capture %s gives the unavailable screen'
 test.each(['filled', 'discarded'] as const)('a refresh to %s keeps what was typed and shows the news above the form (X-62)', async status => {
   server(); const view = mount(); await ready();
   fireEvent.change(screen.getByLabelText("Supplier's bill number"), { target: { value: 'TYPED' } }); await tick(400);
+  expect(screen.getByRole('button', { name: 'Discard photo' })).toBeEnabled();
   view.replace(captureFixture({ status, read: read(), purchase: status === 'filled' ? { id: 905, invoice_number: 'P/1', invoice_date: '2026-10-07', supplier_name: 'Supplier', total_amount: '10.00', business_name: 'Firm' } : null }));
   expect(await screen.findByText(status === 'filled' ? 'Someone has already filled in this bill' : 'Someone discarded this photo')).toBeVisible();
   expect(screen.getByLabelText("Supplier's bill number")).toHaveValue('TYPED');
   expect(screen.queryByText("This photo isn't in the inbox any more")).not.toBeInTheDocument();
   if (status === 'filled') expect(screen.getByRole('link', { name: 'Open the purchase' })).toHaveAttribute('href', '/purchases/905');
+  // A filled or discarded capture can't be discarded again; offering it would only fetch a refusal.
+  expect(screen.queryByRole('button', { name: 'Discard photo' })).not.toBeInTheDocument();
 });
 
 test('a refresh to gone (404) keeps what was typed; with nothing typed it shows the unavailable screen', async () => {
@@ -146,6 +151,7 @@ test('a refresh to gone (404) keeps what was typed; with nothing typed it shows 
   missing = true; await act(() => view.client.invalidateQueries({ queryKey: captureKeys.one(12) }));
   expect(await screen.findByText("This photo isn't in the inbox any more")).toBeVisible();
   expect(screen.getByLabelText("Supplier's bill number")).toHaveValue('TYPED');
+  expect(screen.queryByRole('button', { name: 'Discard photo' })).not.toBeInTheDocument();
   view.unmount(); missing = false;
   const clean = mount(); await ready();
   missing = true; await act(() => clean.client.invalidateQueries({ queryKey: captureKeys.one(12) }));

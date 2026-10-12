@@ -96,7 +96,7 @@ function Fill({ capture, gone, refreshing, refresh, refreshError }: { capture: C
           confirmed={confidence.confirmed} onConfirm={confirm} disabled={reader.isPending || discard || terminal}
           onFocusGroup={group => setFocus(group === 'buyer' ? null : group)} onDirtyChange={setDirty} onBusyChange={setSaving}
           onSaved={bill => { void navigate(`/purchases/${bill.id}?from=capture`, { replace: true }); }} />
-        {removable ? <Button variant="danger-outline" icon={Trash2} full disabled={busy} onClick={() => setDiscard(true)}>Discard photo</Button> : null}
+        {removable && !terminal ? <Button variant="danger-outline" icon={Trash2} full disabled={busy} onClick={() => setDiscard(true)}>Discard photo</Button> : null}
       </div>
     </div>
     <DiscardCaptureDialog capture={discard ? capture : null} typed={dirty} onClose={() => setDiscard(false)} onDone={() => setDiscarded(true)} />
