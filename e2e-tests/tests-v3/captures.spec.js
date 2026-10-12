@@ -123,10 +123,14 @@ test('same pages become one capture; save keeps source, file, exact lines and re
 test('failed upload survives reload, retries same UUID and reads only once', async ({ page }) => {
   await openCapture(page);
   const attempts = [];
+  let failUploads = true;
   const reads = [];
   page.on('request', r => { if (/\/api\/(?:captures\/\d+|purchases)\/read\/$/.test(new URL(r.url()).pathname) && r.method() === 'POST') reads.push(r.url()); });
   await page.route('**/api/captures/', async route => {
-    if (route.request().method() === 'POST') { attempts.push(route.request().postData()); await route.abort('failed'); }
+    if (route.request().method() === 'POST') {
+      attempts.push(route.request().postData());
+      if (failUploads) await route.abort('failed'); else await route.continue();
+    }
     else await route.continue();
   });
   await page.getByLabel(/^(Choose files|Choose bill photos or PDFs)$/).setInputFiles(await synthetic(page));
@@ -140,11 +144,11 @@ test('failed upload survives reload, retries same UUID and reads only once', asy
   expect(localIds).toHaveLength(1);
   expect(attempts.length).toBeGreaterThan(0);
   for (const body of attempts) expect(body).toContain(localIds[0]);
-  await page.unroute('**/api/captures/');
+  failUploads = false;
   const posted = page.waitForResponse(r => new URL(r.url()).pathname === '/api/captures/' && r.request().method() === 'POST' && r.ok());
   await page.getByRole('button', { name: 'Try now', exact: true }).first().click();
   const response = await posted;
-  expect(response.request().postData()).toContain(localIds[0]);
+  expect(attempts.at(-1)).toContain(localIds[0]);
   const capture = await response.json(); made.push(capture.id);
   const ready = await waitReady(page, capture.id);
   expect(reads).toHaveLength(1);
@@ -170,7 +174,7 @@ test('failed synthetic read stays available; discard can be undone', async ({ pa
   await page.getByRole('button', { name: 'Discard photo', exact: true }).click(); await afterDialog(page);
   await page.getByRole('dialog', { name: 'Discard this photo?' }).getByRole('button', { name: 'Discard photo', exact: true }).click();
   const restored = page.waitForResponse(r => new URL(r.url()).pathname === `/api/captures/${capture.id}/restore/` && r.ok());
-  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: /^Undo(?:\s|$)/ }).click();
   expect((await (await restored).json()).status).toBe('failed');
 });
 for (const theme of ['obsidian', 'pearl']) {
