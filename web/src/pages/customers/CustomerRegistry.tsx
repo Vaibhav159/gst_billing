@@ -14,8 +14,9 @@ export function CustomerRegistry({ gstin, stored = "", values, onFill, onName }:
   const [checked, setChecked] = useState<string | null>(null);
   const wanted = gstin !== stored || checked === gstin;
   const asked = useDebounced(gstin);
-  const lookup = useRegistry(asked, wanted);
-  const data = asked === gstin && lookup.data?.gstin === gstin ? lookup.data : undefined;
+  const ready = wanted && asked === gstin;
+  const lookup = useRegistry(asked, ready);
+  const data = ready && lookup.data?.gstin === gstin ? lookup.data : undefined;
   const reg = data?.registry;
   const applied = useRef<string | null>(null);
   const filled = useRef<string[]>([]);

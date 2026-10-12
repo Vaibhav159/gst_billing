@@ -1,4 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { handClock, pass } from "@/test/clock";
 import { ANIL, mount, NO_BILLS, serve, type Call } from "./testing";
 import CustomerForm from "./CustomerForm";
@@ -36,6 +38,41 @@ test("an edit with a stored GSTIN asks the registry only when the person taps Ch
   expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("Stored address");
   expect(screen.getByLabelText("City")).toHaveValue("Mumbai");
   expect(screen.queryByRole("button", { name: "Check this GSTIN" })).not.toBeInTheDocument();
+});
+
+test("a warm registry cache cannot fill or appear on a stored-GSTIN edit until Check this GSTIN is tapped", async () => {
+  function WarmRegistryForm() {
+    const cache = useQueryClient();
+    useEffect(() => { cache.setQueryData(["registry", GST], registry); }, [cache]);
+    return <CustomerForm />;
+  }
+  const calls = serve({ ...base, "GET customers/7/": { ...ANIL, gst_number: GST, address: "", city: "" } });
+  mount([{ path: "/customers/:id/edit", element: <WarmRegistryForm /> }], ["/customers/7/edit"]); await pass(1000);
+  expect(screen.getByRole("button", { name: "Check this GSTIN" })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("");
+  expect(screen.getByLabelText("City")).toHaveValue("");
+  expect(screen.queryByText(/Active since/)).not.toBeInTheDocument();
+  expect(calls.filter(c => c.url.startsWith("registry/"))).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Check this GSTIN" })); await pass();
+  expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("21 Demo Road");
+  expect(screen.getByLabelText("City")).toHaveValue("Mumbai");
+  expect(screen.getByLabelText(/^Name/)).toHaveValue(ANIL.name);
+  expect(screen.getByText(/Active since/)).toBeInTheDocument();
+  expect(calls.filter(c => c.url.startsWith("registry/"))).toHaveLength(0);
+});
+
+test("changing a stored GSTIN never enables its old value while the new value is debouncing", async () => {
+  const next = "08AAMFR5567K1ZG";
+  const calls = serve({ ...base, "GET customers/7/": { ...ANIL, gst_number: GST }, [`GET registry/${next}/`]: { ...registry, gstin: next } });
+  mount(routes, ["/customers/7/edit"]); await pass(1000);
+  fireEvent.change(screen.getByLabelText("GSTIN"), { target: { value: GST.slice(0, -1) } }); await pass();
+  expect(calls.filter(c => c.url.startsWith("registry/"))).toHaveLength(0);
+  await pass(400);
+  expect(calls.filter(c => c.url.startsWith("registry/"))).toHaveLength(0);
+  fireEvent.change(screen.getByLabelText("GSTIN"), { target: { value: next } }); await pass(249);
+  expect(calls.filter(c => c.url.startsWith("registry/"))).toHaveLength(0);
+  await pass(1);
+  expect(calls.filter(c => c.url.startsWith("registry/")).map(c => c.url)).toEqual([`registry/${next}/`]);
 });
 
 test("a late registry answer for the previous GSTIN never fills the new form", async () => {
