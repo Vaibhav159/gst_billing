@@ -28,6 +28,11 @@ const Login = lazyPage(() => import("@/pages/core/Login"));
 const More = lazyPage(() => import("@/pages/core/More"));
 
 const EasyBillFlow = lazyPage(() => import("@/pages/easy/BillFlow"));
+const EasyNewBill = lazyPage(() => import("@/pages/easy/NewBill"));
+const EasyWho = lazyPage(() => import("@/pages/easy/WhoRoute"));
+const EasyItems = lazyPage(() => import("@/pages/easy/NewBill").then(m => ({ default: m.ItemsRoute })));
+const EasyBillCustomer = lazyPage(() => import("@/pages/easy/BillCustomer").then(m => ({ default: m.BillCustomerRoute })));
+const EasySaved = lazyPage(() => import("@/pages/easy/SavedRoute"));
 const SalesList = lazyPage(() => import("@/pages/sales/SalesList"));
 const BillPage = lazyPage(() => import("@/pages/sales/BillPage"));
 const V2NumberLink = lazyPage(() => import("@/pages/sales/V2NumberLink"));
@@ -46,7 +51,7 @@ const Audit = lazyPage(() => import("@/pages/records/Audit"));
 const Backup = lazyPage(() => import("@/pages/records/Backup"));
 const DashboardPage = lazyPage(() => import("@/pages/core/DashboardPage"));
 
-const warmPages = idlePages([GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, DashboardPage, EasyBillFlow, ...easyEverydayPages, paletteCode]);
+const warmPages = idlePages([EasyNewBill, EasyWho, EasyItems, EasyBillCustomer, EasySaved, GstReturns, SalesList, BillPage, V2NumberLink, NewBillPage, EditBillPage, PaperBookPage, PrintPage, ScanPage, BatchPrint, BulkExport, Reports, PurchaseList, PurchasePage, PurchaseFormPage, ...customerPages, ...capturePages, ...productPages, ...firmPages, SettingsPage, SetupPage, UsersPage, ProfilePage, Login, More, Audit, Backup, DashboardPage, EasyBillFlow, ...easyEverydayPages, paletteCode]);
 
 /** What each placeholder names: the area, and the part of v3 that builds it. */
 export const PARTS: Record<string, { part: number; area: string }> = {
@@ -71,7 +76,7 @@ const PAGES: Record<string, string[]> = {
     "/settings", "/setup",
   ],
   easy: [
-    "/e/saved/:id", "/e/capture", "/e/gst",
+    "/e/capture", "/e/gst",
   ],
 };
 
@@ -124,12 +129,15 @@ export const appRoutes: RouteObject[] = [{
       element: <RequireAuth><AppLayout onShown={warmPages} /></RequireAuth>,
       children: [
         { path: "/", element: <DashboardPage /> },
-        // The screens arrive in 6C–6E; their routes and shared form live here from 6B.
+        // One bill brain across its steps, with one leave guard in the view shell.
         { path: "/e/new", element: <EasyBillFlow />, handle: { hideNav: true }, children: [
-          { index: true, element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
-          { path: "items", element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
-          { path: "customer", element: <Placeholder {...PARTS.easy} />, handle: { hideNav: true } },
+          { element: <EasyNewBill />, children: [
+            { index: true, element: <EasyWho />, handle: { hideNav: true } },
+            { path: "items", element: <EasyItems />, handle: { hideNav: true } },
+            { path: "customer", element: <EasyBillCustomer />, handle: { hideNav: true } },
+          ] },
         ] },
+        { path: "/e/saved/:id", element: <EasySaved /> },
         { path: "/e/bill/:id/print", element: <PrintPage />, handle: { hideNav: true } },
         ...easyEverydayRoutes,
         // part 1C's customer screens, ahead of the placeholders: of two routes with one path, the first wins
