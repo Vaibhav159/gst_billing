@@ -2,7 +2,7 @@
 // Uses the authenticated sandbox and existing records. UI/API-created bills go to the bin; all test drafts are removed.
 const { test, expect } = require("@playwright/test");
 const { opened } = require("./session");
-const { afterDialog, client, esc, firstFirm, makesBills, newBill, someCustomer, today } = require("./sales-data");
+const { afterDialog, client, esc, firstFirm, latestOpenPaperDay, makesBills, newBill, someCustomer, today, walkIn } = require("./sales-data");
 const { aProduct, notesSavedBills, startsDrafts } = require("./bill-form-data");
 const { measure } = require("./axe");
 
@@ -123,11 +123,7 @@ test("Easy: exactly two lakh in cash is stopped and Part cash needs its confirma
 
 test("Easy: an earlier paper day drives the number, historical board, draft resume and save", async ({ page, request }) => {
   const { api, firm, customer } = await records(page, request);
-  const [y, m, d] = today().split("-").map(Number);
-  const prior = new Date(Date.UTC(y, m - 1, d - 1));
-  const day = `${prior.getUTCFullYear()}-${String(prior.getUTCMonth() + 1).padStart(2, "0")}-${String(prior.getUTCDate()).padStart(2, "0")}`;
-  const book = await api.get("sales/paper-book/", { business_id: firm.id, month: day.slice(0, 7) });
-  test.skip(book.locked, "the sandbox's previous day belongs to a filed month");
+  const { day, book } = await latestOpenPaperDay(api, firm.id);
   const asked = [];
   page.on("request", (r) => { const u = new URL(r.url()); if (u.pathname.startsWith("/api/")) asked.push({ path: u.pathname, query: Object.fromEntries(u.searchParams) }); });
   await begin(page, customer); await pickProduct(page, api);
@@ -170,9 +166,7 @@ test("Easy: an earlier paper day drives the number, historical board, draft resu
 
 test("Easy: Wrong customer remake keeps the lines and records replaces after choosing the buyer", async ({ page, request }) => {
   const { api, firm, customer } = await records(page, request);
-  const { results } = await api.get("customers/", { page_size: 50 });
-  const wrong = results.find((c) => c.id !== customer.id && c.type === "walkin");
-  test.skip(!wrong, "this fixture needs an existing walk-in and a named customer; it creates no customer");
+  const wrong = await walkIn(api);
   const original = await newBill(api, { firm, customer: wrong, rate: "6512.50" });
   await api.post(`sales/${original.id}/cancel/`, { reason: "Wrong customer" });
   await page.goto(`/e/bill/${original.id}`);

@@ -81,7 +81,11 @@ export function CustomerForm({ Frame, firm, firms, existing = null, initialName 
     // non-unique nullable text fields in the existing serializer; the shared mutation accepts string values.
     const wire = { name: "name", phone: "mobile_number", city: "city", gstin: "gst_number", address: "address" } as const;
     for (const key of fields) if (changed(key)) body[wire[key]] = values[wire[key]];
-    if (!existing || changed("gstin")) { body.state_name = gstState || firm.state; body.customer_type = ""; }
+    if (!existing || changed("gstin")) {
+      if (!existing) body.state_name = firm.state;
+      if (gst.status === "valid") body.state_name = gst.state;
+      body.customer_type = "";
+    }
     if (!existing) body.businesses = [firm.id];
     if (existing && !Object.keys(body).length) { setDone(existing); return; }
     save.mutate({ id: existing?.id, body }, {

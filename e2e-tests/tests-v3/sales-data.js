@@ -8,6 +8,22 @@ function today() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
+/** Latest earlier day the form accepts: current/previous FY, skipping whole filed months. */
+async function latestOpenPaperDay(api, firmId, on = today()) {
+  const [year, month, date] = on.split("-").map(Number);
+  const firstYear = year - (month < 4 ? 1 : 0) - 1;
+  const earliest = `${firstYear}-04-01`;
+  let prior = new Date(Date.UTC(year, month - 1, date - 1));
+  while (prior.toISOString().slice(0, 10) >= earliest) {
+    // UTC arithmetic preserves the IST calendar date supplied by today().
+    const day = prior.toISOString().slice(0, 10);
+    const book = await api.get("sales/paper-book/", { business_id: firmId, month: day.slice(0, 7) });
+    if (!book.locked) return { day, book };
+    prior = new Date(Date.UTC(prior.getUTCFullYear(), prior.getUTCMonth(), 0));
+  }
+  throw new Error(`No open paper day before ${on} in the current or previous financial year for firm ${firmId}.`);
+}
+
 /** A text as a regular expression that matches it literally. */
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -125,4 +141,4 @@ async function afterDialog(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { today, esc, client, firstFirm, someCustomer, walkIn, TEST_ITEM, newBill, noteBill, removeBill, makesBills, afterDialog };
+module.exports = { today, latestOpenPaperDay, esc, client, firstFirm, someCustomer, walkIn, TEST_ITEM, newBill, noteBill, removeBill, makesBills, afterDialog };

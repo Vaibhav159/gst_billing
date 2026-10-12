@@ -60,6 +60,21 @@ it("makes no PATCH for an unchanged existing customer", async () => {
   expect(writes(calls)).toEqual([]);
 });
 
+it.each([
+  ["", undefined],
+  ["27AAPFU0939F1ZV", "MAHARASHTRA"],
+  ["27AAPFU0939F1Z0", undefined],
+])("edits GSTIN to %s without resetting the customer's state to the firm's", async (gstin, state) => {
+  const existing = toCustomer({ ...ANIL, gst_number: "24AAPFU0939F1Z1", state_name: "GUJARAT" });
+  const calls = serve({ "GET customers/": { results: [] }, "PATCH customers/7/": (c: Call) => ({ status: 200, data: { ...existing, ...c.data as object } }) });
+  const saved = vi.fn(); draw(form({ existing, onSaved: saved }));
+  change("GST number · only for shops and companies", gstin);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  expect(writes(calls)[0].data).toEqual({ gst_number: gstin, customer_type: "", ...(state ? { state_name: state } : {}) });
+  expect(saved).toHaveBeenCalledWith(expect.objectContaining({ state_name: state ?? "GUJARAT" }));
+});
+
 it("names an on-file phone and lets the bill flow use it without creating anything", async () => {
   handClock();
   const calls = serve({ "GET customers/": { results: [ANIL] } }); const saved = vi.fn();
@@ -73,7 +88,7 @@ it("names an on-file phone and lets the bill flow use it without creating anythi
   expect(writes(calls)).toEqual([]);
 });
 
-it("uses shared GSTIN validation, retains checksum warnings, and sends the registered state", async () => {
+it("uses shared GSTIN validation and saves a checksum warning without taking its state", async () => {
   const saved = vi.fn(); const calls = serve({ "GET customers/": { results: [] }, "POST customers/": (c: Call) => ({ status: 201, data: { ...ANIL, ...c.data as object } }) });
   draw(form({ onSaved: saved })); typeNew();
   change("GST number · only for shops and companies", "27AAPFU0939F1Z0");
@@ -81,7 +96,7 @@ it("uses shared GSTIN validation, retains checksum warnings, and sends the regis
   expect(screen.getByText(/shop in Maharashtra/)).toHaveTextContent("Bills to it charge IGST, the GST for sales to another state.");
   fireEvent.click(screen.getByRole("button", { name: "Save customer" }));
   await waitFor(() => expect(saved).toHaveBeenCalledOnce());
-  expect(writes(calls)[0].data).toMatchObject({ state_name: "MAHARASHTRA", customer_type: "", gst_number: "27AAPFU0939F1Z0" });
+  expect(writes(calls)[0].data).toMatchObject({ state_name: "RAJASTHAN", customer_type: "", gst_number: "27AAPFU0939F1Z0" });
 });
 
 it("keeps typed fields and exposes both visible and unrepresented server errors", async () => {

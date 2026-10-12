@@ -29,6 +29,7 @@ const dayBefore = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - 86_
 function mount(path: string | { pathname: string; state: { fullView: true } } = "/e/new", me = stubAuth()) {
   const router = createMemoryRouter([{ element: <AppLayout />, children: [
     { path: "/", element: <h1>Full probe</h1> }, { path: "/e", element: <h1>Home probe</h1> },
+    { path: "/sales/new", element: <h1>Full bill probe</h1> },
     { path: "/e/new", element: <BillFlow />, children: [{ index: true, element: <Probe /> }, { path: "items", element: <Probe /> }, { path: "customer", element: <Probe /> }] },
   ] }], { initialEntries: [path] });
   render(<QueryClientProvider client={testQueryClient()}><AuthContext.Provider value={me}><ToastProvider><RouterProvider router={router} /></ToastProvider></AuthContext.Provider></QueryClientProvider>);
@@ -115,6 +116,7 @@ it("requires full view when remaking a cancelled bill with a place-of-supply ove
   expect(screen.queryByRole("heading", { name: "Bill probe" })).not.toBeInTheDocument();
   const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1000);
   await act(async () => finish.click());
+  await screen.findByRole("heading", { name: "Full bill probe" });
   expect(router.state.location.pathname + router.state.location.search).toBe("/sales/new?remake=412");
   expect(router.state.location.state).toEqual({ fullView: true });
   now.mockRestore();
@@ -140,7 +142,7 @@ it("treats persisted Full view router state on reload as an ordinary Easy home",
   await waitFor(() => expect(router.state.location.pathname).toBe("/e"));
 });
 
-afterEach(() => { onlineManager.setOnline(true); __setNetState("online"); });
+afterEach(async () => { await act(async () => { onlineManager.setOnline(true); __setNetState("online"); }); });
 it.each(["?again=412", "?customer=7"])("explains an uncached offline deep link %s", async search => {
   const router = mount("/e/new");
   await screen.findByRole("heading", { name: "Bill probe" });

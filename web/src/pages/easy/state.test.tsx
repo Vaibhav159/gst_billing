@@ -7,10 +7,11 @@ import { __setNetState } from "@/core/api/network";
 import { salesServer } from "@/core/sales/fixtures";
 import { blankLine, startNew } from "@/pages/sales/form/model";
 import { defaultFirmId } from "@/core/scope";
+import { usePrefs } from "@/core/prefs";
 import { easyFirmId, thisYear, lastYear, earlyInYear, weightSlip, unusual, useEasyFirm, useWelcome, setEasyPref } from "./state";
 
 const firms = [{ id: 3, name: "Kiran", short: "Kiran", gstin: "", state: "Rajasthan" }, { id: 8, name: "Aarav", short: "Aarav", gstin: "", state: "Rajasthan" }];
-afterEach(() => __setNetState("online"));
+afterEach(async () => { await act(async () => __setNetState("online")); });
 describe("Easy state", () => {
   it.each([null, 8])("keeps an unread personal default unknown unless this phone picked %s", async (picked) => {
     const me = picked === null ? 92 : 93;
@@ -22,10 +23,14 @@ describe("Easy state", () => {
     });
     function Probe() {
       const f = useEasyFirm();
-      return <output>{f.loading ? "waiting" : "settled"}:{f.firmId ?? "none"}:{String(f.error)}</output>;
+      const { unavailable } = usePrefs();
+      return <output data-prefs-unavailable={Boolean(unavailable)}>{f.loading ? "waiting" : "settled"}:{f.firmId ?? "none"}:{String(f.error)}</output>;
     }
     renderApp(<Probe />, { me: { id: me } });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(picked === null ? "settled:none:true" : "settled:8:false"));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveAttribute("data-prefs-unavailable", "true");
+      expect(screen.getByRole("status")).toHaveTextContent(picked === null ? "settled:none:true" : "settled:8:false");
+    });
   });
   it("uses the phone pick then personal, shop, alphabetical; ignores vanished firms", () => {
     expect(easyFirmId(firms, 3, "8", 8)).toBe(3);
