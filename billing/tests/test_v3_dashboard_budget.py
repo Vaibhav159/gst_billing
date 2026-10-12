@@ -122,7 +122,8 @@ def test_full_predecessor_budgets(shop):
     for role, path, queries, size, today in [("owner", "/api/dashboard/", 14, 40000, date(2026, 10, 8)),
         ("owner", "/api/due-next/?returns=1", 24, 120000, date(2026, 10, 8)),
         ("staff", "/api/due-next/", 10, 90000, date(2026, 10, 8)),
-        ("viewer", "/api/due-next/?returns=1", 12, 25000, date(2026, 10, 8)),
+        ("viewer", "/api/due-next/?returns=1", 14, 25000, date(2026, 10, 8)),
+        # Ruling X-70: 14, not 12 — a viewer's returns card reads 3A's stages and positions; the count is fixed, never per bill.
         ("owner", "/api/due-next/?returns=1", 24, 120000, date(2027, 4, 3))]:
         data, seen = request(shop[role], path, today)
         if "returns=1" in path:
