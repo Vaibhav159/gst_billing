@@ -52,11 +52,22 @@ describe("InvoiceForm's tax warnings", () => {
     await waitFor(() => expect(screen.getByDisplayValue("TW-1")).toBeInTheDocument());
     const panel = await screen.findByRole("note", { name: "Tax warnings" });
     for (const t of TITLES) expect(within(panel).getByText(t)).toBeInTheDocument();
-    expect(within(panel).getByText(/Add the address for LOCAL BUYER in Customers/)).toBeInTheDocument();
+    expect(within(panel).getByText(/then add the address for LOCAL BUYER in Customers/)).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: /Update Invoice/ })[0]);
     const sheet = await screen.findByRole("dialog", { name: "Review invoice before saving" });
     for (const t of TITLES) expect(within(sheet).getByText(t)).toBeInTheDocument();
+  });
+
+  it("drops the cash warning when Payment is set to bank, and every warning for a purchase", async () => {
+    renderEdit();
+    await waitFor(() => expect(screen.getByDisplayValue("TW-1")).toBeInTheDocument());
+    const panel = await screen.findByRole("note", { name: "Tax warnings" });
+    fireEvent.change(screen.getByDisplayValue("Cash"), { target: { value: "bank" } });
+    await waitFor(() => expect(within(panel).queryByText("Cash of ₹2,00,000 or more")).toBeNull());
+    expect(within(panel).getByText("The buyer's name and address")).toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue("Outward (Sales)"), { target: { value: "INWARD" } });
+    await waitFor(() => expect(screen.queryByRole("note", { name: "Tax warnings" })).toBeNull());
   });
 
   it("never stops the save", async () => {

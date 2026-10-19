@@ -68,6 +68,12 @@ describe("buildInvoiceParams — one query builder for the list and the exports 
     expect(p.get("gst_rate")).toBe("3");
   });
 
+  it("asks for the drill-down's dates even when FY and month are set", () => {
+    const p = buildInvoiceParams({ fyFilter: "2025-26", monthFilter: "4", startDate: "2026-09-01", endDate: "2026-09-30" });
+    expect(p.get("start_date")).toBe("2026-09-01");
+    expect(p.get("end_date")).toBe("2026-09-30");
+  });
+
   it("keeps the FY and month range when there's no drill-down", () => {
     const p = buildInvoiceParams({ fyFilter: "2026-27", monthFilter: "9" });
     expect(p.get("start_date")).toBe("2026-09-01");

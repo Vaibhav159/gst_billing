@@ -30,11 +30,11 @@ import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToS
 
 interface InvoiceFormProps { mode: "create" | "edit" }
 
-/** The tax warnings, in the form's amber note style. They never block the save. */
+/** The tax warnings, in the theme's warning colours (as the filed-month note). They never block the save. */
 function TaxWarningList({ warnings }: { warnings: TaxWarning[] }) {
   if (warnings.length === 0) return null;
   return (
-    <div role="note" aria-label="Tax warnings" className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3 text-[12px] text-amber-600 dark:text-amber-400">
+    <div role="note" aria-label="Tax warnings" className="rounded-2xl border border-warning/40 bg-warning/10 p-4 space-y-3 text-[12px] text-warning">
       {warnings.map((w) => (
         <div key={w.key} className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
@@ -113,7 +113,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     // gst_number and state_name are carried because isIntraState reads them.
     // Without them a quick-added customer is a name with no location, and the
     // auto-IGST switch silently treats every such sale as local.
-    customer?: { id: string; name: string; gst_number?: string; state_name?: string };
+    // address and pan_number: set for a customer added with New (its real values, blanks included); left out for
+    // the edit-mode stub built from the stored bill, where they're unknown.
+    customer?: { id: string; name: string; gst_number?: string; state_name?: string; address?: string | null; pan_number?: string | null };
     business?: { id: string; name: string };
     products: { id: string; name: string; hsn: string; gstRate: number }[];
   }>({ products: [] });
@@ -306,6 +308,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         name: fallbackEntities.customer.name,
         gst_number: fallbackEntities.customer.gst_number || "",
         state_name: fallbackEntities.customer.state_name || "",
+        address: fallbackEntities.customer.address,
+        pan_number: fallbackEntities.customer.pan_number,
       } as any);
     }
     return list;
@@ -624,7 +628,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   </select>
                 </div>
                 {lockedPeriodForDate && (
-                  <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-600 dark:text-amber-400">
+                  <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>
                       <b>{String(lockedPeriodForDate.month).padStart(2, "0")}/{lockedPeriodForDate.year} is filed &amp; locked</b> for this business — saving into it will be refused. Pick another date, or unlock the month on the GST page (audit-logged).
@@ -800,7 +804,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               </div>
             </div>
 
-            <TaxWarningList warnings={taxNotes} />
+            <div aria-live="polite">
+              <TaxWarningList warnings={taxNotes} />
+            </div>
 
             {/* Actions - desktop only */}
             {!isMobile && (
@@ -842,6 +848,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               name: newCust.name,
               gst_number: newCust.gst || "",
               state_name: newCust.state || "",
+              address: newCust.address,
+              pan_number: newCust.pan,
             },
           }));
           set("customerId", String(newCust.id));

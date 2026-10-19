@@ -866,31 +866,10 @@ export function useDashboardStats(filters?: InvoiceFilters, enabled = true) {
     setIsLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      // Explicit date range takes priority over FY filter
-      if (filters?.startDate && filters?.endDate) {
-        params.set("start_date", filters.startDate);
-        params.set("end_date", filters.endDate);
-      } else if (filters?.fyFilter && filters.fyFilter !== "all") {
-        const { start_date, end_date } = buildDateRange(filters.fyFilter);
-        if (start_date) params.set("start_date", start_date);
-        if (end_date) params.set("end_date", end_date);
-      }
-      if (filters?.businessId && filters.businessId !== "all") {
-        params.set("business_id", filters.businessId);
-      }
-      if (filters?.customerId && filters.customerId !== "all") {
-        params.set("customer_id", filters.customerId);
-      }
-      if (filters?.typeFilter && filters.typeFilter !== "all") {
-        params.set("type_of_invoice", filters.typeFilter.toLowerCase());
-      }
-      if (filters?.monthFilter && filters.monthFilter !== "all") {
-        params.set("month", filters.monthFilter);
-      }
-      if (filters?.search) {
-        params.set("search", filters.search);
-      }
+      // The list's own query builder: the server's stats read the same queryset as the list, so the cards cover
+      // exactly the invoices the list shows (month chip, GST-page drill-down, payment and slab filters included).
+      // The cards used to send a "month" the server never reads and no slab, segment or payment filter.
+      const params = buildInvoiceParams(filters || {});
 
       const qs = params.toString();
       const res = await api.get<DashboardStats>(`invoices/stats/${qs ? `?${qs}` : ""}`);
