@@ -39,12 +39,12 @@ describe("useDashboardStats asks for what the invoice list shows", () => {
   it("a GST-page drill-down: its dates, slab, segment and payment, as the list sends them", async () => {
     const q = await statsQuery({
       fyFilter: "all", monthFilter: "all", startDate: "2026-09-01", endDate: "2026-09-30",
-      gstRate: "3", segment: "b2cs", paymentFilter: "cash", typeFilter: "OUTWARD",
+      gstRate: "3", segment: "b2c", paymentFilter: "cash", typeFilter: "OUTWARD",
     });
     expect(q.get("start_date")).toBe("2026-09-01");
     expect(q.get("end_date")).toBe("2026-09-30");
     expect(q.get("gst_rate")).toBe("3");
-    expect(q.get("segment")).toBe("b2cs");
+    expect(q.get("segment")).toBe("b2c");
     expect(q.get("payment_mode")).toBe("cash");
     expect(q.get("type_of_invoice")).toBe("outward");
   });

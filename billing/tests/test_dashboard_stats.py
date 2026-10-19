@@ -83,6 +83,20 @@ class DashboardStatsTest(BaseAPITestCase):
         expected = self._db_total(INVOICE_TYPE_OUTWARD) - self._db_total(INVOICE_TYPE_INWARD)
         self.assertAlmostEqual(float(totals["net"]), float(expected), places=2)
 
+    def test_search_narrows_the_cards_as_it_narrows_the_list(self):
+        """The invoice list's search box narrows the list (DRF's SearchFilter); the cards must cover the same bills, or
+        "Avg Invoice" divides every bill's total by the searched count."""
+        hit = self._invoice("SRCH-1", INVOICE_TYPE_OUTWARD, [(10, 100, "0.03")])
+        self._invoice("OTHER-1", INVOICE_TYPE_OUTWARD, [(5, 200, "0.03")])
+        listed = self.client.get(reverse("invoice-list"), {"search": "SRCH"}).data
+        rows = listed["results"] if isinstance(listed, dict) else listed
+        self.assertEqual([r["invoice_number"] for r in rows], ["SRCH-1"])
+        resp = self.client.get(reverse("invoice-stats"), {"search": "SRCH"})
+        self.assertEqual(resp.status_code, 200)
+        totals = resp.data["totals"]
+        self.assertEqual(totals["count"], 1)
+        self.assertAlmostEqual(float(totals["outward"]), float(hit.total_amount), places=2)
+
 
 class TopProductsGroupingTest(BaseAPITestCase):
     """One product must be one row, even when its HSN drifted over time."""

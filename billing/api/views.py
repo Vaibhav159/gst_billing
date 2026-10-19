@@ -1382,7 +1382,8 @@ class InvoiceViewSet(AuditLogMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def stats(self, request):
         """Get consolidated dashboard stats"""
-        queryset = self.get_queryset()
+        # filter_queryset as list() does, so the list's search box narrows the cards too: SearchFilter runs only there.
+        queryset = self.filter_queryset(self.get_queryset())
 
         results = {}
         # 1. Totals

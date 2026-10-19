@@ -99,8 +99,8 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
         gst: created.gst_number || form.gst,
         state: created.state_name || form.state,
         mobile: created.mobile_number || form.mobile,
-        address: created.address ?? form.address ?? "",
-        pan: created.pan_number ?? form.pan ?? "",
+        address: created.address ?? form.address,
+        pan: created.pan_number ?? form.pan,
       });
       setForm({ name: "", gst: "", pan: "", mobile: "", email: "", state: "", address: "" });
       setErrors({});

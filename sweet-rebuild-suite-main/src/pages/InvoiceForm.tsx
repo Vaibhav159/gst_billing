@@ -307,7 +307,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         id: fallbackEntities.customer.id,
         name: fallbackEntities.customer.name,
         gst_number: fallbackEntities.customer.gst_number || "",
-        state_name: fallbackEntities.customer.state_name || "",
+        // As given: the edit-mode stub has no State, which counts as unknown for the tax warnings (isIntraState reads
+        // undefined as no State, as it read "").
+        state_name: fallbackEntities.customer.state_name,
         address: fallbackEntities.customer.address,
         pan_number: fallbackEntities.customer.pan_number,
       } as any);

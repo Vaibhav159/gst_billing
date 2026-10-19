@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isCounterCustomer, taxWarnings } from "./taxWarnings";
 
-const buyer = { name: "Anil Gupta", gst_number: "", address: "12 Bapu Bazaar, Udaipur", pan_number: "ABCDE1234F" };
+const buyer = { name: "Anil Gupta", gst_number: "", address: "12 Bapu Bazaar, Udaipur", pan_number: "ABCDE1234F", state_name: "RAJASTHAN" };
 const sale = (over: Record<string, unknown> = {}) =>
   ({ type: "OUTWARD", subtotal: 10_000, total: 10_300, paymentMode: "bank", customer: buyer, ...over }) as Parameters<typeof taxWarnings>[0];
 const keys = (input: Parameters<typeof taxWarnings>[0]) => taxWarnings(input).map((w) => w.key);
@@ -19,8 +19,19 @@ describe("taxWarnings: the buyer's name and address (GST Rule 46(f))", () => {
     const [w] = taxWarnings(sale({ subtotal: 60_000, total: 61_800, customer: { ...buyer, address: null } }));
     expect(w.text).toContain("Anil Gupta");
     expect(w.text).toContain("Rule 46(f)");
-    expect(w.text).toMatch(/^A taxable value of ₹50,000 or more/);
+    expect(w.text).toMatch(/^A bill to a buyer without a GSTIN, with a taxable value of ₹50,000 or more/);
     expect(w.text).toContain("name, address and State");
+    expect(w.text).toContain("add the address and State for Anil Gupta");
+  });
+
+  it("warns when the State is missing, as Rule 46(f) asks for it too", () => {
+    expect(keys(sale({ subtotal: 60_000, total: 61_800, customer: { ...buyer, state_name: "" } }))).toEqual(["buyer_address"]);
+    expect(keys(sale({ subtotal: 60_000, total: 61_800, customer: { ...buyer, state_name: undefined } }))).toEqual([]);
+  });
+
+  it("takes a real address that starts like a placeholder as an address", () => {
+    for (const address of ["Naya Bazaar, Udaipur", "Nathdwara Road", "Nil Kanth Colony"])
+      expect(keys(sale({ subtotal: 60_000, total: 61_800, customer: { ...buyer, address } }))).toEqual([]);
   });
 
   it("counts a placeholder address such as NA, N/A, nil or a dash as none", () => {

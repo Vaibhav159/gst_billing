@@ -5,7 +5,7 @@ import { hasGstin } from "./gstin";
  * the bill may already be written in the paper book and is only being entered.
  *
  * - GST, CGST Rule 46(f): an invoice to a buyer without a GSTIN with a taxable value of ₹50,000 or more must carry the
- *   buyer's name and address, with the State.
+ *   buyer's name and address, with the State. A missing State warns too: the printed bill then has no buyer State.
  * - Income Tax's cash limit (Sec 269ST of the 1961 Act): ₹2,00,000 or more in cash may not be received for one bill,
  *   or from one person in a day. The penalty equals the cash received.
  * - Income Tax's PAN rule (Rule 114B of the 1962 Rules): a sale above ₹2,00,000 needs the buyer's PAN, or a signed Form
@@ -35,8 +35,10 @@ export interface TaxWarningInput {
   total: number;
   /** "", "bank", "cash", "credit" or "mixed". */
   paymentMode: string;
-  /** undefined address or PAN: the form holds only a stub of this customer, so it's unknown, not blank. */
-  customer?: { name?: string | null; gst_number?: string | null; address?: string | null; pan_number?: string | null } | null;
+  /** An undefined address, PAN or State: the form holds only a stub of this customer, so it's unknown, not blank. */
+  customer?: {
+    name?: string | null; gst_number?: string | null; address?: string | null; pan_number?: string | null; state_name?: string | null;
+  } | null;
 }
 
 // The names a shop gives one general customer for counter sales. Such a record holds no buyer's own name, address
@@ -68,15 +70,15 @@ export function taxWarnings(input: TaxWarningInput): TaxWarning[] {
   const name = (c.name || "").trim() || "this customer";
   const warnings: TaxWarning[] = [];
 
-  if (!registered && input.subtotal >= BUYER_ADDRESS_LIMIT && (counter || missing(c.address))) {
+  if (!registered && input.subtotal >= BUYER_ADDRESS_LIMIT && (counter || missing(c.address) || missing(c.state_name))) {
     warnings.push({
       key: "buyer_address",
       title: "The buyer's name and address",
       text: counter
-        ? "A taxable value of ₹50,000 or more to a buyer without a GSTIN needs the buyer's own name, address and State "
-          + "on the bill (GST Rule 46(f)). Pick or add the buyer's own customer record."
-        : "A taxable value of ₹50,000 or more to a buyer without a GSTIN needs the buyer's name, address and State on "
-          + `the bill (GST Rule 46(f)). Save the bill, then add the address for ${name} in Customers.`,
+        ? "A bill to a buyer without a GSTIN, with a taxable value of ₹50,000 or more, must show the buyer's own name, "
+          + "address and State (GST Rule 46(f)). Pick or add the buyer's own customer record."
+        : "A bill to a buyer without a GSTIN, with a taxable value of ₹50,000 or more, must show the buyer's name, "
+          + `address and State (GST Rule 46(f)). Save the bill, then add the address and State for ${name} in Customers.`,
     });
   }
   if (input.paymentMode === "cash" && input.total >= CASH_LIMIT) {
@@ -94,7 +96,7 @@ export function taxWarnings(input: TaxWarningInput): TaxWarning[] {
       title: "The buyer's PAN",
       text: "A sale above ₹2,00,000 needs the buyer's PAN for Income Tax, or a signed Form 60 if they have none. "
         + (counter
-          ? "Pick or add the buyer's own customer record, with their PAN."
+          ? "Pick or add the buyer's own customer record, with their PAN or Form 60."
           : `Save the bill, then add the PAN for ${name} in Customers.`),
     });
   }

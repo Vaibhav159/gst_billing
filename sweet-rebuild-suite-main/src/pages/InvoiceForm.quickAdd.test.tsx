@@ -51,6 +51,22 @@ describe("InvoiceForm, a customer added with New", () => {
 
     const panel = await screen.findByRole("note", { name: "Tax warnings" });
     expect(within(panel).getByText("The buyer's name and address")).toBeInTheDocument();
-    expect(within(panel).getByText(/add the address for Ramesh Kumar in Customers/)).toBeInTheDocument();
+    expect(within(panel).getByText(/add the address and State for Ramesh Kumar in Customers/)).toBeInTheDocument();
+  });
+
+  it("gets all three warnings at ₹2,50,000 in cash, PAN included", async () => {
+    const big = { ...duplicateFrom, paymentMode: "cash", items: [{ ...duplicateFrom.items[0], qty: 25, rate: 9708.74, amount: 242718.5, cgst: 3640.78, sgst: 3640.78 }] };
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/billing/invoice/add", state: { duplicateFrom: big } }]}>
+        <Routes><Route path="/billing/invoice/add" element={<InvoiceForm mode="create" />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findAllByText("Gold Ornaments 22K");
+    fireEvent.click(screen.getByRole("button", { name: /^New$/ }));
+    fireEvent.change(await screen.findByPlaceholderText("Customer name"), { target: { value: "Ramesh Kumar" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create Customer/ }));
+    const panel = await screen.findByRole("note", { name: "Tax warnings" });
+    for (const t of ["The buyer's name and address", "Cash of ₹2,00,000 or more", "The buyer's PAN"])
+      expect(within(panel).getByText(t)).toBeInTheDocument();
   });
 });
