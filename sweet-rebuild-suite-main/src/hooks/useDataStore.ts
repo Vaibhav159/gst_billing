@@ -298,7 +298,10 @@ export function buildInvoiceParams(f: InvoiceFilters = {}): URLSearchParams {
     params.set("segment", f.segment);
   }
 
-  const dateRange = buildDateRange(f.fyFilter, f.monthFilter);
+  // An explicit range (the GST page's drill-down) wins over FY and month, as in the summary cards' request.
+  const dateRange = f.startDate && f.endDate
+    ? { start_date: f.startDate, end_date: f.endDate }
+    : buildDateRange(f.fyFilter, f.monthFilter);
   if (dateRange.start_date) params.set("start_date", dateRange.start_date);
   if (dateRange.end_date) params.set("end_date", dateRange.end_date);
 
