@@ -121,6 +121,12 @@ export default function InvoiceList() {
 
   const { items: invoices, remove: removeInvoice, isLoading, isLoadingMore, hasMore, loadMore, totalCount, error: loadError, refetch: retryLoad } = useInvoices(apiFilters);
   const { data: statsData } = useDashboardStats(apiFilters);
+  // The month pills' dots show which months of the period have bills. The cards ask for exactly what the list
+  // shows, so with a month picked their figures cover that month alone: ask once more for the whole period, only
+  // while a month is picked, and read the dots from that.
+  const monthPicked = !!apiFilters.monthFilter && apiFilters.monthFilter !== "all";
+  const { data: periodStats } = useDashboardStats({ ...apiFilters, monthFilter: "all" }, monthPicked);
+  const periodMonthly = (monthPicked ? periodStats : statsData)?.monthly || [];
 
   // Only client-side sorting (filtering is done server-side)
   const filtered = [...invoices].sort((a, b) => {
@@ -502,7 +508,7 @@ export default function InvoiceList() {
           const monthNum = String(i < 9 ? i + 4 : i - 8);
           // Server monthly aggregate, not the loaded page — the first 50 rows
           // are usually one month, which lit exactly one pill and no others.
-          const hasInvoices = (statsData?.monthly || []).some((r: any) =>
+          const hasInvoices = periodMonthly.some((r: { month: number | string; outward_total?: number | string; inward_total?: number | string }) =>
             Number(r.month) === Number(monthNum) &&
             ((Number(r.outward_total) || 0) > 0 || (Number(r.inward_total) || 0) > 0));
           return (

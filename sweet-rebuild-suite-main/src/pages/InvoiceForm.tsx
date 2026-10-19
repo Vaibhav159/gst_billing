@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isIntraState } from "@/utils/taxRules";
+import { taxWarnings, type TaxWarning } from "@/utils/taxWarnings";
 import { cn } from "@/utils/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import QuickCustomerModal from "@/components/QuickCustomerModal";
@@ -28,6 +29,24 @@ import { round2, halveTax } from "@/utils/money";
 import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
+
+/** The tax warnings, in the theme's warning colours (as the filed-month note). They never block the save. */
+function TaxWarningList({ warnings }: { warnings: TaxWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div role="note" aria-label="Tax warnings" className="rounded-2xl border border-warning/40 bg-warning/10 p-4 space-y-3 text-[12px] text-warning">
+      {warnings.map((w) => (
+        <div key={w.key} className="flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="space-y-0.5">
+            <p className="font-bold">{w.title}</p>
+            <p>{w.text}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const { id } = useParams<{ id: string }>();
@@ -94,7 +113,9 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
     // gst_number and state_name are carried because isIntraState reads them.
     // Without them a quick-added customer is a name with no location, and the
     // auto-IGST switch silently treats every such sale as local.
-    customer?: { id: string; name: string; gst_number?: string; state_name?: string };
+    // address and pan_number: set for a customer added with New (its real values, blanks included); left out for
+    // the edit-mode stub built from the stored bill, where they're unknown.
+    customer?: { id: string; name: string; gst_number?: string; state_name?: string; address?: string | null; pan_number?: string | null };
     business?: { id: string; name: string };
     products: { id: string; name: string; hsn: string; gstRate: number }[];
   }>({ products: [] });
@@ -286,7 +307,11 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
         id: fallbackEntities.customer.id,
         name: fallbackEntities.customer.name,
         gst_number: fallbackEntities.customer.gst_number || "",
-        state_name: fallbackEntities.customer.state_name || "",
+        // As given: the edit-mode stub has no State, which counts as unknown for the tax warnings (isIntraState reads
+        // undefined as no State, as it read "").
+        state_name: fallbackEntities.customer.state_name,
+        address: fallbackEntities.customer.address,
+        pan_number: fallbackEntities.customer.pan_number,
       } as any);
     }
     return list;
@@ -342,6 +367,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   // interstate invoice was saved as CGST+SGST with the right total but the
   // wrong tax heads.
   const selectedCustomer = localCustomers.find((c) => String(c.id) === String(form.customerId));
+  // Rule 46(f), Sec 269ST and Rule 114B. They only warn: the bill may already be written in the paper book.
+  const taxNotes = taxWarnings({ type: form.type, subtotal, total, paymentMode: form.paymentMode, customer: selectedCustomer });
   const selectedBusiness = effectiveBusinesses.find((b) => String(b.id) === String(form.businessId));
   // Same rule as billing/tax_rules.py (GSTIN state codes first, state_name
   // fallback) so the chip below, the client math, and the server's re-derived
@@ -603,7 +630,7 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                   </select>
                 </div>
                 {lockedPeriodForDate && (
-                  <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-600 dark:text-amber-400">
+                  <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>
                       <b>{String(lockedPeriodForDate.month).padStart(2, "0")}/{lockedPeriodForDate.year} is filed &amp; locked</b> for this business — saving into it will be refused. Pick another date, or unlock the month on the GST page (audit-logged).
@@ -779,6 +806,10 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               </div>
             </div>
 
+            <div aria-live="polite">
+              <TaxWarningList warnings={taxNotes} />
+            </div>
+
             {/* Actions - desktop only */}
             {!isMobile && (
               <div className="elevated-card rounded-2xl p-5 space-y-3">
@@ -819,6 +850,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               name: newCust.name,
               gst_number: newCust.gst || "",
               state_name: newCust.state || "",
+              address: newCust.address,
+              pan_number: newCust.pan,
             },
           }));
           set("customerId", String(newCust.id));
@@ -917,6 +950,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 <span className="text-xl font-display font-bold text-primary">{formatCurrency(total)}</span>
               </div>
             </div>
+
+            {taxNotes.length > 0 && <div className="px-5 pt-4"><TaxWarningList warnings={taxNotes} /></div>}
 
             <div className="px-5 py-4 flex items-center gap-2">
               <button onClick={() => setShowReview(false)} disabled={isSaving} className="premium-btn-ghost flex-1 h-11 text-[13px] disabled:opacity-50">

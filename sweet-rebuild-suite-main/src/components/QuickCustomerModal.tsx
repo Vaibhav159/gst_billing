@@ -13,7 +13,8 @@ import { formatApiError, errorTag } from "@/utils/apiError";
 interface QuickCustomerModalProps {
   open: boolean;
   onClose: () => void;
-  onCreated: (customer: { id: string; name: string; gst: string; state: string; mobile: string }) => void;
+  // address and pan: the invoice form's tax warnings read them (a blank one is a real blank, not "not loaded").
+  onCreated: (customer: { id: string; name: string; gst: string; state: string; mobile: string; address: string; pan: string }) => void;
 }
 
 export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCustomerModalProps) {
@@ -98,6 +99,8 @@ export default function QuickCustomerModal({ open, onClose, onCreated }: QuickCu
         gst: created.gst_number || form.gst,
         state: created.state_name || form.state,
         mobile: created.mobile_number || form.mobile,
+        address: created.address ?? form.address,
+        pan: created.pan_number ?? form.pan,
       });
       setForm({ name: "", gst: "", pan: "", mobile: "", email: "", state: "", address: "" });
       setErrors({});

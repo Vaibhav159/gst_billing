@@ -56,4 +56,33 @@ describe("buildInvoiceParams — one query builder for the list and the exports 
     expect(p.get("customer_id")).toBe("9");
     expect(p.get("type_of_invoice")).toBe("outward");
   });
+
+  // The GST page's drill-down opens the list with ?start_date&end_date and sets FY and month to "all". The summary
+  // cards asked for those dates; the list and its exports dropped them and showed every period's invoices.
+  it("asks for a drill-down's dates, which win over FY and month", () => {
+    const p = buildInvoiceParams({
+      fyFilter: "all", monthFilter: "all", gstRate: "3", startDate: "2026-09-01", endDate: "2026-09-30",
+    });
+    expect(p.get("start_date")).toBe("2026-09-01");
+    expect(p.get("end_date")).toBe("2026-09-30");
+    expect(p.get("gst_rate")).toBe("3");
+  });
+
+  it("asks for the drill-down's dates even when FY and month are set", () => {
+    const p = buildInvoiceParams({ fyFilter: "2025-26", monthFilter: "4", startDate: "2026-09-01", endDate: "2026-09-30" });
+    expect(p.get("start_date")).toBe("2026-09-01");
+    expect(p.get("end_date")).toBe("2026-09-30");
+  });
+
+  it("keeps the FY and month range when there's no drill-down", () => {
+    const p = buildInvoiceParams({ fyFilter: "2026-27", monthFilter: "9" });
+    expect(p.get("start_date")).toBe("2026-09-01");
+    expect(p.get("end_date")).toBe("2026-09-30");
+  });
+
+  it("ignores half a drill-down range, as the summary cards do", () => {
+    const p = buildInvoiceParams({ fyFilter: "all", monthFilter: "all", startDate: "2026-09-01" });
+    expect(p.has("start_date")).toBe(false);
+    expect(p.has("end_date")).toBe(false);
+  });
 });
