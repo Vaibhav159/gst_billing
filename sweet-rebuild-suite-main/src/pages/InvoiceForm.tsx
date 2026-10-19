@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isIntraState } from "@/utils/taxRules";
+import { taxWarnings, type TaxWarning } from "@/utils/taxWarnings";
 import { cn } from "@/utils/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import QuickCustomerModal from "@/components/QuickCustomerModal";
@@ -28,6 +29,24 @@ import { round2, halveTax } from "@/utils/money";
 import { draftFromDuplicate, draftFromSaved, draftFromStored, lineMoney, lineToSave, storedLineKey, withProduct, type DraftLine } from "@/utils/invoiceDraft";
 
 interface InvoiceFormProps { mode: "create" | "edit" }
+
+/** The tax warnings, in the form's amber note style. They never block the save. */
+function TaxWarningList({ warnings }: { warnings: TaxWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div role="note" aria-label="Tax warnings" className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3 text-[12px] text-amber-600 dark:text-amber-400">
+      {warnings.map((w) => (
+        <div key={w.key} className="flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="space-y-0.5">
+            <p className="font-bold">{w.title}</p>
+            <p>{w.text}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function InvoiceForm({ mode }: InvoiceFormProps) {
   const { id } = useParams<{ id: string }>();
@@ -342,6 +361,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
   // interstate invoice was saved as CGST+SGST with the right total but the
   // wrong tax heads.
   const selectedCustomer = localCustomers.find((c) => String(c.id) === String(form.customerId));
+  // Rule 46(f), Sec 269ST and Rule 114B. They only warn: the bill may already be written in the paper book.
+  const taxNotes = taxWarnings({ type: form.type, subtotal, total, paymentMode: form.paymentMode, customer: selectedCustomer });
   const selectedBusiness = effectiveBusinesses.find((b) => String(b.id) === String(form.businessId));
   // Same rule as billing/tax_rules.py (GSTIN state codes first, state_name
   // fallback) so the chip below, the client math, and the server's re-derived
@@ -779,6 +800,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
               </div>
             </div>
 
+            <TaxWarningList warnings={taxNotes} />
+
             {/* Actions - desktop only */}
             {!isMobile && (
               <div className="elevated-card rounded-2xl p-5 space-y-3">
@@ -917,6 +940,8 @@ export default function InvoiceForm({ mode }: InvoiceFormProps) {
                 <span className="text-xl font-display font-bold text-primary">{formatCurrency(total)}</span>
               </div>
             </div>
+
+            {taxNotes.length > 0 && <div className="px-5 pt-4"><TaxWarningList warnings={taxNotes} /></div>}
 
             <div className="px-5 py-4 flex items-center gap-2">
               <button onClick={() => setShowReview(false)} disabled={isSaving} className="premium-btn-ghost flex-1 h-11 text-[13px] disabled:opacity-50">
